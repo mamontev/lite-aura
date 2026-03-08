@@ -1,0 +1,41 @@
+## Interface: 120000
+## Title: AuraLite
+## Notes: Lightweight aura tracker for Retail Midnight (presentation-only)
+## IconTexture: Interface\AddOns\AuraLite\Media\AuraLiteIcon
+## Author: YourName
+## Version: 0.1.0
+## SavedVariables: AuraLiteDB
+## OptionalDeps: Ace3, LibSharedMedia-3.0, LibUIDropDownMenu
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\AceGUI-3.0\AceGUI-3.0.xml
+Libs\LibSharedMedia-3.0\lib.xml
+Libs\AceGUI-3.0-SharedMediaWidgets\widget.xml
+
+Utils.lua
+Localization.lua
+MediaLibrary.lua
+UISkin.lua
+PresetLibrary.lua
+ProfileManager.lua
+DebugManager.lua
+WeakAurasSoundCatalog.lua
+SoundManager.lua
+AuraAPIAdapter.lua
+PlayerResource.lua
+AuraWatchlistRegistry.lua
+SpellCatalogData.lua
+SpellCatalog.lua
+DraggableFrameManager.lua
+TrackerGroupManager.lua
+TestMode.lua
+ProcRuleEngine.lua
+EventRouter.lua
+ConfigUI.lua
+SettingsData.lua
+UIComponents.lua
+SettingsUI.lua
+SettingsUI.MediaWidgets.lua
+OptionsIntegration.lua
+Core.lua
