@@ -12,6 +12,7 @@ local Schemas = UI.Schemas
 local Repo = UI.AuraRepository
 local RuleRepo = UI.RuleRepository
 local FieldFactory = UI.FieldFactory
+local Widgets = UI.Widgets or {}
 
 local AuraEditorPanel = {}
 AuraEditorPanel.__index = AuraEditorPanel
@@ -28,31 +29,29 @@ local function createBackdrop(frame)
 end
 
 function AuraEditorPanel:ValidateDraft()
-  local errors = {}
+  local issues = {}
   if not self.draft then
     V:SetStatus("warn", "No aura selected.")
     return
   end
 
   if tostring(self.draft.name or "") == "" then
-    errors[#errors + 1] = { severity = "warn", path = "name", message = "Aura name is empty." }
+    issues[#issues + 1] = { severity = "warn", path = "name", message = "Aura name is empty." }
   end
+
   local sid = tonumber(self.draft.spellID)
   if not sid or sid <= 0 then
-    errors[#errors + 1] = { severity = "error", path = "spellID", message = "Aura SpellID is required." }
+    issues[#issues + 1] = { severity = "error", path = "spellID", message = "Aura SpellID is required." }
   end
 
-  if tostring(self.draft.triggerType or "cast") == "cast" then
-    local cast = tostring(self.draft.castSpellIDs or "")
-    if cast == "" then
-      errors[#errors + 1] = { severity = "warn", path = "castSpellIDs", message = "Cast SpellIDs are empty: rules will fallback to aura spellID." }
-    end
+  if tostring(self.draft.triggerType or "cast") == "cast" and tostring(self.draft.castSpellIDs or "") == "" then
+    issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "Cast SpellIDs empty: fallback to aura spellID." }
   end
 
-  if #errors == 0 then
+  if #issues == 0 then
     V:SetStatus("ok", "Aura draft looks valid.")
   else
-    V:SetEntries(errors)
+    V:SetEntries(issues)
   end
 end
 
@@ -64,10 +63,11 @@ function AuraEditorPanel:LoadAura(auraId)
   self.currentAuraId = self.draft and self.draft.id or auraId
 
   if self.titleText then
-    self.titleText:SetText(string.format("Editor - %s", tostring((self.draft and self.draft.name) or "New Aura")))
+    self.titleText:SetText(string.format("Aura Editor - %s", tostring((self.draft and self.draft.name) or "New Aura")))
   end
 
-  self:RenderTab((S and S.Get and S:Get().activeTab) or "Trigger")
+  local tab = (S and S.Get and S:Get().activeTab) or "Trigger"
+  self:RenderTab(tab)
   self:ValidateDraft()
 end
 
@@ -76,10 +76,27 @@ function AuraEditorPanel:OnFieldChanged(key, value)
     return
   end
   self.draft[key] = value
+
   if S and S.SetDirty then
     S:SetDirty(true)
   end
-  self:ValidateDraft()
+
+  if key == "loadClassToken" and self.currentTab == "Conditions" then
+    self:RenderTab("Conditions")
+  else
+    self:ValidateDraft()
+    if self.ruleBuilder then
+      self.ruleBuilder:SetDraft(self.draft)
+    end
+    if self.ruleSummaryText then
+      local txt = ""
+      local sid = tonumber(self.draft.spellID)
+      if sid and sid > 0 and RuleRepo and RuleRepo.DescribeRuleForAura then
+        txt = RuleRepo:DescribeRuleForAura(sid)
+      end
+      self.ruleSummaryText:SetText(txt ~= "" and txt or "No persisted rule yet. Save aura to apply trigger rule.")
+    end
+  end
 end
 
 function AuraEditorPanel:ClearTabFields()
@@ -91,10 +108,25 @@ function AuraEditorPanel:ClearTabFields()
     end
   end
   self.fieldWidgets = {}
+
+  if self.ruleBuilder and self.ruleBuilder.frame then
+    self.ruleBuilder.frame:Hide()
+    self.ruleBuilder.frame:SetParent(nil)
+  end
+  self.ruleBuilder = nil
+
+  if self.ruleSummary then
+    self.ruleSummary:Hide()
+    self.ruleSummary:SetParent(nil)
+  end
+  self.ruleSummary = nil
+  self.ruleSummaryText = nil
 end
 
 function AuraEditorPanel:RenderTab(tabKey)
+  self.currentTab = tabKey
   self:ClearTabFields()
+
   if not self.content or not self.draft then
     return
   end
@@ -105,6 +137,46 @@ function AuraEditorPanel:RenderTab(tabKey)
   end
 
   local y = -8
+
+  if tabKey == "Trigger" and Widgets.RuleBuilderWidget and Widgets.RuleBuilderWidget.Create then
+    self.ruleBuilder = Widgets.RuleBuilderWidget:Create(self.content, function()
+      if S and S.SetDirty then
+        S:SetDirty(true)
+      end
+      self:ValidateDraft()
+      self:RenderTab("Trigger")
+    end)
+    self.ruleBuilder.frame:SetPoint("TOPLEFT", 12, y)
+    self.ruleBuilder.frame:SetPoint("RIGHT", -14, 0)
+    self.ruleBuilder.frame:Show()
+    self.ruleBuilder:SetDraft(self.draft)
+    y = y - self.ruleBuilder.frame:GetHeight() - 8
+
+    self.ruleSummary = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
+    createBackdrop(self.ruleSummary)
+    self.ruleSummary:SetHeight(54)
+    self.ruleSummary:SetPoint("TOPLEFT", 12, y)
+    self.ruleSummary:SetPoint("RIGHT", -14, 0)
+
+    local t = self.ruleSummary:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    t:SetPoint("TOPLEFT", 10, -8)
+    t:SetText("Persisted rule")
+
+    self.ruleSummaryText = self.ruleSummary:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    self.ruleSummaryText:SetPoint("TOPLEFT", 10, -24)
+    self.ruleSummaryText:SetPoint("RIGHT", -10, 0)
+    self.ruleSummaryText:SetJustifyH("LEFT")
+
+    local desc = ""
+    local sid = tonumber(self.draft.spellID)
+    if sid and sid > 0 and RuleRepo and RuleRepo.DescribeRuleForAura then
+      desc = RuleRepo:DescribeRuleForAura(sid)
+    end
+    self.ruleSummaryText:SetText(desc ~= "" and desc or "No persisted rule yet. Save aura to apply trigger rule.")
+
+    y = y - 62
+  end
+
   for i = 1, #(tab.fields or {}) do
     local field = tab.fields[i]
     local widget = FieldFactory:CreateField(self.content, field, self.draft, function(key, value)
@@ -117,7 +189,8 @@ function AuraEditorPanel:RenderTab(tabKey)
     self.fieldWidgets[#self.fieldWidgets + 1] = widget
   end
 
-  self.content:SetHeight(math.max(200, -y + 18))
+  self.content:SetHeight(math.max(240, -y + 20))
+  self:ValidateDraft()
 end
 
 function AuraEditorPanel:SelectTab(tabKey)
@@ -163,6 +236,7 @@ end
 function AuraEditorPanel:Create(parent)
   local o = setmetatable({}, self)
   o.fieldWidgets = {}
+  o.currentTab = "Trigger"
 
   o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
   o.frame:SetAllPoints()
@@ -170,29 +244,34 @@ function AuraEditorPanel:Create(parent)
 
   o.titleText = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   o.titleText:SetPoint("TOPLEFT", 10, -8)
-  o.titleText:SetText("Editor")
+  o.titleText:SetText("Aura Editor")
 
   o.statusText = o.frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   o.statusText:SetPoint("TOPRIGHT", -10, -10)
   o.statusText:SetText("Ready")
 
+  o.tabStrip = CreateFrame("Frame", nil, o.frame)
+  o.tabStrip:SetPoint("TOPLEFT", 8, -30)
+  o.tabStrip:SetPoint("TOPRIGHT", -8, -30)
+  o.tabStrip:SetHeight(24)
+
   o.tabs = {}
-  local x = 10
+  local x = 0
   for i = 1, #(Schemas and Schemas.EditorTabs or {}) do
     local tab = Schemas.EditorTabs[i]
-    local btn = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-    btn:SetSize(86, 20)
-    btn:SetPoint("TOPLEFT", x, -34)
+    local btn = CreateFrame("Button", nil, o.tabStrip, "UIPanelButtonTemplate")
+    btn:SetSize(96, 22)
+    btn:SetPoint("TOPLEFT", x, 0)
     btn:SetText(tab.label or tab.key)
     btn:SetScript("OnClick", function()
       o:SelectTab(tab.key)
     end)
     o.tabs[tab.key] = btn
-    x = x + 90
+    x = x + 100
   end
 
   o.scroll = CreateFrame("ScrollFrame", nil, o.frame, "UIPanelScrollFrameTemplate")
-  o.scroll:SetPoint("TOPLEFT", 8, -60)
+  o.scroll:SetPoint("TOPLEFT", 8, -58)
   o.scroll:SetPoint("BOTTOMRIGHT", -28, 42)
 
   o.content = CreateFrame("Frame", nil, o.scroll)

@@ -49,6 +49,7 @@ end
 
 function B:DraftFromEditableModel(model)
   model = model or {}
+  local specList = parseCSVNumbers(model.loadSpecIDs)
   return {
     id = tostring(model.key or ""),
     name = tostring(model.displayName or ""),
@@ -66,7 +67,7 @@ function B:DraftFromEditableModel(model)
     soundOnShow = tostring(model.soundOnGain or "default"),
     soundOnExpire = tostring(model.soundOnExpire or "none"),
     loadClassToken = tostring(model.loadClassToken or ""),
-    loadSpecIDs = parseCSVNumbers(model.loadSpecIDs),
+    loadSpecID = specList[1] or "",
     notes = "",
     debug = false,
   }
@@ -90,7 +91,7 @@ function B:NewDraft(auraId)
     soundOnShow = "default",
     soundOnExpire = "none",
     loadClassToken = "",
-    loadSpecIDs = {},
+    loadSpecID = "",
     notes = "",
     debug = false,
   }
@@ -98,13 +99,14 @@ end
 
 function B:ToSettingsDataModel(draft)
   draft = draft or {}
+  local specIDs = parseCSVNumbers(draft.loadSpecID)
   local model = {
     spellInput = trim(draft.spellID),
     displayName = trim(draft.name),
     unit = trim(draft.unit) ~= "" and trim(draft.unit) or "player",
     groupID = trim(draft.group) ~= "" and trim(draft.group) or "important_procs",
     loadClassToken = trim(draft.loadClassToken):upper(),
-    loadSpecIDs = parseCSVNumbers(draft.loadSpecIDs),
+    loadSpecIDs = specIDs,
     layoutGroupEnabled = false,
     instanceUID = trim(draft.instanceUID),
     onlyMine = draft.onlyMine == true,
@@ -156,7 +158,7 @@ function B:ToRuleModel(draft, auraSpellID)
     duration = tonumber(draft and draft.duration) or 8,
     conditionMode = (tostring(draft and draft.conditionLogic or "all") == "any") and "any" or "all",
     loadClassToken = trim((draft and draft.loadClassToken) or ""):upper(),
-    loadSpecIDs = parseCSVNumbers(draft and draft.loadSpecIDs),
+    loadSpecIDs = parseCSVNumbers(draft and draft.loadSpecID),
     requireInCombat = draft and draft.inCombatOnly == true,
     actionMode = mode,
   }
@@ -193,7 +195,8 @@ function B:ApplyRuleToDraft(draft, rule)
 
   draft.conditionLogic = tostring(rule.conditionMode or "all") == "any" and "any" or "all"
   draft.loadClassToken = tostring(rule.classToken or "")
-  draft.loadSpecIDs = parseCSVNumbers(rule.specIDs)
+  local specs = parseCSVNumbers(rule.specIDs)
+  draft.loadSpecID = specs[1] or ""
 
   local requireCombat = false
   for i = 1, #(rule.ifAll or {}) do

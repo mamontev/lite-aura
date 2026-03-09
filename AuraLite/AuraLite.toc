@@ -43,6 +43,7 @@ UI\Schemas\EditorTabs.lua
 UI\FieldFactory.lua
 UI\Repositories\AuraRepository.lua
 UI\Repositories\RuleRepository.lua
+UI\Widgets\RuleBuilderWidget.lua
 UI\Panels\AuraEditorPanel.lua
 UI\Panels\AuraListPanel.lua
 UI\Panels\ConfigFrame.lua

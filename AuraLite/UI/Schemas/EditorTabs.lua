@@ -12,9 +12,27 @@ local function loadClassOptions()
   return {
     { value = "", label = "Any Class" },
     { value = "WARRIOR", label = "Warrior" },
-    { value = "PALADIN", label = "Paladin" },
-    { value = "DEMONHUNTER", label = "Demon Hunter" },
   }
+end
+
+local function loadSpecOptions(model)
+  if ns.SettingsData and ns.SettingsData.GetLoadSpecMenuOptions then
+    local classToken = model and model.loadClassToken or ""
+    local raw = ns.SettingsData:GetLoadSpecMenuOptions(classToken)
+    local flat = {}
+    for i = 1, #(raw or {}) do
+      local row = raw[i]
+      if row.value ~= nil then
+        flat[#flat + 1] = { value = row.value, label = row.label }
+      elseif type(row.menuList) == "table" then
+        for j = 1, #row.menuList do
+          flat[#flat + 1] = { value = row.menuList[j].value, label = row.label .. " - " .. row.menuList[j].label }
+        end
+      end
+    end
+    return flat
+  end
+  return { { value = "", label = "Any Spec" } }
 end
 
 Schemas.EditorTabs = {
@@ -38,7 +56,7 @@ Schemas.EditorTabs = {
       { value = "any", label = "OR (any)" },
     } },
     { key = "loadClassToken", label = "Load Class", widget = "dropdown", optionsProvider = loadClassOptions },
-    { key = "loadSpecIDs", label = "Load Spec IDs (CSV)", widget = "text" },
+    { key = "loadSpecID", label = "Load Spec", widget = "dropdown", optionsProvider = loadSpecOptions },
     { key = "inCombatOnly", label = "In Combat Only", widget = "checkbox" },
     { key = "notes", label = "Condition Notes", widget = "multiline" },
   } },
