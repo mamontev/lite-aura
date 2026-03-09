@@ -44,8 +44,12 @@ UI\FieldFactory.lua
 UI\Repositories\AuraRepository.lua
 UI\Repositories\RuleRepository.lua
 UI\Widgets\RuleBuilderWidget.lua
+UI\Widgets\ConditionTreeWidget.lua
+UI\Widgets\PreviewPanelWidget.lua
 UI\Panels\AuraEditorPanel.lua
 UI\Panels\AuraListPanel.lua
+UI\Panels\AuraWizard.lua
+UI\Panels\GlobalPanel.lua
 UI\Panels\ConfigFrame.lua
 UI\UIBootstrap.lua
 SettingsUI.lua

@@ -9,16 +9,15 @@ local B = UI.Bindings
 UI.RuleRepository = UI.RuleRepository or {}
 local R = UI.RuleRepository
 
-local function actionType(rule)
-  local a = rule and rule.thenActions and rule.thenActions[1]
-  return tostring((a and a.type) or ""):lower()
+function R:ListRulesForAura(auraSpellID)
+  if not ns.ProcRules or not ns.ProcRules.GetUserRulesForAura then
+    return {}
+  end
+  return ns.ProcRules:GetUserRulesForAura(auraSpellID) or {}
 end
 
 function R:GetPrimaryRuleForAura(auraSpellID)
-  if not ns.ProcRules or not ns.ProcRules.GetUserRulesForAura then
-    return nil
-  end
-  local rules = ns.ProcRules:GetUserRulesForAura(auraSpellID) or {}
+  local rules = self:ListRulesForAura(auraSpellID)
   if #rules == 0 then
     return nil
   end
@@ -48,6 +47,7 @@ function R:SaveRuleFromDraft(draft)
   if not ns.ProcRules or not B or not B.ToRuleModel then
     return true
   end
+
   local auraSpellID = tonumber(draft and draft.spellID)
   if not auraSpellID or auraSpellID <= 0 then
     return true
@@ -58,9 +58,7 @@ function R:SaveRuleFromDraft(draft)
     return true
   end
 
-  local base = string.format("ui2_%d", auraSpellID)
-  ns.ProcRules:RemoveUserRule(base .. "_produce", auraSpellID)
-  ns.ProcRules:RemoveUserRule(base .. "_consume", auraSpellID)
+  ns.ProcRules:RemoveUserRule(model.id, auraSpellID)
 
   if model.actionMode == "consume" then
     return ns.ProcRules:AddSimpleConsumeRuleEx(model)

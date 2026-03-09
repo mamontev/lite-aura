@@ -19,14 +19,15 @@ local function loadSpecOptions(model)
   if ns.SettingsData and ns.SettingsData.GetLoadSpecMenuOptions then
     local classToken = model and model.loadClassToken or ""
     local raw = ns.SettingsData:GetLoadSpecMenuOptions(classToken)
-    local flat = {}
+    local flat = { { value = "", label = "Any Spec" } }
     for i = 1, #(raw or {}) do
       local row = raw[i]
       if row.value ~= nil then
         flat[#flat + 1] = { value = row.value, label = row.label }
       elseif type(row.menuList) == "table" then
         for j = 1, #row.menuList do
-          flat[#flat + 1] = { value = row.menuList[j].value, label = row.label .. " - " .. row.menuList[j].label }
+          local child = row.menuList[j]
+          flat[#flat + 1] = { value = child.value, label = row.label .. " - " .. child.label }
         end
       end
     end
@@ -37,57 +38,50 @@ end
 
 Schemas.EditorTabs = {
   { key = "Trigger", label = "Trigger", fields = {
-    { key = "name", label = "Aura Name", widget = "text", required = true },
-    { key = "spellID", label = "Aura Spell ID", widget = "text", required = true },
-    { key = "castSpellIDs", label = "Cast SpellIDs (CSV)", widget = "text" },
-    { key = "triggerType", label = "Trigger Type", widget = "dropdown", options = {
-      { value = "cast", label = "Cast Spell" },
-      { value = "aura", label = "Aura Present" },
-      { value = "rule", label = "Custom Rule" },
-    } },
-    { key = "unit", label = "Unit", widget = "dropdown", options = {
-      { value = "player", label = "Player" },
-      { value = "target", label = "Target" },
-    } },
+    { key = "ruleName", label = "Rule Name", widget = "text", required = false },
+    { key = "ruleID", label = "Rule ID", widget = "text", required = false },
+    { key = "castSpellIDs", label = "WHEN Cast SpellIDs (CSV)", widget = "text", required = true },
+    { key = "spellID", label = "THEN Aura SpellID", widget = "text", required = true },
   } },
   { key = "Conditions", label = "Conditions", fields = {
     { key = "conditionLogic", label = "Condition Logic", widget = "dropdown", options = {
       { value = "all", label = "AND (all)" },
       { value = "any", label = "OR (any)" },
     } },
-    { key = "loadClassToken", label = "Load Class", widget = "dropdown", optionsProvider = loadClassOptions },
-    { key = "loadSpecID", label = "Load Spec", widget = "dropdown", optionsProvider = loadSpecOptions },
+    { key = "talentSpellIDs", label = "Talent SpellIDs (CSV)", widget = "text" },
+    { key = "requiredAuraSpellIDs", label = "Required Aura SpellIDs (CSV)", widget = "text" },
     { key = "inCombatOnly", label = "In Combat Only", widget = "checkbox" },
-    { key = "notes", label = "Condition Notes", widget = "multiline" },
   } },
   { key = "Actions", label = "Actions", fields = {
-    { key = "actionMode", label = "Action", widget = "dropdown", options = {
-      { value = "produce", label = "Produce Aura" },
-      { value = "consume", label = "Consume Aura" },
+    { key = "actionMode", label = "THEN Action", widget = "dropdown", options = {
+      { value = "produce", label = "Produce/Show Aura" },
+      { value = "consume", label = "Consume/Hide Aura" },
     } },
-    { key = "duration", label = "Duration (sec)", widget = "number", min = 1, max = 60 },
+    { key = "duration", label = "Duration (sec)", widget = "number", min = 1, max = 120 },
   } },
   { key = "Display", label = "Display", fields = {
+    { key = "name", label = "Aura Name", widget = "text" },
+    { key = "unit", label = "Unit", widget = "dropdown", options = {
+      { value = "player", label = "Player" },
+      { value = "target", label = "Target" },
+    } },
+    { key = "group", label = "Group ID", widget = "text" },
     { key = "displayMode", label = "Display Mode", widget = "dropdown", options = {
       { value = "icon", label = "Icon" },
       { value = "bar", label = "Bar" },
       { value = "iconbar", label = "Icon + Bar" },
     } },
-    { key = "lowTime", label = "Low Time Threshold", widget = "number", min = 0, max = 20 },
+    { key = "lowTime", label = "Low-Time Threshold", widget = "number", min = 0, max = 60 },
   } },
   { key = "Sound", label = "Sound", fields = {
-    { key = "soundOnShow", label = "On Show", widget = "dropdown", options = {
-      { value = "default", label = "Default" },
-      { value = "none", label = "None" },
-    } },
-    { key = "soundOnExpire", label = "On Expire", widget = "dropdown", options = {
-      { value = "default", label = "Default" },
-      { value = "none", label = "None" },
-    } },
+    { key = "soundOnShow", label = "Sound On Show", widget = "text" },
+    { key = "soundOnExpire", label = "Sound On Expire", widget = "text" },
   } },
   { key = "Advanced", label = "Advanced", fields = {
-    { key = "group", label = "Group", widget = "text" },
-    { key = "debug", label = "Enable Debug", widget = "checkbox" },
+    { key = "loadClassToken", label = "Load: Class", widget = "dropdown", optionsProvider = loadClassOptions },
+    { key = "loadSpecID", label = "Load: Spec", widget = "dropdown", optionsProvider = loadSpecOptions },
+    { key = "debug", label = "Debug for this aura", widget = "checkbox" },
+    { key = "notes", label = "Notes", widget = "multiline" },
   } },
 }
 

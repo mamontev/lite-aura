@@ -36,6 +36,14 @@ local function parseCSVNumbers(value)
   return out
 end
 
+local function toCSV(list)
+  local parts = {}
+  for i = 1, #(list or {}) do
+    parts[#parts + 1] = tostring(list[i])
+  end
+  return table.concat(parts, ",")
+end
+
 local function firstNumber(value)
   if type(value) == "table" then
     return tonumber(value[1])
@@ -58,7 +66,10 @@ function B:DraftFromEditableModel(model)
     group = tostring(model.groupID or "important_procs"),
     triggerType = "cast",
     castSpellIDs = "",
+    ruleName = "",
     conditionLogic = "all",
+    talentSpellIDs = "",
+    requiredAuraSpellIDs = "",
     inCombatOnly = false,
     actionMode = "produce",
     duration = tonumber(model.lowTimeThreshold) and math.max(1, tonumber(model.lowTimeThreshold)) or 8,
@@ -82,11 +93,14 @@ function B:NewDraft(auraId)
     group = "important_procs",
     triggerType = "cast",
     castSpellIDs = "",
+    ruleName = "",
     conditionLogic = "all",
+    talentSpellIDs = "",
+    requiredAuraSpellIDs = "",
     inCombatOnly = false,
     actionMode = "produce",
     duration = 8,
-    displayMode = "icon",
+    displayMode = "iconbar",
     lowTime = 3,
     soundOnShow = "default",
     soundOnExpire = "none",
@@ -100,7 +114,7 @@ end
 function B:ToSettingsDataModel(draft)
   draft = draft or {}
   local specIDs = parseCSVNumbers(draft.loadSpecID)
-  local model = {
+  return {
     spellInput = trim(draft.spellID),
     displayName = trim(draft.name),
     unit = trim(draft.unit) ~= "" and trim(draft.unit) or "player",
@@ -130,7 +144,6 @@ function B:ToSettingsDataModel(draft)
     soundOnLow = "default",
     soundOnExpire = draft.soundOnExpire or "none",
   }
-  return model
 end
 
 function B:ToRuleModel(draft, auraSpellID)
@@ -147,18 +160,23 @@ function B:ToRuleModel(draft, auraSpellID)
     return nil
   end
 
-  local baseID = string.format("ui2_%d", auraID)
   local mode = (tostring(draft and draft.actionMode or "produce") == "consume") and "consume" or "produce"
+  local baseID = trim((draft and draft.ruleID) or "")
+  if baseID == "" then
+    baseID = string.format("ui2_%d_%s", auraID, mode)
+  end
 
   return {
-    id = baseID .. "_" .. mode,
-    name = trim((draft and draft.name) or ""),
+    id = baseID,
+    name = trim((draft and draft.ruleName) or (draft and draft.name) or ""),
     castSpellIDs = castIDs,
     auraSpellID = auraID,
     duration = tonumber(draft and draft.duration) or 8,
     conditionMode = (tostring(draft and draft.conditionLogic or "all") == "any") and "any" or "all",
     loadClassToken = trim((draft and draft.loadClassToken) or ""):upper(),
     loadSpecIDs = parseCSVNumbers(draft and draft.loadSpecID),
+    talentSpellIDs = parseCSVNumbers(draft and draft.talentSpellIDs),
+    requiredAuraSpellIDs = parseCSVNumbers(draft and draft.requiredAuraSpellIDs),
     requireInCombat = draft and draft.inCombatOnly == true,
     actionMode = mode,
   }
@@ -168,6 +186,7 @@ function B:ApplyRuleToDraft(draft, rule)
   if type(draft) ~= "table" or type(rule) ~= "table" then
     return draft
   end
+
   local eventSpellIDs = rule.eventSpellIDs or {}
   local out = {}
   for i = 1, #eventSpellIDs do
@@ -179,15 +198,13 @@ function B:ApplyRuleToDraft(draft, rule)
   if #out == 0 and tonumber(rule.eventSpellID) then
     out[1] = tostring(tonumber(rule.eventSpellID))
   end
-  draft.castSpellIDs = table.concat(out, ",")
+  draft.castSpellIDs = toCSV(out)
+  draft.ruleID = tostring(rule.id or "")
+  draft.ruleName = tostring(rule.name or "")
 
   local thenActions = rule.thenActions or {}
   local firstType = tostring((thenActions[1] and thenActions[1].type) or "")
-  if firstType:lower() == "hideaura" then
-    draft.actionMode = "consume"
-  else
-    draft.actionMode = "produce"
-  end
+  draft.actionMode = firstType:lower() == "hideaura" and "consume" or "produce"
 
   if thenActions[1] and tonumber(thenActions[1].duration) then
     draft.duration = tonumber(thenActions[1].duration)
@@ -198,16 +215,30 @@ function B:ApplyRuleToDraft(draft, rule)
   local specs = parseCSVNumbers(rule.specIDs)
   draft.loadSpecID = specs[1] or ""
 
+  local talents = {}
+  local reqAuras = {}
   local requireCombat = false
   for i = 1, #(rule.ifAll or {}) do
-    local c = rule.ifAll[i]
-    if tostring((c and c.type) or ""):lower() == "incombat" then
+    local c = rule.ifAll[i] or {}
+    local cType = tostring(c.type or ""):lower()
+    if cType == "intalenttree" or cType == "istalented" then
+      local sid = tonumber(c.spellID)
+      if sid and sid > 0 then
+        talents[#talents + 1] = sid
+      end
+    elseif cType == "auraactive" then
+      local sid = tonumber(c.spellID)
+      if sid and sid > 0 then
+        reqAuras[#reqAuras + 1] = sid
+      end
+    elseif cType == "incombat" then
       requireCombat = true
-      break
     end
   end
-  draft.inCombatOnly = requireCombat
 
+  draft.talentSpellIDs = toCSV(talents)
+  draft.requiredAuraSpellIDs = toCSV(reqAuras)
+  draft.inCombatOnly = requireCombat
   return draft
 end
 

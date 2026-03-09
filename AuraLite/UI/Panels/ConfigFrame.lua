@@ -17,8 +17,8 @@ local function createPanelBackdrop(frame, r, g, b, a)
     edgeSize = 12,
     insets = { left = 2, right = 2, top = 2, bottom = 2 },
   })
-  frame:SetBackdropColor(r or 0.03, g or 0.05, b or 0.08, a or 0.92)
-  frame:SetBackdropBorderColor(0.08, 0.4, 0.7, 0.9)
+  frame:SetBackdropColor(r or 0.03, g or 0.09, b or 0.18, a or 0.90)
+  frame:SetBackdropBorderColor(0.12, 0.50, 0.82, 0.95)
 end
 
 function ConfigFrame:BuildFrame()
@@ -27,7 +27,7 @@ function ConfigFrame:BuildFrame()
   end
 
   local frame = CreateFrame("Frame", "AuraLiteConfigFrameV2", UIParent, "BackdropTemplate")
-  frame:SetSize(1120, 680)
+  frame:SetSize(1360, 760)
   frame:SetPoint("CENTER")
   frame:SetFrameStrata("DIALOG")
   frame:SetMovable(true)
@@ -35,78 +35,61 @@ function ConfigFrame:BuildFrame()
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnDragStart", frame.StartMoving)
   frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-  createPanelBackdrop(frame)
+  createPanelBackdrop(frame, 0.02, 0.08, 0.17, 0.95)
   frame:Hide()
 
   local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   title:SetPoint("TOPLEFT", 14, -10)
-  title:SetText("AuraLite v2")
+  title:SetText("AuraLite - Editor")
+
+  local sub = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  sub:SetPoint("TOPLEFT", 16, -30)
+  sub:SetText("WeakAuras-like workflow: pick aura on the left, edit in the center, preview on the right.")
 
   local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -4, -4)
 
-  local headerLine = frame:CreateTexture(nil, "ARTWORK")
-  headerLine:SetColorTexture(0.15, 0.45, 0.75, 0.7)
-  headerLine:SetPoint("TOPLEFT", 10, -36)
-  headerLine:SetPoint("TOPRIGHT", -10, -36)
-  headerLine:SetHeight(1)
-
   local btnGlobal = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   btnGlobal:SetSize(84, 22)
-  btnGlobal:SetPoint("TOPLEFT", 14, -46)
+  btnGlobal:SetPoint("TOPRIGHT", -44, -30)
   btnGlobal:SetText("Global")
 
   local btnNew = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  btnNew:SetSize(92, 22)
-  btnNew:SetPoint("LEFT", btnGlobal, "RIGHT", 8, 0)
+  btnNew:SetSize(94, 22)
+  btnNew:SetPoint("RIGHT", btnGlobal, "LEFT", -8, 0)
   btnNew:SetText("New Aura")
 
   local search = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
   search:SetAutoFocus(false)
   search:SetSize(260, 24)
-  search:SetPoint("TOPRIGHT", -40, -46)
+  search:SetPoint("TOPLEFT", 16, -60)
   search:SetTextInsets(6, 6, 0, 0)
   search:SetText("")
 
   local searchLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   searchLabel:SetPoint("BOTTOMLEFT", search, "TOPLEFT", 2, 3)
-  searchLabel:SetText("Search")
+  searchLabel:SetText("Search Auras")
 
   local left = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-  left:SetPoint("TOPLEFT", 12, -80)
+  left:SetPoint("TOPLEFT", 12, -92)
   left:SetPoint("BOTTOMLEFT", 12, 12)
-  left:SetWidth(360)
-  createPanelBackdrop(left, 0.02, 0.05, 0.1, 0.72)
+  left:SetWidth(350)
+  createPanelBackdrop(left, 0.03, 0.10, 0.20, 0.75)
+
+  local center = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+  center:SetPoint("TOPLEFT", left, "TOPRIGHT", 10, 0)
+  center:SetPoint("BOTTOMLEFT", left, "BOTTOMRIGHT", 10, 0)
+  center:SetWidth(700)
+  createPanelBackdrop(center, 0.03, 0.11, 0.22, 0.75)
 
   local right = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-  right:SetPoint("TOPLEFT", left, "TOPRIGHT", 10, 0)
+  right:SetPoint("TOPLEFT", center, "TOPRIGHT", 10, 0)
   right:SetPoint("BOTTOMRIGHT", -12, 12)
-  createPanelBackdrop(right, 0.03, 0.06, 0.12, 0.72)
+  createPanelBackdrop(right, 0.02, 0.09, 0.18, 0.75)
 
-  local globalPopup = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-  globalPopup:SetSize(220, 150)
-  globalPopup:SetPoint("TOPLEFT", btnGlobal, "BOTTOMLEFT", 0, -8)
-  createPanelBackdrop(globalPopup, 0.02, 0.04, 0.08, 0.95)
-  globalPopup:Hide()
-
-  local gpTitle = globalPopup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  gpTitle:SetPoint("TOPLEFT", 10, -10)
-  gpTitle:SetText("Global Actions")
-
-  local gpHint = globalPopup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  gpHint:SetPoint("TOPLEFT", 10, -36)
-  gpHint:SetJustifyH("LEFT")
-  gpHint:SetText("Settings, Localization, Debug,\nRefresh and Unlock Drag\nwill move here in next milestones.")
-
-  btnGlobal:SetScript("OnClick", function()
-    globalPopup:SetShown(not globalPopup:IsShown())
-  end)
-
-  btnNew:SetScript("OnClick", function()
-    if E then
-      E:Emit(E.Names.NEW_AURA, { source = "header_button" })
-    end
-  end)
+  local rightTitle = right:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  rightTitle:SetPoint("TOPLEFT", 10, -8)
+  rightTitle:SetText("Preview / Test")
 
   local listPanel = nil
   if Panels.AuraListPanel and Panels.AuraListPanel.Create then
@@ -116,8 +99,41 @@ function ConfigFrame:BuildFrame()
 
   local editorPanel = nil
   if Panels.AuraEditorPanel and Panels.AuraEditorPanel.Create then
-    editorPanel = Panels.AuraEditorPanel:Create(right)
+    editorPanel = Panels.AuraEditorPanel:Create(center)
   end
+
+  local previewPanel = nil
+  if UI.Widgets and UI.Widgets.PreviewPanelWidget and UI.Widgets.PreviewPanelWidget.Create then
+    previewPanel = UI.Widgets.PreviewPanelWidget:Create(right)
+  end
+
+  local wizardPanel = nil
+  if Panels.AuraWizard and Panels.AuraWizard.Create then
+    wizardPanel = Panels.AuraWizard:Create(frame)
+  end
+
+  local globalPanel = nil
+  if Panels.GlobalPanel and Panels.GlobalPanel.Create then
+    globalPanel = Panels.GlobalPanel:Create(frame)
+  end
+
+  btnGlobal:SetScript("OnClick", function()
+    if E then
+      E:Emit(E.Names.OPEN_GLOBAL_PANEL, { anchor = btnGlobal })
+    elseif globalPanel and globalPanel.frame then
+      globalPanel.frame:SetShown(not globalPanel.frame:IsShown())
+    end
+  end)
+
+  btnNew:SetScript("OnClick", function()
+    if wizardPanel and wizardPanel.Open then
+      wizardPanel:Open(btnNew)
+      return
+    end
+    if E then
+      E:Emit(E.Names.NEW_AURA, { source = "header_button" })
+    end
+  end)
 
   self.frame = frame
   self.title = title
@@ -125,10 +141,13 @@ function ConfigFrame:BuildFrame()
   self.btnNew = btnNew
   self.searchBox = search
   self.leftPanel = left
+  self.centerPanel = center
   self.rightPanel = right
-  self.globalPopup = globalPopup
   self.listPanel = listPanel
   self.editorPanel = editorPanel
+  self.previewPanel = previewPanel
+  self.globalPanel = globalPanel
+  self.wizardPanel = wizardPanel
 end
 
 function ConfigFrame:Open()

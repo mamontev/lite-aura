@@ -17,12 +17,6 @@ local STATUS_COLORS = {
   error = { 1.0, 0.3, 0.3 },
 }
 
-local MOCK_AURAS = {
-  { id = "aura_1278009", spellID = 1278009, name = "Phalanx", unit = "player", group = "Important Procs", trigger = "Cast", status = "ok", icon = 132341 },
-  { id = "aura_871", spellID = 871, name = "Shield Wall", unit = "player", group = "Defensives", trigger = "Aura", status = "ok", icon = 132362 },
-  { id = "aura_589", spellID = 589, name = "Shadow Word: Pain", unit = "target", group = "Target Debuffs", trigger = "Aura", status = "warn", icon = 136207 },
-}
-
 local function lowerSafe(text)
   return tostring(text or ""):lower()
 end
@@ -34,8 +28,8 @@ local function createBackdrop(frame)
     edgeSize = 12,
     insets = { left = 2, right = 2, top = 2, bottom = 2 },
   })
-  frame:SetBackdropColor(0.03, 0.06, 0.11, 0.75)
-  frame:SetBackdropBorderColor(0.1, 0.42, 0.72, 0.85)
+  frame:SetBackdropColor(0.03, 0.08, 0.16, 0.74)
+  frame:SetBackdropBorderColor(0.1, 0.44, 0.76, 0.90)
 end
 
 function AuraListPanel:BuildRows()
@@ -44,116 +38,155 @@ function AuraListPanel:BuildRows()
     rows = UI.AuraRepository:ListAuras(S and S:Get() or nil)
   end
   if type(rows) ~= "table" then
-    rows = MOCK_AURAS
+    rows = {}
   end
 
-  local search = ""
-  if S and S.Get then
-    local state = S:Get()
-    search = lowerSafe(state.filters and state.filters.search or "")
+  local state = S and S.Get and S:Get() or {}
+  local search = lowerSafe(state.filters and state.filters.search or "")
+
+  if search ~= "" then
+    local filtered = {}
+    for i = 1, #rows do
+      local row = rows[i]
+      local hay = lowerSafe(row.name) .. " " .. lowerSafe(row.group) .. " " .. lowerSafe(row.unit) .. " " .. tostring(row.spellID or "")
+      if hay:find(search, 1, true) then
+        filtered[#filtered + 1] = row
+      end
+    end
+    rows = filtered
   end
 
-  if search == "" then
-    return rows
-  end
+  table.sort(rows, function(a, b)
+    local ga, gb = tostring(a.group or ""), tostring(b.group or "")
+    if ga ~= gb then
+      return ga < gb
+    end
+    return tostring(a.name or "") < tostring(b.name or "")
+  end)
 
-  local filtered = {}
+  local out = {}
+  local currentGroup = nil
   for i = 1, #rows do
     local row = rows[i]
-    local hay = lowerSafe(row.name) .. " " .. lowerSafe(row.group) .. " " .. lowerSafe(row.unit) .. " " .. tostring(row.spellID or "")
-    if hay:find(search, 1, true) then
-      filtered[#filtered + 1] = row
+    local grp = tostring(row.group or "Ungrouped")
+    if grp ~= currentGroup then
+      currentGroup = grp
+      out[#out + 1] = { isHeader = true, group = grp }
     end
+    out[#out + 1] = row
   end
-  return filtered
+  return out
 end
 
-function AuraListPanel:AcquireRow(index)
+function AuraListPanel:AcquireRow(index, rowType)
   self.rowButtons = self.rowButtons or {}
-  local btn = self.rowButtons[index]
+  local key = tostring(index) .. ":" .. tostring(rowType or "row")
+  local btn = self.rowButtons[key]
   if btn then
     return btn
   end
 
   btn = CreateFrame("Button", nil, self.scrollChild)
-  btn:SetHeight(30)
 
-  btn.bg = btn:CreateTexture(nil, "BACKGROUND")
-  btn.bg:SetAllPoints()
-  btn.bg:SetColorTexture(0.06, 0.1, 0.17, 0.4)
+  if rowType == "header" then
+    btn:SetHeight(20)
+    btn.bg = btn:CreateTexture(nil, "BACKGROUND")
+    btn.bg:SetAllPoints()
+    btn.bg:SetColorTexture(0.08, 0.2, 0.34, 0.8)
 
-  btn.icon = btn:CreateTexture(nil, "ARTWORK")
-  btn.icon:SetPoint("LEFT", 6, 0)
-  btn.icon:SetSize(20, 20)
+    btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.text:SetPoint("LEFT", 8, 0)
+    btn.text:SetJustifyH("LEFT")
+  else
+    btn:SetHeight(34)
+    btn.bg = btn:CreateTexture(nil, "BACKGROUND")
+    btn.bg:SetAllPoints()
+    btn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
 
-  btn.nameText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  btn.nameText:SetPoint("TOPLEFT", btn.icon, "TOPRIGHT", 8, 0)
-  btn.nameText:SetPoint("RIGHT", -90, 0)
-  btn.nameText:SetJustifyH("LEFT")
+    btn.icon = btn:CreateTexture(nil, "ARTWORK")
+    btn.icon:SetPoint("LEFT", 6, 0)
+    btn.icon:SetSize(22, 22)
 
-  btn.metaText = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  btn.metaText:SetPoint("BOTTOMLEFT", btn.icon, "BOTTOMRIGHT", 8, 0)
-  btn.metaText:SetPoint("RIGHT", -90, 0)
-  btn.metaText:SetJustifyH("LEFT")
+    btn.nameText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    btn.nameText:SetPoint("TOPLEFT", btn.icon, "TOPRIGHT", 8, 1)
+    btn.nameText:SetPoint("RIGHT", -84, 0)
+    btn.nameText:SetJustifyH("LEFT")
 
-  btn.statusText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  btn.statusText:SetPoint("RIGHT", -8, 0)
+    btn.metaText = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    btn.metaText:SetPoint("BOTTOMLEFT", btn.icon, "BOTTOMRIGHT", 8, -1)
+    btn.metaText:SetPoint("RIGHT", -84, 0)
+    btn.metaText:SetJustifyH("LEFT")
 
-  btn:SetScript("OnClick", function(selfBtn)
-    if S and S.SetSelectedAura then
-      S:SetSelectedAura(selfBtn.auraId, "list")
-    end
-  end)
+    btn.statusText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    btn.statusText:SetPoint("RIGHT", -8, 0)
 
-  btn:SetScript("OnEnter", function(selfBtn)
-    selfBtn.bg:SetColorTexture(0.1, 0.2, 0.3, 0.65)
-  end)
+    btn:SetScript("OnClick", function(selfBtn)
+      if S and S.SetSelectedAura then
+        S:SetSelectedAura(selfBtn.auraId, "list")
+      end
+    end)
 
-  btn:SetScript("OnLeave", function(selfBtn)
-    if selfBtn.auraId and selfBtn.auraId == self.selectedAuraId then
-      selfBtn.bg:SetColorTexture(0.16, 0.3, 0.46, 0.8)
-    else
-      selfBtn.bg:SetColorTexture(0.06, 0.1, 0.17, 0.4)
-    end
-  end)
+    btn:SetScript("OnEnter", function(selfBtn)
+      selfBtn.bg:SetColorTexture(0.14, 0.28, 0.44, 0.78)
+    end)
 
-  self.rowButtons[index] = btn
+    btn:SetScript("OnLeave", function(selfBtn)
+      if selfBtn.auraId and selfBtn.auraId == self.selectedAuraId then
+        selfBtn.bg:SetColorTexture(0.18, 0.36, 0.56, 0.88)
+      else
+        selfBtn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
+      end
+    end)
+  end
+
+  self.rowButtons[key] = btn
   return btn
 end
 
 function AuraListPanel:Render()
   local rows = self:BuildRows()
-  local width = self.scrollChild:GetWidth() - 8
+  local width = math.max(100, self.scrollChild:GetWidth() - 8)
   local y = -2
+
+  local used = {}
 
   for i = 1, #rows do
     local row = rows[i]
-    local btn = self:AcquireRow(i)
+    local rowType = row.isHeader and "header" or "row"
+    local btn = self:AcquireRow(i, rowType)
+    used[tostring(i) .. ":" .. rowType] = true
     btn:SetPoint("TOPLEFT", 2, y)
     btn:SetWidth(width)
     btn:Show()
 
-    btn.auraId = row.id
-    btn.icon:SetTexture(row.icon or 134400)
-    btn.nameText:SetText(string.format("%s (%s)", tostring(row.name or "Aura"), tostring(row.spellID or "?")))
-    btn.metaText:SetText(string.format("%s | %s | %s", tostring(row.unit or "player"), tostring(row.group or "Group"), tostring(row.trigger or "Rule")))
-
-    local status = tostring(row.status or "ok")
-    local color = STATUS_COLORS[status] or STATUS_COLORS.ok
-    btn.statusText:SetText(status:upper())
-    btn.statusText:SetTextColor(color[1], color[2], color[3])
-
-    if row.id and row.id == self.selectedAuraId then
-      btn.bg:SetColorTexture(0.16, 0.3, 0.46, 0.8)
+    if row.isHeader then
+      btn.text:SetText(tostring(row.group or "Group"))
+      y = y - 22
     else
-      btn.bg:SetColorTexture(0.06, 0.1, 0.17, 0.4)
-    end
+      btn.auraId = row.id
+      btn.icon:SetTexture(row.icon or 134400)
+      btn.nameText:SetText(string.format("%s (%s)", tostring(row.name or "Aura"), tostring(row.spellID or "?")))
+      btn.metaText:SetText(string.format("%s | %s", tostring(row.unit or "player"), tostring(row.trigger or "Rule")))
 
-    y = y - 32
+      local status = tostring(row.status or "ok")
+      local color = STATUS_COLORS[status] or STATUS_COLORS.ok
+      btn.statusText:SetText(status:upper())
+      btn.statusText:SetTextColor(color[1], color[2], color[3])
+
+      if row.id and row.id == self.selectedAuraId then
+        btn.bg:SetColorTexture(0.18, 0.36, 0.56, 0.88)
+      else
+        btn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
+      end
+
+      y = y - 36
+    end
   end
 
-  for i = #rows + 1, #(self.rowButtons or {}) do
-    self.rowButtons[i]:Hide()
+  for key, btn in pairs(self.rowButtons or {}) do
+    if not used[key] then
+      btn:Hide()
+    end
   end
 
   self.scrollChild:SetHeight(math.max(1, -y + 8))

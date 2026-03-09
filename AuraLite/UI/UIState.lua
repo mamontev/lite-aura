@@ -16,6 +16,11 @@ S._data = S._data or {
     unit = "all",
     group = "all",
   },
+  preview = {
+    playing = false,
+    startedAt = 0,
+    duration = 0,
+  },
 }
 
 local function shallowCopy(tbl)
@@ -29,6 +34,7 @@ end
 function S:Get()
   local snap = shallowCopy(self._data)
   snap.filters = shallowCopy(self._data.filters)
+  snap.preview = shallowCopy(self._data.preview)
   return snap
 end
 
@@ -50,6 +56,7 @@ function S:SetActiveTab(tabKey)
   end
   self._data.activeTab = tabKey
   if E then
+    E:Emit(E.Names.TAB_CHANGED, { tab = tabKey })
     E:Emit(E.Names.STATE_CHANGED, self:Get())
   end
 end
@@ -86,6 +93,15 @@ function S:ResetFilters()
   self._data.filters.group = "all"
   if E then
     E:Emit(E.Names.FILTER_CHANGED, { key = "*", value = nil, filters = shallowCopy(self._data.filters) })
+    E:Emit(E.Names.STATE_CHANGED, self:Get())
+  end
+end
+
+function S:SetPreview(playing, duration)
+  self._data.preview.playing = playing == true
+  self._data.preview.duration = tonumber(duration) or 0
+  self._data.preview.startedAt = GetTime() or 0
+  if E then
     E:Emit(E.Names.STATE_CHANGED, self:Get())
   end
 end
