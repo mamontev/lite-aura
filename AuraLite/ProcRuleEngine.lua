@@ -291,15 +291,21 @@ local function normalizeIfRule(raw, idx)
     return nil
   end
 
+  local classToken = tostring(raw.classToken or ""):upper()
+  if classToken == "" or classToken == "ANY" or classToken == "*" then
+    classToken = nil
+  end
+
   local rule = {
     kind = "if",
     id = tostring(raw.id or ("if_rule_" .. tostring(idx or 0))),
+    name = tostring(raw.name or ""),
     enabled = raw.enabled ~= false,
     eventSpellID = eventSpellIDs[1],
     eventSpellIDs = eventSpellIDs,
     conditionMode = (tostring(raw.conditionMode or "all"):lower() == "any") and "any" or "all",
     modeAny = (tostring(raw.conditionMode or "all"):lower() == "any"),
-    classToken = raw.classToken and tostring(raw.classToken) or nil,
+    classToken = classToken,
     specSet = makeSet(raw.specIDs),
     ifAll = {},
     thenActions = {},
@@ -1057,11 +1063,14 @@ function P:AddSimpleIfRuleEx(model)
 
   rules[#rules + 1] = {
     id = ruleID,
+    name = tostring(model.name or ""),
     enabled = true,
     ownerAuraSpellID = auraSpellID,
     eventSpellID = castSpellIDs[1],
     eventSpellIDs = castSpellIDs,
     conditionMode = conditionMode,
+    classToken = tostring(model.loadClassToken or ""):upper(),
+    specIDs = normalizeSpellIDList(model.loadSpecIDs),
     ifAll = buildConditionsFromModel(model),
     thenActions = {
       { type = "showAura", auraSpellID = auraSpellID, duration = duration, stacks = 1, maxStacks = 1, hideOnTimerEnd = true },
@@ -1106,11 +1115,14 @@ function P:AddSimpleConsumeRuleEx(model)
 
   rules[#rules + 1] = {
     id = ruleID,
+    name = tostring(model.name or ""),
     enabled = true,
     ownerAuraSpellID = auraSpellID,
     eventSpellID = castSpellIDs[1],
     eventSpellIDs = castSpellIDs,
     conditionMode = conditionMode,
+    classToken = tostring(model.loadClassToken or ""):upper(),
+    specIDs = normalizeSpellIDList(model.loadSpecIDs),
     ifAll = buildConditionsFromModel({
       talentSpellIDs = model.talentSpellIDs or model.talentSpellID,
       requiredAuraSpellIDs = requiredAuraSpellIDs,
@@ -1212,6 +1224,7 @@ function P:DescribeUserRule(rule)
     return "invalid"
   end
   local id = tostring(rule.id or "?")
+  local name = tostring(rule.name or "")
   local eventSpellID = tonumber(rule.eventSpellID) or 0
   local eventSpellIDs = normalizeSpellIDList(rule.eventSpellIDs)
   local castLabel = tostring(eventSpellID)
@@ -1223,9 +1236,16 @@ function P:DescribeUserRule(rule)
   local auraSpellID = tonumber(thenAction.auraSpellID) or 0
   local conditionMode = (tostring(rule.conditionMode or "all"):lower() == "any") and "OR" or "AND"
   local conditionCount = type(rule.ifAll) == "table" and #rule.ifAll or 0
-  return ("%s: onCast=%s if[%s:%d] then=%s(%d)"):format(id, castLabel, conditionMode, conditionCount, actionType, auraSpellID)
+  local prefix = id
+  if name ~= "" then
+    prefix = name .. " [" .. id .. "]"
+  end
+  return ("%s: onCast=%s if[%s:%d] then=%s(%d)"):format(prefix, castLabel, conditionMode, conditionCount, actionType, auraSpellID)
 end
 
 function P:Reset()
   ns.state.procRuleStates = {}
 end
+
+
+

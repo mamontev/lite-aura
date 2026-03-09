@@ -113,6 +113,143 @@ local function normalizeThreshold(value)
   return n
 end
 
+local function normalizeInstanceUID(text)
+  text = U.Trim(tostring(text or ""))
+  if text == "" then
+    return ""
+  end
+  text = text:gsub("[^%w_%-%.:]", "")
+  if #text > 64 then
+    text = text:sub(1, 64)
+  end
+  return text
+end
+
+local function buildInstanceUID(spellID)
+  local nowMs = math.floor((GetTime() or 0) * 1000)
+  return string.format("a%d_%d_%04d", tonumber(spellID) or 0, nowMs, math.random(0, 9999))
+end
+local function normalizeClassToken(value)
+  local token = safeLower(tostring(value or "")):upper()
+  if token == "" or token == "ANY" or token == "*" then
+    return ""
+  end
+  if token:match("^[A-Z_]+$") then
+    return token
+  end
+  return ""
+end
+
+local fallbackClassSpecCatalog = {
+  { token = "WARRIOR", label = "Warrior", specs = { { id = 71, label = "Arms" }, { id = 72, label = "Fury" }, { id = 73, label = "Protection" } } },
+  { token = "PALADIN", label = "Paladin", specs = { { id = 65, label = "Holy" }, { id = 66, label = "Protection" }, { id = 70, label = "Retribution" } } },
+  { token = "HUNTER", label = "Hunter", specs = { { id = 253, label = "Beast Mastery" }, { id = 254, label = "Marksmanship" }, { id = 255, label = "Survival" } } },
+  { token = "ROGUE", label = "Rogue", specs = { { id = 259, label = "Assassination" }, { id = 260, label = "Outlaw" }, { id = 261, label = "Subtlety" } } },
+  { token = "PRIEST", label = "Priest", specs = { { id = 256, label = "Discipline" }, { id = 257, label = "Holy" }, { id = 258, label = "Shadow" } } },
+  { token = "DEATHKNIGHT", label = "Death Knight", specs = { { id = 250, label = "Blood" }, { id = 251, label = "Frost" }, { id = 252, label = "Unholy" } } },
+  { token = "SHAMAN", label = "Shaman", specs = { { id = 262, label = "Elemental" }, { id = 263, label = "Enhancement" }, { id = 264, label = "Restoration" } } },
+  { token = "MAGE", label = "Mage", specs = { { id = 62, label = "Arcane" }, { id = 63, label = "Fire" }, { id = 64, label = "Frost" } } },
+  { token = "WARLOCK", label = "Warlock", specs = { { id = 265, label = "Affliction" }, { id = 266, label = "Demonology" }, { id = 267, label = "Destruction" } } },
+  { token = "MONK", label = "Monk", specs = { { id = 268, label = "Brewmaster" }, { id = 269, label = "Windwalker" }, { id = 270, label = "Mistweaver" } } },
+  { token = "DRUID", label = "Druid", specs = { { id = 102, label = "Balance" }, { id = 103, label = "Feral" }, { id = 104, label = "Guardian" }, { id = 105, label = "Restoration" } } },
+  { token = "DEMONHUNTER", label = "Demon Hunter", specs = { { id = 577, label = "Havoc" }, { id = 581, label = "Vengeance" } } },
+  { token = "EVOKER", label = "Evoker", specs = { { id = 1467, label = "Devastation" }, { id = 1468, label = "Preservation" }, { id = 1473, label = "Augmentation" } } },
+}
+local classSpecCatalogCache = nil
+
+local function cloneClassSpecCatalog(src)
+  local out = {}
+  for i = 1, #(src or {}) do
+    local cls = src[i]
+    local specs = {}
+    for j = 1, #((cls and cls.specs) or {}) do
+      local s = cls.specs[j]
+      specs[#specs + 1] = {
+        id = tonumber(s.id),
+        label = tostring(s.label or ""),
+      }
+    end
+    out[#out + 1] = {
+      token = tostring((cls and cls.token) or ""),
+      label = tostring((cls and cls.label) or ""),
+      specs = specs,
+    }
+  end
+  return out
+end
+
+local function buildClassSpecCatalog()
+  if not GetNumClasses or not GetClassInfo or not GetNumSpecializationsForClassID or not GetSpecializationInfoForClassID then
+    return cloneClassSpecCatalog(fallbackClassSpecCatalog)
+  end
+
+  local dynamic = {}
+  local numClasses = tonumber(GetNumClasses()) or 0
+  for classID = 1, numClasses do
+    local className, classToken = GetClassInfo(classID)
+    classToken = tostring(classToken or ""):upper()
+    if classToken ~= "" then
+      local row = {
+        token = classToken,
+        label = tostring(className or classToken),
+        specs = {},
+      }
+      local specCount = tonumber(GetNumSpecializationsForClassID(classID)) or 0
+      for specIndex = 1, specCount do
+        local specID, specName = GetSpecializationInfoForClassID(classID, specIndex)
+        specID = tonumber(specID)
+        if specID and specID > 0 then
+          row.specs[#row.specs + 1] = {
+            id = specID,
+            label = tostring(specName or ("Spec " .. tostring(specID))),
+          }
+        end
+      end
+      if #row.specs > 0 then
+        dynamic[#dynamic + 1] = row
+      end
+    end
+  end
+
+  if #dynamic > 0 then
+    table.sort(dynamic, function(a, b)
+      return tostring(a.label) < tostring(b.label)
+    end)
+    return dynamic
+  end
+
+  return cloneClassSpecCatalog(fallbackClassSpecCatalog)
+end
+
+local function getClassSpecCatalog()
+  if not classSpecCatalogCache then
+    classSpecCatalogCache = buildClassSpecCatalog()
+  end
+  return classSpecCatalogCache
+end
+local function normalizeSpecIDList(input)
+  local out = {}
+  local seen = {}
+  if type(input) == "table" then
+    for i = 1, #input do
+      local id = tonumber(input[i])
+      if id and id > 0 and not seen[id] then
+        seen[id] = true
+        out[#out + 1] = id
+      end
+    end
+  else
+    local text = tostring(input or "")
+    for token in text:gmatch("[^,%s;]+") do
+      local id = tonumber(token)
+      if id and id > 0 and not seen[id] then
+        seen[id] = true
+        out[#out + 1] = id
+      end
+    end
+  end
+  return out
+end
 local function normalizeDisplayName(text)
   text = U.Trim(tostring(text or ""))
   if text == "" then
@@ -205,6 +342,45 @@ function D:GetGroupOptions()
   return out
 end
 
+function D:GetLoadClassOptions()
+  local classSpecCatalog = getClassSpecCatalog()
+  local out = {
+    { value = "", label = "Any Class" },
+  }
+  for i = 1, #classSpecCatalog do
+    local cls = classSpecCatalog[i]
+    out[#out + 1] = { value = cls.token, label = cls.label }
+  end
+  return out
+end
+
+function D:GetLoadSpecMenuOptions(classToken)
+  local classSpecCatalog = getClassSpecCatalog()
+  local token = normalizeClassToken(classToken)
+  local out = {
+    { value = "", label = "Any Spec" },
+  }
+  for i = 1, #classSpecCatalog do
+    local cls = classSpecCatalog[i]
+    if token == "" or token == cls.token then
+      local submenu = {}
+      for j = 1, #(cls.specs or {}) do
+        local spec = cls.specs[j]
+        submenu[#submenu + 1] = {
+          value = tonumber(spec.id),
+          label = tostring(spec.label),
+        }
+      end
+      if #submenu > 0 then
+        out[#out + 1] = {
+          label = cls.label,
+          menuList = submenu,
+        }
+      end
+    end
+  end
+  return out
+end
 function D:GetUnitOptions()
   return {
     { value = "player", label = "Player" },
@@ -286,7 +462,11 @@ function D:BuildEditableModel(entry)
     unit = entry.unit,
     spellID = tonumber(item.spellID) or 0,
     spellName = ns.AuraAPI:GetSpellName(item.spellID) or "",
+    instanceUID = normalizeInstanceUID(item.instanceUID),
     groupID = item.groupID or "important_procs",
+    layoutGroupEnabled = item.layoutGroupEnabled == true,
+    loadClassToken = normalizeClassToken(item.loadClassToken),
+    loadSpecIDs = normalizeSpecIDList(item.loadSpecIDs),
     onlyMine = item.onlyMine == true,
     alert = item.alert ~= false,
     iconMode = item.iconMode or "spell",
@@ -315,7 +495,11 @@ function D:BuildDefaultCreateModel()
   return {
     spellInput = "",
     unit = "player",
+    instanceUID = "",
     groupID = "important_procs",
+    layoutGroupEnabled = false,
+    loadClassToken = "",
+    loadSpecIDs = {},
     onlyMine = true,
     alert = true,
     iconMode = "spell",
@@ -350,6 +534,10 @@ function D:BuildWatchItemFromModel(model)
   end
 
   local groupID = self:EnsureGroup(model.groupID)
+  local instanceUID = normalizeInstanceUID(model.instanceUID)
+  if instanceUID == "" then
+    instanceUID = buildInstanceUID(spellID)
+  end
   local iconMode = (model.iconMode == "custom") and "custom" or "spell"
   local customTexture = ""
   if iconMode == "custom" then
@@ -366,7 +554,11 @@ function D:BuildWatchItemFromModel(model)
 
   return {
     spellID = spellID,
+    instanceUID = instanceUID,
     groupID = groupID,
+    layoutGroupEnabled = normalizeBool(model.layoutGroupEnabled, false),
+    loadClassToken = normalizeClassToken(model.loadClassToken),
+    loadSpecIDs = normalizeSpecIDList(model.loadSpecIDs),
     onlyMine = normalizeBool(model.onlyMine, true),
     alert = normalizeBool(model.alert, true),
     displayName = normalizeDisplayName(model.displayName),
@@ -455,3 +647,7 @@ function D:DeleteEntry(key)
   ns.Debug:Logf("UI DeleteEntry key=%s", tostring(key))
   return 1
 end
+
+
+
+

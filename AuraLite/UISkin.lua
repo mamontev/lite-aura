@@ -6,23 +6,38 @@ local S = ns.UISkin
 
 local validThemes = {
   modern = true,
+  sky = true,
   classic = true,
 }
 
 local palettes = {
   modern = {
-    windowBG = { 0.06, 0.09, 0.14, 0.80 },
+    windowBG = { 0.13, 0.20, 0.30, 0.84 },
     windowBorder = { 0.20, 0.56, 0.82, 0.92 },
-    sectionBG = { 0.09, 0.13, 0.20, 0.72 },
-    sectionBorder = { 0.12, 0.32, 0.52, 0.9 },
-    sectionAccent = { 0.24, 0.70, 0.98, 0.85 },
-    textureAlpha = 0.08,
-    buttonBG = { 0.07, 0.10, 0.16, 0.82 },
-    buttonHover = { 0.12, 0.18, 0.28, 0.92 },
+    sectionBG = { 0.17, 0.27, 0.40, 0.78 },
+    sectionBorder = { 0.24, 0.48, 0.72, 0.92 },
+    sectionAccent = { 0.48, 0.82, 1.00, 0.90 },
+    textureAlpha = 0.10,
+    buttonBG = { 0.12, 0.22, 0.34, 0.88 },
+    buttonHover = { 0.19, 0.33, 0.48, 0.94 },
     buttonBorder = { 0.22, 0.62, 0.92, 0.9 },
-    rowNormal = { 0.04, 0.06, 0.09, 0.55 },
-    rowHover = { 0.13, 0.20, 0.30, 0.82 },
-    rowSelected = { 0.18, 0.40, 0.70, 0.88 },
+    rowNormal = { 0.11, 0.19, 0.30, 0.60 },
+    rowHover = { 0.21, 0.34, 0.50, 0.86 },
+    rowSelected = { 0.28, 0.50, 0.76, 0.90 },
+  },
+  sky = {
+    windowBG = { 0.17, 0.26, 0.38, 0.86 },
+    windowBorder = { 0.45, 0.78, 0.98, 0.96 },
+    sectionBG = { 0.22, 0.34, 0.49, 0.80 },
+    sectionBorder = { 0.30, 0.60, 0.84, 0.92 },
+    sectionAccent = { 0.56, 0.87, 1.00, 0.92 },
+    textureAlpha = 0.11,
+    buttonBG = { 0.16, 0.28, 0.42, 0.88 },
+    buttonHover = { 0.24, 0.40, 0.58, 0.94 },
+    buttonBorder = { 0.53, 0.86, 1.00, 0.94 },
+    rowNormal = { 0.14, 0.25, 0.38, 0.62 },
+    rowHover = { 0.24, 0.39, 0.56, 0.86 },
+    rowSelected = { 0.31, 0.54, 0.78, 0.92 },
   },
   classic = {
     windowBG = { 0.00, 0.00, 0.00, 0.78 },
@@ -85,8 +100,9 @@ end
 
 function S:GetTheme()
   local options = ns.db and ns.db.options or nil
-  if options and options.uiTheme == "classic" then
-    return "classic"
+  local chosen = options and tostring(options.uiTheme or "modern") or "modern"
+  if validThemes[chosen] then
+    return chosen
   end
   return "modern"
 end
@@ -98,6 +114,7 @@ end
 function S:GetThemeOptions()
   return {
     { value = "modern", label = (ns.Localization and ns.Localization:T("loc_theme_modern")) or "Modern" },
+    { value = "sky", label = (ns.Localization and ns.Localization:T("loc_theme_sky")) or "Sky" },
     { value = "classic", label = (ns.Localization and ns.Localization:T("loc_theme_classic")) or "Classic" },
   }
 end
@@ -253,3 +270,4 @@ function S:GetListRowColor(state)
   end
   return color[1], color[2], color[3], color[4]
 end
+

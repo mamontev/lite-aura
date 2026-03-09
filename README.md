@@ -46,6 +46,7 @@ Addon WoW Retail per tracciare aura selezionate con approccio "WA-lite": scegli 
   - hint contestuali in alto e layout adattivo dei pannelli
   - lista aura con larghezza dinamica per migliorare leggibilita
   - pannello `Rules` in UI per creare/modificare/rimuovere regole senza slash command
+  - quick presets nel Rule Builder (`Show Aura`, `Show + Talent`, `Consume Aura`) per setup rapido
 
 ## Audio
 
@@ -89,6 +90,7 @@ Per file custom per-aura usa il formato token:
 - `AuraLite/SettingsUI.lua`: pannello settings modulare.
 - `AuraLite/UISkin.lua`: skin condivisa UI (tema + texture custom).
 - `docs/UX_UI_STUDY.md`: studio UX/UI, flussi e principi di design adottati.
+- `docs/AuraLite_Audit_and_Roadmap.md`: audit tecnico completo + roadmap implementativa API-safe.
 - `AuraLite/SpellCatalog.lua`: ricerca/autocomplete spell.
 - `AuraLite/SpellCatalogData.lua`: dataset locale generato da Wowhead.
 - `AuraLite/DebugManager.lua`: logging debug.

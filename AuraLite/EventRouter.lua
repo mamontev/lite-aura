@@ -1,4 +1,5 @@
 local _, ns = ...
+local U = ns.Utils or {}
 ns.EventRouter = ns.EventRouter or {}
 local E = ns.EventRouter
 E.lastProcessedCast = E.lastProcessedCast or {}
@@ -10,6 +11,15 @@ E.hookedTriggerRevision = E.hookedTriggerRevision or -1
 E.lastUiErrorAt = E.lastUiErrorAt or 0
 E.lastRawAttempt = E.lastRawAttempt or nil
 E.lastRefreshSummary = E.lastRefreshSummary or { key = "", at = 0 }
+
+local function trimSafe(text)
+  if U and type(U.Trim) == "function" then
+    return U.Trim(text)
+  end
+  text = tostring(text or "")
+  return (text:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
 local processPlayerCast
 
 local function getSpellDebugName(spellID)
@@ -123,6 +133,152 @@ local function mergeGroupRows(dst, src)
       dst[groupID][#dst[groupID] + 1] = rows[i]
     end
   end
+end
+
+
+local function sanitizeGroupToken(text)
+  text = tostring(text or ""):lower()
+  text = text:gsub("[^%w_]+", "_")
+  text = text:gsub("_+", "_")
+  text = text:gsub("^_+", "")
+  text = text:gsub("_+$", "")
+  return text
+end
+
+local function buildIndependentGroupID(unit, item)
+  local spellID = tonumber(item and item.spellID) or 0
+  local unitToken = sanitizeGroupToken(unit or "player")
+  local uidToken = sanitizeGroupToken(item and item.instanceUID or "")
+  if uidToken ~= "" then
+    return string.format("aura_%s_%s", unitToken, uidToken)
+  end
+  local groupToken = sanitizeGroupToken(item and item.groupID or "group")
+  local nameToken = sanitizeGroupToken(item and item.displayName or "")
+  if nameToken == "" then
+    nameToken = "spell" .. tostring(spellID)
+  end
+  return string.format("aura_%s_%s_%d_%s", unitToken, groupToken, spellID, nameToken)
+end
+
+local function cloneLayoutSafe(layout)
+  if type(layout) ~= "table" then
+    return { iconSize = 36, spacing = 4, direction = "RIGHT" }
+  end
+  return {
+    iconSize = tonumber(layout.iconSize) or 36,
+    spacing = tonumber(layout.spacing) or 4,
+    direction = tostring(layout.direction or "RIGHT"),
+    nudgeX = tonumber(layout.nudgeX) or 0,
+    nudgeY = tonumber(layout.nudgeY) or 0,
+  }
+end
+local function ensureIndependentGroup(groupID, sourceGroupID, item)
+  if not ns.db or type(ns.db.groups) ~= "table" or type(ns.db.positions) ~= "table" then
+    return
+  end
+  if ns.db.groups[groupID] then
+    return
+  end
+  local maxOrder = 0
+  for _, cfg in pairs(ns.db.groups) do
+    maxOrder = math.max(maxOrder, tonumber(cfg and cfg.order) or 0)
+  end
+  local source = ns.db.groups[sourceGroupID]
+  local layout = cloneLayoutSafe(source and source.layout)
+  local spellID = tonumber(item and item.spellID) or 0
+  local name = trimSafe(tostring(item and item.displayName or ""))
+  if name == "" then
+    name = (ns.AuraAPI and ns.AuraAPI.GetSpellName and ns.AuraAPI:GetSpellName(spellID)) or ("Spell " .. tostring(spellID))
+  end
+  ns.db.groups[groupID] = {
+    id = groupID,
+    name = name,
+    order = maxOrder + 1,
+    layout = layout,
+  }
+  ns.db.positions[groupID] = ns.db.positions[groupID] or {
+    point = "CENTER",
+    relativePoint = "CENTER",
+    x = 0,
+    y = -72 - ((maxOrder + 1) * 52),
+  }
+end
+
+local function resolveDisplayGroupID(unit, item)
+  local sourceGroupID = tostring(item and item.groupID or "important_procs")
+
+  if item and item.layoutGroupEnabled == true then
+    local linkedGroupID = sanitizeGroupToken(sourceGroupID)
+    if linkedGroupID == "" then
+      linkedGroupID = "important_procs"
+    end
+    ensureIndependentGroup(linkedGroupID, sourceGroupID, item)
+    return linkedGroupID
+  end
+
+  local groupID = buildIndependentGroupID(unit, item)
+  ensureIndependentGroup(groupID, sourceGroupID, item)
+  return groupID
+end
+
+local function isSelectedAuraInUnlock(unit, item)
+  if not (ns.db and ns.db.locked == false and ns.state and ns.state.selectedAura) then
+    return false
+  end
+  if tostring(ns.state.selectedAura.unit or "") ~= tostring(unit or "") then
+    return false
+  end
+  local selectedUID = tostring(ns.state.selectedAura.instanceUID or "")
+  local itemUID = tostring(item and item.instanceUID or "")
+  if selectedUID ~= "" and itemUID ~= "" then
+    return selectedUID == itemUID
+  end
+  return tonumber(ns.state.selectedAura.spellID) == tonumber(item and item.spellID)
+end
+
+local function getPlayerClassToken()
+  local _, classToken = UnitClass("player")
+  return tostring(classToken or "")
+end
+
+local function getPlayerSpecID()
+  if not GetSpecialization or not GetSpecializationInfo then
+    return nil
+  end
+  local specIndex = GetSpecialization()
+  if not specIndex then
+    return nil
+  end
+  local specID = GetSpecializationInfo(specIndex)
+  return tonumber(specID)
+end
+
+local function isAuraLoadAllowed(item, playerClassToken, playerSpecID)
+  if type(item) ~= "table" then
+    return true
+  end
+  local loadClass = tostring(item.loadClassToken or "")
+  if loadClass ~= "" and playerClassToken ~= "" and loadClass ~= playerClassToken then
+    return false
+  end
+  local specList = item.loadSpecIDs
+  if type(specList) == "table" and #specList > 0 then
+    local sid = tonumber(playerSpecID)
+    if not sid then
+      return false
+    end
+    local matched = false
+    for i = 1, #specList do
+      if tonumber(specList[i]) == sid then
+        matched = true
+        break
+      end
+    end
+    if not matched then
+      return false
+    end
+  end
+  return true
 end
 
 function E:RefreshHookedTriggerSet()
@@ -326,158 +482,167 @@ function E:BuildRowsForUnit(unit)
   local rowsByGroup = {}
   local list = ns.db.watchlist[unit] or {}
   local rulesOnlyMode = ns.db and ns.db.options and ns.db.options.rulesOnlyMode == true
+  local playerClassToken = getPlayerClassToken()
+  local playerSpecID = getPlayerSpecID()
 
   for _, item in ipairs(list) do
-    local aura = nil
-    if not rulesOnlyMode then
-      aura = ns.AuraAPI:GetAuraBySpellID(unit, item.spellID)
-    end
+    if isAuraLoadAllowed(item, playerClassToken, playerSpecID) then
+      local selectedInUnlock = isSelectedAuraInUnlock(unit, item)
+      local effectiveGroupID = resolveDisplayGroupID(unit, item)
+      if selectedInUnlock then
+        effectiveGroupID = buildIndependentGroupID(unit, item)
+        ensureIndependentGroup(effectiveGroupID, tostring(item and item.groupID or "important_procs"), item)
+      end
+      local aura = nil
+      if not rulesOnlyMode then
+        aura = ns.AuraAPI:GetAuraBySpellID(unit, item.spellID)
+      end
 
-    if ns.ProcRules and ns.ProcRules.GetSyntheticAura then
-      local synthetic = ns.ProcRules:GetSyntheticAura(item.spellID)
-      if synthetic then
-        if not aura then
-          aura = synthetic
-        else
-          -- If aura exists but all key fields are hidden/secret, prefer deterministic synthetic state.
-          local auraExpirationTime, auraDuration = ns.AuraAPI:GetAuraTiming(aura)
-          local auraApplications = ns.AuraAPI:GetAuraApplications(aura)
-          local auraFromPlayer = ns.AuraAPI:IsFromPlayerOrPet(aura)
-          if not auraFromPlayer and not auraExpirationTime and not auraDuration and auraApplications <= 0 then
+      if ns.ProcRules and ns.ProcRules.GetSyntheticAura then
+        local synthetic = ns.ProcRules:GetSyntheticAura(item.spellID)
+        if synthetic then
+          if not aura then
             aura = synthetic
+          else
+            local auraExpirationTime, auraDuration = ns.AuraAPI:GetAuraTiming(aura)
+            local auraApplications = ns.AuraAPI:GetAuraApplications(aura)
+            local auraFromPlayer = ns.AuraAPI:IsFromPlayerOrPet(aura)
+            if not auraFromPlayer and not auraExpirationTime and not auraDuration and auraApplications <= 0 then
+              aura = synthetic
+            end
           end
         end
       end
-    end
-    local cooldown = nil
-    local cooldownRestricted = false
-    if (not rulesOnlyMode) and (not aura) and unit == "player" then
-      cooldownRestricted = ns.AuraAPI:IsSecretCooldownsRestricted(item.spellID)
-      if cooldownRestricted then
-        cooldown = getEstimatedCooldown(item.spellID)
-        if cooldown then
-          ns.Debug:Throttled(
-            "cd-estimate-" .. tostring(item.spellID),
-            1.5,
-            "Estimated cooldown row spellID=%d remaining=%.1f",
-            tonumber(item.spellID) or 0,
-            math.max(0, (cooldown.expirationTime or 0) - GetTime())
-          )
+      local cooldown = nil
+      local cooldownRestricted = false
+      if (not rulesOnlyMode) and (not aura) and unit == "player" then
+        cooldownRestricted = ns.AuraAPI:IsSecretCooldownsRestricted(item.spellID)
+        if cooldownRestricted then
+          cooldown = getEstimatedCooldown(item.spellID)
+          if cooldown then
+            ns.Debug:Throttled("cd-estimate-" .. tostring(item.spellID), 1.5, "Estimated cooldown row spellID=%d remaining=%.1f", tonumber(item.spellID) or 0, math.max(0, (cooldown.expirationTime or 0) - GetTime()))
+          else
+            ns.Debug:Throttled("cd-restricted-" .. tostring(item.spellID), 4.0, "SecretCooldowns active for spellID=%d: cooldown hidden by API in this context.", tonumber(item.spellID) or 0)
+          end
         else
-          ns.Debug:Throttled(
-            "cd-restricted-" .. tostring(item.spellID),
-            4.0,
-            "SecretCooldowns active for spellID=%d: cooldown hidden by API in this context.",
-            tonumber(item.spellID) or 0
-          )
-        end
-      else
-        cooldown = ns.AuraAPI:GetSpellCooldownData(item.spellID)
-        if cooldown then
-          learnCooldown(item.spellID, cooldown.duration)
-          clearEstimatedCooldown(item.spellID)
-          local remaining = math.max(0, (cooldown.expirationTime or 0) - GetTime())
-          ns.Debug:Throttled(
-            "cd-hit-" .. tostring(item.spellID),
-            1.5,
-            "Cooldown row spellID=%d remaining=%.1f",
-            tonumber(item.spellID) or 0,
-            remaining
-          )
-        else
-          ns.Debug:Throttled(
-            "cd-miss-" .. tostring(item.spellID),
-            4.0,
-            "No cooldown data spellID=%d (possible aura/proc ID).",
-            tonumber(item.spellID) or 0
-          )
+          cooldown = ns.AuraAPI:GetSpellCooldownData(item.spellID)
+          if cooldown then
+            learnCooldown(item.spellID, cooldown.duration)
+            clearEstimatedCooldown(item.spellID)
+            local remaining = math.max(0, (cooldown.expirationTime or 0) - GetTime())
+            ns.Debug:Throttled("cd-hit-" .. tostring(item.spellID), 1.5, "Cooldown row spellID=%d remaining=%.1f", tonumber(item.spellID) or 0, remaining)
+          else
+            ns.Debug:Throttled("cd-miss-" .. tostring(item.spellID), 4.0, "No cooldown data spellID=%d (possible aura/proc ID).", tonumber(item.spellID) or 0)
+          end
         end
       end
-    end
 
-    local include = aura ~= nil or cooldown ~= nil
-    if include and item.onlyMine then
-      include = aura and ns.AuraAPI:IsFromPlayerOrPet(aura) or true
-    end
-    if include and item.resourceConditionEnabled == true and ns.PlayerResource then
-      include = ns.PlayerResource:MatchesRange(item.resourceMinPct, item.resourceMaxPct)
-    end
+      local include = aura ~= nil or cooldown ~= nil
+      if include and item.onlyMine then
+        include = aura and ns.AuraAPI:IsFromPlayerOrPet(aura) or true
+      end
+      if include and item.resourceConditionEnabled == true and ns.PlayerResource then
+        include = ns.PlayerResource:MatchesRange(item.resourceMinPct, item.resourceMaxPct)
+      end
 
-    if include then
-      local canCompute = aura and ns.AuraAPI:CanComputeRemaining(aura) or (cooldown and cooldown.canCompute == true)
-      local fallbackIcon = ns.AuraAPI:SelectBestTexture(
-        aura and aura.icon or nil,
-        ns.AuraAPI:GetSpellTexture(item.spellID),
-        136243
-      )
-      local auraExpirationTime, auraDuration = ns.AuraAPI:GetAuraTiming(aura)
-      local applications = ns.AuraAPI:GetAuraApplications(aura)
-      local expirationTime = auraExpirationTime or (cooldown and cooldown.expirationTime)
-      local duration = auraDuration or (cooldown and cooldown.duration)
-      local sourceLabel = aura and ns.AuraAPI:GetSourceLabel(aura) or ""
-      rowsByGroup[item.groupID] = rowsByGroup[item.groupID] or {}
-      rowsByGroup[item.groupID][#rowsByGroup[item.groupID] + 1] = {
-        unit = unit,
-        groupID = item.groupID,
-        spellID = item.spellID,
-        auraInstanceID = ns.AuraAPI:GetAuraInstanceID(aura),
-        icon = ns.AuraAPI:GetDisplayTextureForItem(item, aura),
-        fallbackIcon = fallbackIcon,
-        applications = applications,
-        expirationTime = expirationTime,
-        duration = duration,
-        sourceLabel = sourceLabel,
-        canCompute = canCompute,
-        alert = item.alert ~= false,
-        displayName = item.displayName or "",
-        customText = item.customText or "",
-        timerVisual = item.timerVisual or "icon",
-        barTexture = item.barTexture or "",
-        timerAnchor = item.timerAnchor or "BOTTOM",
-        timerOffsetX = tonumber(item.timerOffsetX) or 0,
-        timerOffsetY = tonumber(item.timerOffsetY) or -1,
-        customTextAnchor = item.customTextAnchor or "TOP",
-        customTextOffsetX = tonumber(item.customTextOffsetX) or 0,
-        customTextOffsetY = tonumber(item.customTextOffsetY) or 2,
-        resourceConditionEnabled = item.resourceConditionEnabled == true,
-        resourceMinPct = tonumber(item.resourceMinPct) or 0,
-        resourceMaxPct = tonumber(item.resourceMaxPct) or 100,
-        lowTimeThreshold = tonumber(item.lowTimeThreshold) or 0,
-        soundOnGain = item.soundOnGain or "default",
-        soundOnLow = item.soundOnLow or "default",
-        soundOnExpire = item.soundOnExpire or "default",
-        isPlaceholder = false,
-      }
-    elseif ns.TestMode:IsEnabled() then
-      local fake = ns.TestMode:BuildPlaceholder(item, unit)
-      fake.groupID = item.groupID
-      fake.displayName = item.displayName or ""
-      fake.customText = item.customText or ""
-      fake.timerVisual = item.timerVisual or "icon"
-      fake.barTexture = item.barTexture or ""
-      fake.timerAnchor = item.timerAnchor or "BOTTOM"
-      fake.timerOffsetX = tonumber(item.timerOffsetX) or 0
-      fake.timerOffsetY = tonumber(item.timerOffsetY) or -1
-      fake.customTextAnchor = item.customTextAnchor or "TOP"
-      fake.customTextOffsetX = tonumber(item.customTextOffsetX) or 0
-      fake.customTextOffsetY = tonumber(item.customTextOffsetY) or 2
-      fake.resourceConditionEnabled = item.resourceConditionEnabled == true
-      fake.resourceMinPct = tonumber(item.resourceMinPct) or 0
-      fake.resourceMaxPct = tonumber(item.resourceMaxPct) or 100
-      fake.lowTimeThreshold = tonumber(item.lowTimeThreshold) or 0
-      fake.soundOnGain = item.soundOnGain or "default"
-      fake.soundOnLow = item.soundOnLow or "default"
-      fake.soundOnExpire = item.soundOnExpire or "default"
-      fake.iconMode = item.iconMode or "spell"
-      fake.customTexture = item.customTexture or ""
-      fake.icon = ns.AuraAPI:GetDisplayTextureForItem(item, nil)
-      fake.fallbackIcon = ns.AuraAPI:SelectBestTexture(ns.AuraAPI:GetSpellTexture(item.spellID), 136243)
-      fake.isPlaceholder = true
-      rowsByGroup[item.groupID] = rowsByGroup[item.groupID] or {}
-      rowsByGroup[item.groupID][#rowsByGroup[item.groupID] + 1] = fake
+      if include then
+        local canCompute = aura and ns.AuraAPI:CanComputeRemaining(aura) or (cooldown and cooldown.canCompute == true)
+        local fallbackIcon = ns.AuraAPI:SelectBestTexture(aura and aura.icon or nil, ns.AuraAPI:GetSpellTexture(item.spellID), 136243)
+        local auraExpirationTime, auraDuration = ns.AuraAPI:GetAuraTiming(aura)
+        local applications = ns.AuraAPI:GetAuraApplications(aura)
+        local expirationTime = auraExpirationTime or (cooldown and cooldown.expirationTime)
+        local duration = auraDuration or (cooldown and cooldown.duration)
+        local sourceLabel = aura and ns.AuraAPI:GetSourceLabel(aura) or ""
+        rowsByGroup[effectiveGroupID] = rowsByGroup[effectiveGroupID] or {}
+        rowsByGroup[effectiveGroupID][#rowsByGroup[effectiveGroupID] + 1] = {
+          unit = unit,
+          groupID = effectiveGroupID,
+          spellID = item.spellID,
+          auraInstanceID = ns.AuraAPI:GetAuraInstanceID(aura),
+          icon = ns.AuraAPI:GetDisplayTextureForItem(item, aura),
+          fallbackIcon = fallbackIcon,
+          applications = applications,
+          expirationTime = expirationTime,
+          duration = duration,
+          sourceLabel = sourceLabel,
+          canCompute = canCompute,
+          alert = item.alert ~= false,
+          displayName = item.displayName or "",
+          customText = item.customText or "",
+          timerVisual = item.timerVisual or "icon",
+          barTexture = item.barTexture or "",
+          timerAnchor = item.timerAnchor or "BOTTOM",
+          timerOffsetX = tonumber(item.timerOffsetX) or 0,
+          timerOffsetY = tonumber(item.timerOffsetY) or -1,
+          customTextAnchor = item.customTextAnchor or "TOP",
+          customTextOffsetX = tonumber(item.customTextOffsetX) or 0,
+          customTextOffsetY = tonumber(item.customTextOffsetY) or 2,
+          resourceConditionEnabled = item.resourceConditionEnabled == true,
+          resourceMinPct = tonumber(item.resourceMinPct) or 0,
+          resourceMaxPct = tonumber(item.resourceMaxPct) or 100,
+          lowTimeThreshold = tonumber(item.lowTimeThreshold) or 0,
+          soundOnGain = item.soundOnGain or "default",
+          soundOnLow = item.soundOnLow or "default",
+          soundOnExpire = item.soundOnExpire or "default",
+          isPlaceholder = false,
+        }
+      elseif selectedInUnlock then
+        local fake = ns.TestMode:BuildPlaceholder(item, unit)
+        fake.groupID = effectiveGroupID
+        fake.displayName = item.displayName or ""
+        fake.customText = item.customText or ""
+        fake.timerVisual = item.timerVisual or "icon"
+        fake.barTexture = item.barTexture or ""
+        fake.timerAnchor = item.timerAnchor or "BOTTOM"
+        fake.timerOffsetX = tonumber(item.timerOffsetX) or 0
+        fake.timerOffsetY = tonumber(item.timerOffsetY) or -1
+        fake.customTextAnchor = item.customTextAnchor or "TOP"
+        fake.customTextOffsetX = tonumber(item.customTextOffsetX) or 0
+        fake.customTextOffsetY = tonumber(item.customTextOffsetY) or 2
+        fake.resourceConditionEnabled = item.resourceConditionEnabled == true
+        fake.resourceMinPct = tonumber(item.resourceMinPct) or 0
+        fake.resourceMaxPct = tonumber(item.resourceMaxPct) or 100
+        fake.lowTimeThreshold = tonumber(item.lowTimeThreshold) or 0
+        fake.soundOnGain = item.soundOnGain or "default"
+        fake.soundOnLow = item.soundOnLow or "default"
+        fake.soundOnExpire = item.soundOnExpire or "default"
+        fake.iconMode = item.iconMode or "spell"
+        fake.customTexture = item.customTexture or ""
+        fake.icon = ns.AuraAPI:GetDisplayTextureForItem(item, nil)
+        fake.fallbackIcon = ns.AuraAPI:SelectBestTexture(ns.AuraAPI:GetSpellTexture(item.spellID), 136243)
+        fake.isPlaceholder = true
+        rowsByGroup[effectiveGroupID] = rowsByGroup[effectiveGroupID] or {}
+        rowsByGroup[effectiveGroupID][#rowsByGroup[effectiveGroupID] + 1] = fake
+      elseif ns.TestMode:IsEnabled() then
+        local fake = ns.TestMode:BuildPlaceholder(item, unit)
+        fake.groupID = effectiveGroupID
+        fake.displayName = item.displayName or ""
+        fake.customText = item.customText or ""
+        fake.timerVisual = item.timerVisual or "icon"
+        fake.barTexture = item.barTexture or ""
+        fake.timerAnchor = item.timerAnchor or "BOTTOM"
+        fake.timerOffsetX = tonumber(item.timerOffsetX) or 0
+        fake.timerOffsetY = tonumber(item.timerOffsetY) or -1
+        fake.customTextAnchor = item.customTextAnchor or "TOP"
+        fake.customTextOffsetX = tonumber(item.customTextOffsetX) or 0
+        fake.customTextOffsetY = tonumber(item.customTextOffsetY) or 2
+        fake.resourceConditionEnabled = item.resourceConditionEnabled == true
+        fake.resourceMinPct = tonumber(item.resourceMinPct) or 0
+        fake.resourceMaxPct = tonumber(item.resourceMaxPct) or 100
+        fake.lowTimeThreshold = tonumber(item.lowTimeThreshold) or 0
+        fake.soundOnGain = item.soundOnGain or "default"
+        fake.soundOnLow = item.soundOnLow or "default"
+        fake.soundOnExpire = item.soundOnExpire or "default"
+        fake.iconMode = item.iconMode or "spell"
+        fake.customTexture = item.customTexture or ""
+        fake.icon = ns.AuraAPI:GetDisplayTextureForItem(item, nil)
+        fake.fallbackIcon = ns.AuraAPI:SelectBestTexture(ns.AuraAPI:GetSpellTexture(item.spellID), 136243)
+        fake.isPlaceholder = true
+        rowsByGroup[effectiveGroupID] = rowsByGroup[effectiveGroupID] or {}
+        rowsByGroup[effectiveGroupID][#rowsByGroup[effectiveGroupID] + 1] = fake
+      end
     end
   end
-
   return rowsByGroup
 end
 
@@ -501,34 +666,36 @@ function E:RefreshAll()
   ns.GroupManager:SetRestrictionState(restrictionActive)
   ns.GroupManager:Render(activeByGroup)
 
-  local groupCount = 0
-  local rowCount = 0
-  for _, rows in pairs(activeByGroup) do
-    groupCount = groupCount + 1
-    rowCount = rowCount + #rows
-  end
-  local now = GetTime()
-  local summaryKey = string.format(
-    "%d|%d|%s|%s",
-    groupCount,
-    rowCount,
-    tostring(restrictionActive),
-    tostring(cooldownRestricted)
-  )
-  local changed = summaryKey ~= (self.lastRefreshSummary and self.lastRefreshSummary.key or "")
-  local heartbeatDue = (now - (self.lastRefreshSummary and self.lastRefreshSummary.at or 0)) >= 6.0
-  if changed or heartbeatDue then
-    ns.Debug:Logf(
-      "RefreshAll done. groups=%d rows=%d restricted=%s cdRestricted=%s",
+  if ns.Debug and ns.Debug.IsEnabled and ns.Debug:IsEnabled() then
+    local groupCount = 0
+    local rowCount = 0
+    for _, rows in pairs(activeByGroup) do
+      groupCount = groupCount + 1
+      rowCount = rowCount + #rows
+    end
+    local now = GetTime()
+    local summaryKey = string.format(
+      "%d|%d|%s|%s",
       groupCount,
       rowCount,
       tostring(restrictionActive),
       tostring(cooldownRestricted)
     )
-    self.lastRefreshSummary = {
-      key = summaryKey,
-      at = now,
-    }
+    local changed = summaryKey ~= (self.lastRefreshSummary and self.lastRefreshSummary.key or "")
+    local heartbeatDue = (now - (self.lastRefreshSummary and self.lastRefreshSummary.at or 0)) >= 6.0
+    if changed or heartbeatDue then
+      ns.Debug:Logf(
+        "RefreshAll done. groups=%d rows=%d restricted=%s cdRestricted=%s",
+        groupCount,
+        rowCount,
+        tostring(restrictionActive),
+        tostring(cooldownRestricted)
+      )
+      self.lastRefreshSummary = {
+        key = summaryKey,
+        at = now,
+      }
+    end
   end
 end
 
@@ -942,3 +1109,17 @@ function E:COMBAT_LOG_EVENT_UNFILTERED()
   end
   processPlayerCast(self, spellID, "COMBAT_LOG_EVENT_UNFILTERED")
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -120,34 +120,51 @@ function C:CreateDropdown(parent, width)
   drop.value = nil
   drop._onValueChanged = nil
 
-  UIDropDownMenu_Initialize(drop, function(frame, level)
-    for i = 1, #(frame.options or {}) do
-      local opt = frame.options[i]
+  local function findLabelByValue(options, value)
+    for i = 1, #(options or {}) do
+      local opt = options[i]
+      if opt.value ~= nil and opt.value == value then
+        return opt.label
+      end
+      if type(opt.menuList) == "table" then
+        local nested = findLabelByValue(opt.menuList, value)
+        if nested then
+          return nested
+        end
+      end
+    end
+    return nil
+  end
+
+  local function buildLevel(frame, level, menuList)
+    local list = (level and level > 1) and menuList or frame.options
+    for i = 1, #(list or {}) do
+      local opt = list[i]
       local info = UIDropDownMenu_CreateInfo()
       info.text = opt.label
-      info.arg1 = opt.value
-      info.checked = (frame.value == opt.value)
-      info.func = function(_, value)
-        frame:SetValue(value, true)
-      end
-      UIDropDownMenu_AddButton(info, level)
-    end
-  end)
-
-  function drop:SetOptions(options)
-    self.options = options or {}
-    UIDropDownMenu_Initialize(self, function(frame, level)
-      for i = 1, #(frame.options or {}) do
-        local opt = frame.options[i]
-        local info = UIDropDownMenu_CreateInfo()
-        info.text = opt.label
+      if type(opt.menuList) == "table" and #opt.menuList > 0 then
+        info.hasArrow = true
+        info.notCheckable = true
+        info.menuList = opt.menuList
+      else
         info.arg1 = opt.value
         info.checked = (frame.value == opt.value)
         info.func = function(_, value)
           frame:SetValue(value, true)
         end
-        UIDropDownMenu_AddButton(info, level)
       end
+      UIDropDownMenu_AddButton(info, level)
+    end
+  end
+
+  UIDropDownMenu_Initialize(drop, function(frame, level, menuList)
+    buildLevel(frame, level or 1, menuList)
+  end)
+
+  function drop:SetOptions(options)
+    self.options = options or {}
+    UIDropDownMenu_Initialize(self, function(frame, level, menuList)
+      buildLevel(frame, level or 1, menuList)
     end)
   end
 
@@ -161,15 +178,8 @@ function C:CreateDropdown(parent, width)
 
   function drop:SetValue(value, emitEvent)
     self.value = value
-    local label = tostring(value or "")
-    for i = 1, #(self.options or {}) do
-      local opt = self.options[i]
-      if opt.value == value then
-        label = opt.label
-        break
-      end
-    end
-    UIDropDownMenu_SetText(self, label)
+    local label = findLabelByValue(self.options, value)
+    UIDropDownMenu_SetText(self, label or tostring(value or ""))
     if emitEvent and self._onValueChanged then
       self._onValueChanged(value)
     end
@@ -181,7 +191,6 @@ function C:CreateDropdown(parent, width)
 
   return drop
 end
-
 function C:CreateSegmentedControl(parent, width, height, options, onChanged)
   local holder = CreateFrame("Frame", nil, parent)
   holder:SetSize(width or 300, height or 22)

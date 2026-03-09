@@ -276,6 +276,11 @@ function UI:EnsureUXOptionsDefaults()
   else
     options.rulesOnlyMode = options.rulesOnlyMode == true
   end
+  if options.aggregateByGroup == nil then
+    options.aggregateByGroup = false
+  else
+    options.aggregateByGroup = options.aggregateByGroup == true
+  end
   local workspace = tostring(options.uiWorkspace or "split")
   if not validWorkspaceModes[workspace] then
     workspace = "split"
@@ -312,7 +317,6 @@ function UI:GetQuickHeight()
   end
   return 122
 end
-
 function UI:ApplyWorkspaceLayout()
   if not self.frame or not self.left or not self.right then
     return
@@ -325,6 +329,20 @@ function UI:ApplyWorkspaceLayout()
     mode = "split"
   end
   local fullWidth = math.floor(self.frame:GetWidth() - 32)
+  local layoutSig = table.concat({
+    tostring(mode),
+    tostring(contentTopY),
+    tostring(contentHeight),
+    tostring(fullWidth),
+    tostring(self.activeTab or "general"),
+    tostring(#(self.listButtons or {})),
+    tostring(self.frame:IsShown() and 1 or 0),
+  }, "|")
+  if self._layoutSig == layoutSig then
+    self:UpdateHintText()
+    return
+  end
+  self._layoutSig = layoutSig
 
   self.left:ClearAllPoints()
   self.right:ClearAllPoints()
@@ -340,10 +358,10 @@ function UI:ApplyWorkspaceLayout()
     self.left:Hide()
   else
     self.left:SetPoint("TOPLEFT", 16, contentTopY)
-    self.left:SetSize(348, contentHeight)
+    self.left:SetSize(364, contentHeight)
     self.left:Show()
     self.right:SetPoint("TOPRIGHT", self.frame, "TOPRIGHT", -16, contentTopY)
-    self.right:SetSize(686, contentHeight)
+    self.right:SetSize(724, contentHeight)
     self.right:Show()
   end
 
@@ -375,20 +393,16 @@ function UI:ApplyWorkspaceLayout()
       row.test:SetPoint("LEFT", row.pathEdit, "RIGHT", 8, 0)
     end
   end
-
   if self.rulesFrame then
     local f = self.rulesFrame
     f:ClearAllPoints()
     f:SetPoint("TOPLEFT", self.right, "TOPLEFT", 12, -112)
     f:SetSize(math.max(620, math.floor(self.right:GetWidth() - 24)), math.max(300, math.floor(self.right:GetHeight() - 144)))
-    if f.listScroll then
-      f.listScroll:SetPoint("TOPLEFT", 10, -46)
-      f.listScroll:SetSize(f.listBaseWidth or 228, math.max(160, f:GetHeight() - 92))
+    if self.RelayoutRulesPanel then
+      self:RelayoutRulesPanel()
+    elseif self.activeTab == "rules" and f:IsShown() then
+      self:RefreshRulesList()
     end
-    if f.listContent then
-      f.listContent:SetSize(math.max(128, (f.listBaseWidth or 228) - 28), math.max(24, #(f.ruleRows or {}) * 24))
-    end
-    self:RefreshRulesList()
   end
 
   self:UpdateHintText()
@@ -409,12 +423,18 @@ function UI:SetWorkspaceMode(mode, skipRefresh)
     self:RebuildAuraList()
   end
 end
-
 function UI:ApplyGuidedMode()
   if not self.frame then
     return
   end
   local guided = ns.db and ns.db.options and ns.db.options.uiGuidedMode == true
+  local guidedSig = tostring(guided) .. "|" .. tostring(self.activeTab or "general")
+  if self._guidedSig == guidedSig then
+    self:RefreshBarTextureVisibility(self.ddTimerVisual and self.ddTimerVisual:GetValue() or "icon")
+    self:UpdateHintText()
+    return
+  end
+  self._guidedSig = guidedSig
 
   local map = self.advancedControlsByTab or {}
   for _, controls in pairs(map) do
@@ -514,7 +534,7 @@ function UI:ApplySkin()
   local buttons = {
     self.btnLock, self.btnEdit, self.btnRefresh, self.btnLocalization, self.btnRules,
     self.btnGlobalOptions,
-    self.btnTabGeneral, self.btnTabDisplay, self.btnTabSounds, self.btnTabRules,
+    self.btnTabGeneral, self.btnTabDisplay, self.btnTabSounds, self.btnTabLoad, self.btnTabRules,
     self.btnClearFilter, self.btnNewAura, self.btnDuplicate, self.btnDelete,
     self.btnSave, self.btnReset, self.btnOpenOptions,
     self.btnGlobalClose,
@@ -544,7 +564,7 @@ function UI:ApplySkin()
 
   local drops = {
     self.ddChannel, self.ddUnit, self.ddGroup, self.ddIconMode, self.ddTimerVisual,
-    self.ddBarTexturePreset, self.ddTimerAnchor, self.ddCustomAnchor,
+    self.ddBarTexturePreset, self.ddLoadClass, self.ddLoadSpec, self.ddTimerAnchor, self.ddCustomAnchor,
   }
   for i = 1, #drops do
     if drops[i] then
@@ -592,133 +612,96 @@ function UI:ApplySkin()
       end
     end
   end
-
   if self.rulesFrame then
     local f = self.rulesFrame
-    ns.UISkin:ApplySection(f)
-    if f.ddType then
-      ns.UISkin:ApplyDropdown(f.ddType)
-    end
-    if f.ddConditionMode then
-      ns.UISkin:ApplyDropdown(f.ddConditionMode)
-    end
-    if f.editRuleID then
-      ns.UISkin:ApplyEditBox(f.editRuleID)
-    end
-    if f.editCastSpell then
-      ns.UISkin:ApplyEditBox(f.editCastSpell)
-    end
-    if f.editTalentSpell then
-      ns.UISkin:ApplyEditBox(f.editTalentSpell)
-    end
-    if f.editConditionAura then
-      ns.UISkin:ApplyEditBox(f.editConditionAura)
-    end
-    if f.editAuraSpell then
-      ns.UISkin:ApplyEditBox(f.editAuraSpell)
-    end
-    if f.editDuration then
-      ns.UISkin:ApplyEditBox(f.editDuration)
-    end
-    if f.btnSave then
-      ns.UISkin:ApplyButton(f.btnSave)
-    end
-    if f.btnRemove then
-      ns.UISkin:ApplyButton(f.btnRemove)
-    end
-    if f.btnClear then
-      ns.UISkin:ApplyButton(f.btnClear)
-    end
-    if f.btnNew then
-      ns.UISkin:ApplyButton(f.btnNew)
-    end
-    if f.btnClose then
-      ns.UISkin:ApplyButton(f.btnClose)
+    f:ClearAllPoints()
+    f:SetPoint("TOPLEFT", self.right, "TOPLEFT", 12, -112)
+    f:SetSize(math.max(620, math.floor(self.right:GetWidth() - 24)), math.max(300, math.floor(self.right:GetHeight() - 144)))
+    if self.RelayoutRulesPanel then
+      self:RelayoutRulesPanel()
+    elseif self.activeTab == "rules" and f:IsShown() then
+      self:RefreshRulesList()
     end
   end
 
-  if self.listButtons then
-    for i = 1, #self.listButtons do
-      local btn = self.listButtons[i]
-      if btn and btn.key then
-        local selected = btn.key == self.selectedKey and self.editorMode == "edit"
-        self:ApplyListButtonState(btn, selected and "selected" or "normal")
-      end
-    end
-  end
-end
-
-function UI:RegisterTabControl(tabKey, control)
-  if not control then
-    return
-  end
-  self.tabControls = self.tabControls or {
-    general = {},
-    display = {},
-    sounds = {},
-  }
-  self.tabControls[tabKey] = self.tabControls[tabKey] or {}
-  self.tabControls[tabKey][#self.tabControls[tabKey] + 1] = control
+  self:UpdateHintText()
 end
 
 function UI:RegisterTabControls(tabKey, controls)
-  for i = 1, #(controls or {}) do
-    self:RegisterTabControl(tabKey, controls[i])
-  end
-end
-
-local function setControlVisible(control, visible)
-  if not control then
+  if type(tabKey) ~= "string" or type(controls) ~= "table" then
     return
   end
-  if visible then
-    control:Show()
-  else
-    control:Hide()
-  end
-end
-
-function UI:RefreshTabButtons()
-  if not self.tabButtons then
-    return
-  end
-  for key, button in pairs(self.tabButtons) do
-    if button and button.Disable and button.Enable then
-      if key == self.activeTab then
-        button:Disable()
-      else
-        button:Enable()
-      end
+  self.tabControls = self.tabControls or {}
+  self.tabControls[tabKey] = self.tabControls[tabKey] or {}
+  local bucket = self.tabControls[tabKey]
+  for i = 1, #controls do
+    local ctrl = controls[i]
+    if ctrl then
+      bucket[#bucket + 1] = ctrl
     end
   end
 end
 
+local validTabs = {
+  general = true,
+  display = true,
+  sounds = true,
+  load = true,
+  rules = true,
+}
+
 function UI:SelectTab(tabKey)
-  if tabKey ~= "general" and tabKey ~= "display" and tabKey ~= "sounds" and tabKey ~= "rules" then
+  if not validTabs[tabKey] then
     tabKey = "general"
   end
   self.activeTab = tabKey
 
-  if self.tabControls then
-    for key, controls in pairs(self.tabControls) do
-      local show = key == tabKey
-      for i = 1, #controls do
-        setControlVisible(controls[i], show)
+  for key, btn in pairs(self.tabButtons or {}) do
+    if btn and btn.Disable and btn.Enable then
+      if key == tabKey then
+        btn:Disable()
+      else
+        btn:Enable()
       end
     end
   end
 
-  self:RefreshIconCustomVisibility(self.ddIconMode and self.ddIconMode:GetValue() or "spell")
-  self:RefreshBarTextureVisibility(self.ddTimerVisual and self.ddTimerVisual:GetValue() or "icon")
-
-  if tabKey ~= "general" then
-    self:HideAutocomplete()
+  local map = self.tabControls or {}
+  for key, controls in pairs(map) do
+    local show = key == tabKey
+    for i = 1, #controls do
+      local ctrl = controls[i]
+      if ctrl and ctrl.SetShown then
+        ctrl:SetShown(show)
+      elseif ctrl and ctrl.Show and ctrl.Hide then
+        if show then
+          ctrl:Show()
+        else
+          ctrl:Hide()
+        end
+      end
+    end
   end
-  local showAuraEditorButtons = tabKey ~= "rules"
-  setControlVisible(self.btnSave, showAuraEditorButtons)
-  setControlVisible(self.btnReset, showAuraEditorButtons)
-  setControlVisible(self.btnOpenOptions, showAuraEditorButtons)
-  self:RefreshTabButtons()
+
+  if tabKey == "rules" then
+    if self.BuildRulesPanel then
+      self:BuildRulesPanel()
+    end
+    if self.rulesFrame then
+      self:SyncRuleAuraBinding()
+      if self.RelayoutRulesPanel then
+        self:RelayoutRulesPanel()
+      end
+      self:RefreshRulesList()
+      self:RefreshRulesTypeVisibility()
+      self:SetRulesSubTab((self.rulesFrame and self.rulesFrame.activeSubTab) or "trigger", false)
+    end
+  end
+
+  self:RefreshIconCustomVisibility(self.ddIconMode and self.ddIconMode:GetValue() or "spell")
+  if self.RefreshBarTextureVisibility then
+    self:RefreshBarTextureVisibility(self.ddTimerVisual and self.ddTimerVisual:GetValue() or "icon")
+  end
   self:ApplyGuidedMode()
   self:UpdateHintText()
 end
@@ -778,6 +761,12 @@ function UI:BuildGlobalOptionsPanel()
   end)
   self.cbRulesOnly:SetPoint("TOPLEFT", 16, -152)
 
+  self.cbAggregateGroup = C:CreateCheckBox(f, tr("lbl_aggregate_group"), function(checked)
+    ns.db.options.aggregateByGroup = checked == true
+    ns.EventRouter:RefreshAll()
+  end)
+  self.cbAggregateGroup:SetPoint("TOPLEFT", 16, -180)
+
   self.lblChannel = C:CreateLabel(f, tr("lbl_channel"), "GameFontHighlightSmall")
   self.lblChannel:SetPoint("TOPLEFT", 282, -40)
   self.ddChannel = C:CreateDropdown(f, 130)
@@ -805,7 +794,7 @@ function UI:BuildGlobalOptionsPanel()
   end)
 
   self.globalHint = C:CreateLabel(f, tr("global_hint"), "GameFontDisableSmall")
-  self.globalHint:SetPoint("TOPLEFT", 16, -196)
+  self.globalHint:SetPoint("TOPLEFT", 16, -224)
   self.globalHint:SetWidth(460)
   self.globalHint:SetJustifyH("LEFT")
 
@@ -833,7 +822,7 @@ function UI:BuildFrame()
   end
 
   local frame = CreateFrame("Frame", "AuraLiteSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-  frame:SetSize(1080, 660)
+  frame:SetSize(1120, 700)
   frame:SetPoint("CENTER")
   frame:SetFrameStrata("DIALOG")
   frame:SetMovable(true)
@@ -850,7 +839,7 @@ function UI:BuildFrame()
     frame.TitleText:SetText(tr("ui_title"))
   end
 
-  local quick = C:CreateSection(frame, tr("quick_actions"), 1048, 122)
+  local quick = C:CreateSection(frame, tr("quick_actions"), 1088, 132)
   quick:SetPoint("TOPLEFT", 16, -50)
   self.quick = quick
 
@@ -892,7 +881,7 @@ function UI:BuildFrame()
   self.btnGlobalOptions:SetPoint("LEFT", self.btnRules, "RIGHT", 10, 0)
 
   self.lblWorkspace = C:CreateLabel(quick, tr("lbl_workspace"), "GameFontHighlightSmall")
-  self.lblWorkspace:SetPoint("TOPLEFT", 786, -22)
+  self.lblWorkspace:SetPoint("TOPRIGHT", quick, "TOPRIGHT", -222, -22)
   self.workspaceSegment = C:CreateSegmentedControl(quick, 190, 22, {
     { value = "auras", label = tr("ws_auras") },
     { value = "editor", label = tr("ws_editor") },
@@ -900,7 +889,7 @@ function UI:BuildFrame()
   }, function(value)
     self:SetWorkspaceMode(value, false)
   end)
-  self.workspaceSegment:SetPoint("TOPLEFT", 836, -30)
+  self.workspaceSegment:SetPoint("TOPRIGHT", quick, "TOPRIGHT", -14, -30)
 
   self.cbGuided = C:CreateCheckBox(quick, tr("lbl_guided_mode"), function(checked)
     ns.db.options.uiGuidedMode = checked == true
@@ -910,10 +899,10 @@ function UI:BuildFrame()
 
   self.hintText = C:CreateLabel(quick, "", "GameFontDisableSmall")
   self.hintText:SetPoint("TOPLEFT", 14, -92)
-  self.hintText:SetWidth(1018)
+  self.hintText:SetWidth(1060)
   self.hintText:SetJustifyH("LEFT")
 
-  local left = C:CreateSection(frame, tr("aura_list"), 348, 460)
+  local left = C:CreateSection(frame, tr("aura_list"), 364, 492)
   left:SetPoint("TOPLEFT", 16, -184)
   self.left = left
 
@@ -955,7 +944,7 @@ function UI:BuildFrame()
   end)
   self.btnDelete:SetPoint("LEFT", self.btnDuplicate, "RIGHT", 8, 0)
 
-  local right = C:CreateSection(frame, tr("aura_details"), 686, 460)
+  local right = C:CreateSection(frame, tr("aura_details"), 724, 492)
   right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -184)
   self.right = right
 
@@ -1000,10 +989,16 @@ function UI:BuildFrame()
   self.btnTabSounds:SetPoint("LEFT", self.btnTabDisplay, "RIGHT", 8, 0)
   self.tabButtons.sounds = self.btnTabSounds
 
+  self.btnTabLoad = C:CreateButton(right, tr("tab_load"), 92, 20, function()
+    self:SelectTab("load")
+  end)
+  self.btnTabLoad:SetPoint("LEFT", self.btnTabSounds, "RIGHT", 8, 0)
+  self.tabButtons.load = self.btnTabLoad
+
   self.btnTabRules = C:CreateButton(right, tr("tab_rules"), 92, 20, function()
     self:SelectTab("rules")
   end)
-  self.btnTabRules:SetPoint("LEFT", self.btnTabSounds, "RIGHT", 8, 0)
+  self.btnTabRules:SetPoint("LEFT", self.btnTabLoad, "RIGHT", 8, 0)
   self.tabButtons.rules = self.btnTabRules
 
   self.lblSpell = C:CreateLabel(right, tr("lbl_spell"), "GameFontHighlightSmall")
@@ -1076,13 +1071,34 @@ function UI:BuildFrame()
 
   self.cbOnlyMine = C:CreateCheckBox(right, tr("lbl_only_mine"), nil)
   self.cbOnlyMine:SetPoint("TOPLEFT", 394, -182)
+  if self.cbOnlyMine.text then self.cbOnlyMine.text:SetWidth(120) end
   self.cbAlert = C:CreateCheckBox(right, tr("lbl_low_alert"), nil)
-  self.cbAlert:SetPoint("LEFT", self.cbOnlyMine, "RIGHT", 126, 0)
+  self.cbAlert:SetPoint("TOPLEFT", 394, -208)
+  if self.cbAlert.text then self.cbAlert.text:SetWidth(180) end
+  self.cbMoveWithGroup = C:CreateCheckBox(right, tr("lbl_move_with_group"), nil)
+  self.cbMoveWithGroup:SetPoint("TOPLEFT", 394, -234)
+  if self.cbMoveWithGroup.text then self.cbMoveWithGroup.text:SetWidth(220) end
   self.lblLowTimeAura = C:CreateLabel(right, tr("lbl_low_time_aura"), "GameFontHighlightSmall")
-  self.lblLowTimeAura:SetPoint("TOPLEFT", 394, -218)
+  self.lblLowTimeAura:SetPoint("TOPLEFT", 394, -262)
   self.editLowTimeAura = C:CreateEditBox(right, 56, 20, false)
-  self.editLowTimeAura:SetPoint("TOPLEFT", 394, -234)
+  self.editLowTimeAura:SetPoint("TOPLEFT", 394, -278)
   self.editLowTimeAura:SetNumeric(false)
+
+  self.lblLoadClass = C:CreateLabel(right, tr("lbl_load_class"), "GameFontHighlightSmall")
+  self.lblLoadClass:SetPoint("TOPLEFT", 12, -262)
+  self.ddLoadClass = C:CreateDropdown(right, 180)
+  self.ddLoadClass:SetPoint("TOPLEFT", -2, -274)
+  self.ddLoadClass:SetOptions(D:GetLoadClassOptions())
+
+  self.lblLoadSpec = C:CreateLabel(right, tr("lbl_load_spec"), "GameFontHighlightSmall")
+  self.lblLoadSpec:SetPoint("TOPLEFT", 206, -262)
+  self.ddLoadSpec = C:CreateDropdown(right, 168)
+  self.ddLoadSpec:SetPoint("TOPLEFT", 190, -274)
+  self.ddLoadSpec:SetOptions(D:GetLoadSpecMenuOptions(""))
+  self.ddLoadSpec:SetValue("")
+  self.ddLoadClass:SetOnValueChanged(function()
+    self:RefreshLoadSpecDropdown(nil, true)
+  end)
 
   self.lblIconMode = C:CreateLabel(right, tr("lbl_icon"), "GameFontHighlightSmall")
   self.lblIconMode:SetPoint("TOPLEFT", 12, -120)
@@ -1197,6 +1213,7 @@ function UI:BuildFrame()
     general = {},
     display = {},
     sounds = {},
+    load = {},
     rules = {},
   }
 
@@ -1206,7 +1223,7 @@ function UI:BuildFrame()
     self.lblUnit, self.ddUnit,
     self.lblGroup, self.ddGroup,
     self.lblGroupCustom, self.editGroupCustom,
-    self.cbOnlyMine, self.cbAlert,
+    self.cbOnlyMine, self.cbAlert, self.cbMoveWithGroup,
     self.lblLowTimeAura, self.editLowTimeAura,
     self.cbResourceCondition, self.lblResourceRange,
     self.editResourceMin, self.editResourceMax, self.lblResourceCurrent,
@@ -1227,6 +1244,10 @@ function UI:BuildFrame()
 
   self:RegisterTabControls("sounds", {
     self.soundTitle,
+  })
+
+  self:RegisterTabControls("load", {
+    self.lblLoadClass, self.ddLoadClass, self.lblLoadSpec, self.ddLoadSpec,
   })
   for _, state in ipairs({ "gain", "low", "expire" }) do
     local row = self.soundControls[state]
@@ -1252,6 +1273,7 @@ function UI:BuildFrame()
       self.lblCustomOffset, self.editCustomOffsetX, self.editCustomOffsetY,
     },
     sounds = {},
+    load = {},
     rules = {},
   }
 
@@ -1350,6 +1372,9 @@ function UI:ApplyLocalization()
   if self.btnTabSounds then
     self.btnTabSounds:SetText(tr("tab_sounds"))
   end
+  if self.btnTabLoad then
+    self.btnTabLoad:SetText(tr("tab_load"))
+  end
   if self.btnTabRules then
     self.btnTabRules:SetText(tr("tab_rules"))
   end
@@ -1368,6 +1393,9 @@ function UI:ApplyLocalization()
   self.cbGuided.text:SetText(tr("lbl_guided_mode"))
   if self.cbRulesOnly and self.cbRulesOnly.text then
     self.cbRulesOnly.text:SetText(tr("lbl_rules_only"))
+  end
+  if self.cbAggregateGroup and self.cbAggregateGroup.text then
+    self.cbAggregateGroup.text:SetText(tr("lbl_aggregate_group"))
   end
   if self.lblChannel then
     self.lblChannel:SetText(tr("lbl_channel"))
@@ -1388,7 +1416,12 @@ function UI:ApplyLocalization()
   self.lblGroupCustom:SetText(tr("lbl_group_custom"))
   self.cbOnlyMine.text:SetText(tr("lbl_only_mine"))
   self.cbAlert.text:SetText(tr("lbl_low_alert"))
+  if self.cbMoveWithGroup and self.cbMoveWithGroup.text then
+    self.cbMoveWithGroup.text:SetText(tr("lbl_move_with_group"))
+  end
   self.lblLowTimeAura:SetText(tr("lbl_low_time_aura"))
+  if self.lblLoadClass then self.lblLoadClass:SetText(tr("lbl_load_class")) end
+  if self.lblLoadSpec then self.lblLoadSpec:SetText(tr("lbl_load_spec")) end
   self.lblIconMode:SetText(tr("lbl_icon"))
   self.lblTexture:SetText(tr("lbl_custom_texture"))
   self.textureHelp:SetText(tr("help_custom_texture"))
@@ -1524,584 +1557,13 @@ function UI:RefreshLocalizationPanelTexts()
   self:ApplySkin()
 end
 
-function UI:RefreshRulesTypeVisibility()
-  if not self.rulesFrame then
-    return
-  end
-  local f = self.rulesFrame
-  local ruleType = (f.ddType and f.ddType:GetValue()) or "if"
-  local subTab = tostring(f.activeSubTab or "trigger")
-  local onTrigger = subTab == "trigger"
-  local onConditions = subTab == "conditions"
-  local onActions = subTab == "actions"
-
-  local function setShown(ctrl, shown)
-    if ctrl then
-      ctrl:SetShown(shown == true)
-    end
-  end
-
-  setShown(f.lblType, onTrigger)
-  setShown(f.ddType, onTrigger)
-  setShown(f.lblRuleID, onTrigger)
-  setShown(f.editRuleID, onTrigger)
-  setShown(f.lblCastSpell, onTrigger)
-  setShown(f.editCastSpell, onTrigger)
-
-  setShown(f.lblConditionMode, onConditions)
-  setShown(f.ddConditionMode, onConditions)
-  setShown(f.lblTalentSpell, onConditions)
-  setShown(f.editTalentSpell, onConditions)
-  setShown(f.lblConditionAura, onConditions)
-  setShown(f.editConditionAura, onConditions)
-  setShown(f.cbConditionCombat, onConditions)
-  setShown(f.csvHint, onConditions)
-
-  setShown(f.lblAuraSpell, onActions)
-  setShown(f.editAuraSpell, onActions)
-  setShown(f.lblDuration, onActions and ruleType == "if")
-  setShown(f.editDuration, onActions and ruleType == "if")
-end
-
-function UI:SetRulesSubTab(tabKey, emit)
-  if not self.rulesFrame then
-    return
-  end
-  local f = self.rulesFrame
-  if tabKey ~= "trigger" and tabKey ~= "conditions" and tabKey ~= "actions" then
-    tabKey = "trigger"
-  end
-  f.activeSubTab = tabKey
-  if f.rulesSegment then
-    f.rulesSegment:SetValue(tabKey, emit == true)
-  end
-  self:RefreshRulesTypeVisibility()
-end
-
-function UI:ApplyRuleFormModel(model)
-  if not self.rulesFrame then
-    return
-  end
-  local f = self.rulesFrame
-  local boundAuraSpellID = self:GetActiveRuleAuraSpellID()
-  model = model or {
-    type = "if",
-    id = "",
-    castSpellIDs = {},
-    conditionMode = "all",
-    talentSpellIDs = {},
-    requiredAuraSpellIDs = {},
-    requireInCombat = false,
-    auraSpellID = boundAuraSpellID or "",
-    duration = 8,
-  }
-  if f.ddType then
-    f.ddType:SetValue(model.type or "if")
-  end
-  if f.editRuleID then
-    f.editRuleID:SetText(tostring(model.id or ""))
-  end
-  if f.editCastSpell then
-    f.editCastSpell:SetText(joinSpellIDList(model.castSpellIDs))
-  end
-  if f.editTalentSpell then
-    f.editTalentSpell:SetText(joinSpellIDList(model.talentSpellIDs))
-  end
-  if f.ddConditionMode then
-    f.ddConditionMode:SetValue((model.conditionMode == "any") and "any" or "all")
-  end
-  if f.editConditionAura then
-    f.editConditionAura:SetText(joinSpellIDList(model.requiredAuraSpellIDs))
-  end
-  if f.cbConditionCombat then
-    f.cbConditionCombat:SetChecked(model.requireInCombat == true)
-  end
-  if f.editAuraSpell then
-    local auraForRule = boundAuraSpellID or model.auraSpellID
-    f.editAuraSpell:SetText(tostring(auraForRule or ""))
-  end
-  if f.editDuration then
-    local d = tonumber(model.duration) or 0
-    if d <= 0 then
-      d = 8
-    end
-    f.editDuration:SetText(tostring(d))
-  end
-  f.selectedRuleID = tostring(model.id or "")
-  self:SyncRuleAuraBinding()
-  self:RefreshRuleNarrative(model)
-  self:RefreshRulesTypeVisibility()
-end
-
-function UI:RefreshRuleNarrative(model)
-  if not self.rulesFrame or not self.rulesFrame.ruleNarrative then
-    return
-  end
-  model = model or {}
-  local ruleType = tostring(model.type or "if")
-  local castText = joinSpellIDList(model.castSpellIDs or {})
-  if castText == "" then
-    castText = "?"
-  end
-  local ifText = tr("rule_condition_and")
-  if tostring(model.conditionMode or "all") == "any" then
-    ifText = tr("rule_condition_or")
-  end
-  local auraText = tostring(model.auraSpellID or "?")
-  local tail = ""
-  if ruleType == "if" then
-    tail = string.format("%s %ss", tr("rule_narrative_show"), tostring(tonumber(model.duration) or 8))
-  else
-    tail = tr("rule_narrative_consume")
-  end
-  self.rulesFrame.ruleNarrative:SetText(string.format("%s %s | %s %s | %s %s", tr("rule_narrative_when"), castText, tr("rule_narrative_if"), ifText, tr("rule_narrative_then"), tail .. " #" .. auraText))
-end
-
-function UI:CollectRuleFormModel()
-  if not self.rulesFrame then
-    return nil, tr("msg_rule_invalid")
-  end
-  local f = self.rulesFrame
-  local boundAuraSpellID = self:GetActiveRuleAuraSpellID()
-  local castSpellIDs = parseSpellIDList((f.editCastSpell and f.editCastSpell:GetText()) or "")
-  local talentSpellIDs = parseSpellIDList((f.editTalentSpell and f.editTalentSpell:GetText()) or "")
-  local requiredAuraSpellIDs = parseSpellIDList((f.editConditionAura and f.editConditionAura:GetText()) or "")
-  local model = {
-    type = f.ddType and f.ddType:GetValue() or "if",
-    id = U.Trim((f.editRuleID and f.editRuleID:GetText()) or ""),
-    castSpellIDs = castSpellIDs,
-    conditionMode = (f.ddConditionMode and f.ddConditionMode:GetValue()) or "all",
-    talentSpellIDs = talentSpellIDs,
-    requiredAuraSpellIDs = requiredAuraSpellIDs,
-    requireInCombat = (f.cbConditionCombat and f.cbConditionCombat:GetChecked() == true) or false,
-    auraSpellID = boundAuraSpellID or tonumber(U.Trim((f.editAuraSpell and f.editAuraSpell:GetText()) or "")),
-    duration = tonumber(U.Trim((f.editDuration and f.editDuration:GetText()) or "")) or 0,
-  }
-  if model.conditionMode ~= "any" then
-    model.conditionMode = "all"
-  end
-  if model.id == "" or #model.castSpellIDs == 0 or not model.auraSpellID then
-    return nil, tr("msg_rule_invalid")
-  end
-  if model.type == "if" then
-    if model.duration <= 0 then
-      model.duration = 8
-    end
-  end
-  self:RefreshRuleNarrative(model)
-  return model
-end
-
-function UI:RefreshRulesList()
-  if not self.rulesFrame then
-    return
-  end
-  local f = self.rulesFrame
-  local auraSpellID = self:GetActiveRuleAuraSpellID()
-  if f.lblList then
-    if auraSpellID then
-      f.lblList:SetText(string.format("%s (%d)", tr("rules_list"), auraSpellID))
-    else
-      f.lblList:SetText(tr("rules_list"))
-    end
-  end
-  local rules = {}
-  if ns.ProcRules and auraSpellID and ns.ProcRules.GetUserRulesForAura then
-    rules = ns.ProcRules:GetUserRulesForAura(auraSpellID) or {}
-  end
-  f.ruleRows = rules
-  f.ruleButtons = f.ruleButtons or {}
-
-  local rowWidth = math.max(140, math.floor((f.listBaseWidth or 228) - 34))
-  for i = 1, #rules do
-    local rule = rules[i]
-    local btn = f.ruleButtons[i]
-    if not btn then
-      btn = CreateFrame("Button", nil, f.listContent, "BackdropTemplate")
-      btn:SetSize(rowWidth, 22)
-      btn.bg = btn:CreateTexture(nil, "BACKGROUND")
-      btn.bg:SetAllPoints()
-      self:ApplyListButtonState(btn, "normal")
-      btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      btn.text:SetPoint("LEFT", 6, 0)
-      btn.text:SetPoint("RIGHT", -10, 0)
-      btn.text:SetJustifyH("LEFT")
-      btn.text:SetWordWrap(false)
-      btn:SetScript("OnEnter", function(selfBtn)
-        if selfBtn.ruleID ~= f.selectedRuleID then
-          self:ApplyListButtonState(selfBtn, "hover")
-        end
-      end)
-      btn:SetScript("OnLeave", function(selfBtn)
-        if selfBtn.ruleID ~= f.selectedRuleID then
-          self:ApplyListButtonState(selfBtn, "normal")
-        end
-      end)
-      btn:SetScript("OnMouseDown", function(selfBtn)
-        f.selectedRuleID = selfBtn.ruleID
-        local model = inferSimpleRuleModel(selfBtn.rule)
-        if model then
-          self:ApplyRuleFormModel(model)
-        else
-          info("Unsupported rule format in UI. You can still remove it.")
-          if f.editRuleID then
-            f.editRuleID:SetText(tostring(selfBtn.ruleID or ""))
-          end
-        end
-        self:RefreshRulesList()
-      end)
-      f.ruleButtons[i] = btn
-    end
-
-    btn.rule = rule
-    btn.ruleID = tostring(rule.id or ("rule_" .. tostring(i)))
-    btn:SetSize(rowWidth, 22)
-    btn:SetPoint("TOPLEFT", 0, -((i - 1) * 24))
-    local label = ns.ProcRules:DescribeUserRule(rule)
-    if #label > 34 then
-      label = label:sub(1, 31) .. "..."
-    end
-    btn.text:SetText(label)
-    if btn.ruleID == f.selectedRuleID then
-      self:ApplyListButtonState(btn, "selected")
-    else
-      self:ApplyListButtonState(btn, "normal")
-    end
-    btn:Show()
-  end
-
-  for i = #rules + 1, #f.ruleButtons do
-    f.ruleButtons[i]:Hide()
-  end
-
-  f.listContent:SetSize(rowWidth, math.max(24, #rules * 24))
-end
-
-function UI:SaveRuleFromPanel()
-  if not ns.ProcRules then
-    return
-  end
-  local model, err = self:CollectRuleFormModel()
-  if not model then
-    info(err or tr("msg_rule_invalid"))
-    return
-  end
-  local auraSpellID = self:GetActiveRuleAuraSpellID()
-  if not auraSpellID then
-    info(tr("msg_select_missing"))
-    return
-  end
-
-  local ok, saveErr
-  if model.type == "if" then
-    ok, saveErr = ns.ProcRules:AddSimpleIfRuleEx(model)
-  else
-    ok, saveErr = ns.ProcRules:AddSimpleConsumeRuleEx(model)
-  end
-
-  if not ok then
-    info(saveErr or tr("msg_rule_invalid"))
-    return
-  end
-  self.rulesFrame.selectedRuleID = model.id
-  self:RefreshRulesList()
-  ns.EventRouter:RefreshAll()
-  info(tr("msg_rule_saved"))
-end
-
-function UI:RemoveSelectedRuleFromPanel()
-  if not ns.ProcRules or not self.rulesFrame then
-    return
-  end
-  local f = self.rulesFrame
-  local auraSpellID = self:GetActiveRuleAuraSpellID()
-  local ruleID = U.Trim((f.editRuleID and f.editRuleID:GetText()) or f.selectedRuleID or "")
-  if ruleID == "" then
-    info(tr("msg_rule_pick"))
-    return
-  end
-  local removed = ns.ProcRules:RemoveUserRule(ruleID, auraSpellID)
-  ns.EventRouter:RefreshAll()
-  info(string.format(tr("msg_rule_removed"), removed))
-  self:ApplyRuleFormModel(nil)
-  self:RefreshRulesList()
-end
-
-function UI:ClearRulesFromPanel()
-  if not ns.ProcRules then
-    return
-  end
-  local auraSpellID = self:GetActiveRuleAuraSpellID()
-  ns.ProcRules:ClearUserRules(auraSpellID)
-  ns.EventRouter:RefreshAll()
-  info(tr("msg_rule_clear"))
-  self:ApplyRuleFormModel(nil)
-  self:RefreshRulesList()
-end
-
-function UI:RefreshRulesPanelTexts()
-  if not self.rulesFrame then
-    return
-  end
-  local f = self.rulesFrame
-  if f.title then
-    f.title:SetText(tr("rules_title"))
-  end
-  if f.lblList then
-    f.lblList:SetText(tr("rules_list"))
-  end
-  if f.lblType then
-    f.lblType:SetText(tr("rules_type"))
-  end
-  if f.lblRuleID then
-    f.lblRuleID:SetText(tr("rule_id"))
-  end
-  if f.lblCastSpell then
-    f.lblCastSpell:SetText(tr("rule_cast_spell"))
-  end
-  if f.lblTalentSpell then
-    f.lblTalentSpell:SetText(tr("rule_talent_spell"))
-  end
-  if f.lblConditionMode then
-    f.lblConditionMode:SetText(tr("rule_condition_mode"))
-  end
-  if f.lblConditionAura then
-    f.lblConditionAura:SetText(tr("rule_condition_aura"))
-  end
-  if f.cbConditionCombat and f.cbConditionCombat.text then
-    f.cbConditionCombat.text:SetText(tr("rule_condition_combat"))
-  end
-  if f.lblAuraSpell then
-    f.lblAuraSpell:SetText(tr("rule_aura_spell"))
-  end
-  if f.lblDuration then
-    f.lblDuration:SetText(tr("rule_duration"))
-  end
-  if f.csvHint then
-    f.csvHint:SetText(tr("rule_csv_hint"))
-  end
-  if f.btnSave then
-    f.btnSave:SetText(tr("rules_save"))
-  end
-  if f.btnRemove then
-    f.btnRemove:SetText(tr("rules_remove"))
-  end
-  if f.btnClear then
-    f.btnClear:SetText(tr("rules_clear"))
-  end
-  if f.btnClose then
-    f.btnClose:SetText(tr("rules_close"))
-  end
-  if f.btnNew then
-    f.btnNew:SetText(tr("rules_new"))
-  end
-  if f.ddType then
-    f.ddType:SetOptions({
-      { value = "if", label = tr("rule_type_if") },
-      { value = "consume", label = tr("rule_type_consume") },
-    })
-    if not f.ddType:GetValue() then
-      f.ddType:SetValue("if")
-    end
-  end
-  if f.ddConditionMode then
-    f.ddConditionMode:SetOptions({
-      { value = "all", label = tr("rule_condition_and") },
-      { value = "any", label = tr("rule_condition_or") },
-    })
-    if not f.ddConditionMode:GetValue() then
-      f.ddConditionMode:SetValue("all")
-    end
-  end
-  if f.rulesSegment then
-    local current = f.rulesSegment:GetValue() or f.activeSubTab or "trigger"
-    f.rulesSegment:SetOptions({
-      { value = "trigger", label = tr("rules_tab_trigger") },
-      { value = "conditions", label = tr("rules_tab_conditions") },
-      { value = "actions", label = tr("rules_tab_actions") },
-    })
-    f.rulesSegment:SetValue(current, false)
-  end
-  self:RefreshRulesTypeVisibility()
-end
-
-function UI:BuildRulesPanel()
-  if self.rulesFrame then
-    return
-  end
-
-  local parent = self.right or self.frame
-  local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-  f:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -112)
-  f:SetSize(math.max(620, math.floor(parent:GetWidth() - 24)), math.max(300, math.floor(parent:GetHeight() - 144)))
-  f:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 16,
-    edgeSize = 10,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
-  })
-  f:SetBackdropColor(0.05, 0.10, 0.16, 0.36)
-  f:SetBackdropBorderColor(0.20, 0.56, 0.82, 0.50)
-  f:SetClipsChildren(true)
-  f:Hide()
-
-  f.title = C:CreateLabel(f, "", "GameFontNormal")
-  f.title:SetPoint("TOPLEFT", 8, -8)
-
-  f.lblList = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblList:SetPoint("TOPLEFT", 8, -30)
-
-  local panelW = f:GetWidth()
-  local panelH = f:GetHeight()
-  local listW = 228
-  local formX = listW + 44
-  local formW = math.max(280, panelW - formX - 12)
-  local colGap = 14
-  local colW = math.max(132, math.floor((formW - colGap) / 2))
-  local colA = formX
-  local function fitRuleLabel(label, width)
-    if not label then
-      return
-    end
-    label:SetWidth(width)
-    label:SetJustifyH("LEFT")
-    if label.SetWordWrap then
-      label:SetWordWrap(false)
-    end
-  end
-
-  f.listScroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-  f.listScroll:SetPoint("TOPLEFT", 10, -46)
-  f.listScroll:SetSize(listW, math.max(180, panelH - 92))
-  f.listContent = CreateFrame("Frame", nil, f.listScroll)
-  f.listContent:SetSize(math.max(128, listW - 28), 10)
-  f.listScroll:SetScrollChild(f.listContent)
-  f.ruleButtons = {}
-  f.ruleRows = {}
-  f.listBaseWidth = listW
-
-  f.rulesSegment = C:CreateSegmentedControl(f, math.min(340, formW), 20, {
-    { value = "trigger", label = tr("rules_tab_trigger") },
-    { value = "conditions", label = tr("rules_tab_conditions") },
-    { value = "actions", label = tr("rules_tab_actions") },
-  }, function(value)
-    self:SetRulesSubTab(value, false)
-  end)
-  f.rulesSegment:SetPoint("TOPLEFT", colA, -30)
-
-  f.ruleNarrative = C:CreateLabel(f, "", "GameFontDisableSmall")
-  f.ruleNarrative:SetPoint("TOPLEFT", colA, -56)
-  f.ruleNarrative:SetWidth(formW)
-  f.ruleNarrative:SetJustifyH("LEFT")
-
-  f.lblType = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblType:SetPoint("TOPLEFT", colA, -84)
-  fitRuleLabel(f.lblType, formW)
-  f.ddType = C:CreateDropdown(f, formW)
-  f.ddType:SetPoint("TOPLEFT", colA - 16, -100)
-  f.ddType:SetOnValueChanged(function()
-    self:RefreshRulesTypeVisibility()
-  end)
-
-  f.lblRuleID = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblRuleID:SetPoint("TOPLEFT", colA, -140)
-  fitRuleLabel(f.lblRuleID, formW)
-  f.editRuleID = C:CreateEditBox(f, formW, 20, false)
-  f.editRuleID:SetPoint("TOPLEFT", colA, -156)
-
-  f.lblCastSpell = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblCastSpell:SetPoint("TOPLEFT", colA, -188)
-  fitRuleLabel(f.lblCastSpell, colW)
-  f.editCastSpell = C:CreateEditBox(f, colW, 20, false)
-  f.editCastSpell:SetPoint("TOPLEFT", colA, -204)
-
-  f.lblAuraSpell = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblAuraSpell:SetPoint("TOPLEFT", colA, -140)
-  fitRuleLabel(f.lblAuraSpell, colW)
-  f.editAuraSpell = C:CreateEditBox(f, colW, 20, false)
-  f.editAuraSpell:SetPoint("TOPLEFT", colA, -156)
-
-  f.lblTalentSpell = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblTalentSpell:SetPoint("TOPLEFT", colA, -140)
-  fitRuleLabel(f.lblTalentSpell, formW)
-  f.editTalentSpell = C:CreateEditBox(f, formW, 20, false)
-  f.editTalentSpell:SetPoint("TOPLEFT", colA, -156)
-
-  f.lblDuration = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblDuration:SetPoint("TOPLEFT", colA, -188)
-  fitRuleLabel(f.lblDuration, colW)
-  f.editDuration = C:CreateEditBox(f, colW, 20, false)
-  f.editDuration:SetPoint("TOPLEFT", colA, -204)
-
-  f.lblConditionMode = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblConditionMode:SetPoint("TOPLEFT", colA, -92)
-  fitRuleLabel(f.lblConditionMode, formW)
-  f.ddConditionMode = C:CreateDropdown(f, colW)
-  f.ddConditionMode:SetPoint("TOPLEFT", colA - 16, -108)
-
-  f.lblConditionAura = C:CreateLabel(f, "", "GameFontHighlightSmall")
-  f.lblConditionAura:SetPoint("TOPLEFT", colA, -188)
-  fitRuleLabel(f.lblConditionAura, formW)
-  f.editConditionAura = C:CreateEditBox(f, formW, 20, false)
-  f.editConditionAura:SetPoint("TOPLEFT", colA, -204)
-
-  f.cbConditionCombat = C:CreateCheckBox(f, "", function() end)
-  f.cbConditionCombat:SetPoint("TOPLEFT", colA, -236)
-
-  f.csvHint = C:CreateLabel(f, "CSV example: 6343,23922", "GameFontDisableSmall")
-  f.csvHint:SetPoint("TOPLEFT", colA, -266)
-  f.csvHint:SetWidth(formW)
-  f.csvHint:SetJustifyH("LEFT")
-
-  f.btnNew = C:CreateButton(f, "", 104, 24, function()
-    f.selectedRuleID = nil
-    self:ApplyRuleFormModel(nil)
-    self:RefreshRulesList()
-  end)
-  f.btnNew:SetPoint("BOTTOMLEFT", 8, 10)
-
-  f.btnClear = C:CreateButton(f, "", 104, 24, function()
-    self:ClearRulesFromPanel()
-  end)
-  f.btnClear:SetPoint("LEFT", f.btnNew, "RIGHT", 8, 0)
-
-  f.btnSave = C:CreateButton(f, "", 118, 24, function()
-    self:SaveRuleFromPanel()
-  end)
-  f.btnSave:SetPoint("BOTTOMLEFT", colA, 10)
-
-  f.btnRemove = C:CreateButton(f, "", 118, 24, function()
-    self:RemoveSelectedRuleFromPanel()
-  end)
-  f.btnRemove:SetPoint("LEFT", f.btnSave, "RIGHT", 8, 0)
-
-  self.rulesFrame = f
-  self:RegisterTabControls("rules", { f })
-  self:ApplySkin()
-  self:RefreshRulesPanelTexts()
-  self:SetRulesSubTab("trigger", false)
-  self:ApplyRuleFormModel(nil)
-  self:RefreshRulesList()
-end
-
-function UI:OpenRulesPanel()
-  self:BuildRulesPanel()
-  self:SetWorkspaceMode("editor", true)
-  self:RefreshRulesPanelTexts()
-  self:RefreshRulesList()
-  self:SetRulesSubTab("trigger", false)
-  self:SelectTab("rules")
-end
-
 function UI:BuildLocalizationPanel()
   if self.localizationFrame then
     return
   end
 
   local f = CreateFrame("Frame", "AuraLiteLocalizationFrame", UIParent, "BasicFrameTemplateWithInset")
-  f:SetSize(420, 270)
+  f:SetSize(460, 318)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetFrameStrata("FULLSCREEN_DIALOG")
   f:SetToplevel(true)
@@ -2120,29 +1582,29 @@ function UI:BuildLocalizationPanel()
   f.title:SetPoint("TOPLEFT", 16, -14)
 
   f.lblLanguage = C:CreateLabel(f, "", "GameFontHighlight")
-  f.lblLanguage:SetPoint("TOPLEFT", 18, -50)
+  f.lblLanguage:SetPoint("TOPLEFT", 18, -52)
 
-  f.ddLanguage = C:CreateDropdown(f, 180)
-  f.ddLanguage:SetPoint("TOPLEFT", 8, -70)
+  f.ddLanguage = C:CreateDropdown(f, 220)
+  f.ddLanguage:SetPoint("TOPLEFT", 8, -74)
   f.ddLanguage:SetOptions(L:GetLanguageOptions())
   f.ddLanguage:SetValue(L:GetLanguage())
 
   f.lblTheme = C:CreateLabel(f, "", "GameFontHighlight")
-  f.lblTheme:SetPoint("TOPLEFT", 18, -102)
-  f.ddTheme = C:CreateDropdown(f, 180)
-  f.ddTheme:SetPoint("TOPLEFT", 8, -122)
+  f.lblTheme:SetPoint("TOPLEFT", 18, -114)
+  f.ddTheme = C:CreateDropdown(f, 220)
+  f.ddTheme:SetPoint("TOPLEFT", 8, -136)
   if ns.UISkin then
     f.ddTheme:SetOptions(ns.UISkin:GetThemeOptions())
   end
   f.ddTheme:SetValue((ns.db and ns.db.options and ns.db.options.uiTheme) or "modern")
 
   f.lblTexture = C:CreateLabel(f, "", "GameFontHighlight")
-  f.lblTexture:SetPoint("TOPLEFT", 18, -154)
-  f.editTexture = C:CreateEditBox(f, 360, 20, false)
-  f.editTexture:SetPoint("TOPLEFT", 18, -172)
+  f.lblTexture:SetPoint("TOPLEFT", 18, -178)
+  f.editTexture = C:CreateEditBox(f, 410, 20, false)
+  f.editTexture:SetPoint("TOPLEFT", 18, -196)
   f.editTexture:SetText((ns.db and ns.db.options and ns.db.options.uiTexturePath) or "")
   f.lblTextureHelp = C:CreateLabel(f, "", "GameFontDisableSmall")
-  f.lblTextureHelp:SetPoint("TOPLEFT", 18, -194)
+  f.lblTextureHelp:SetPoint("TOPLEFT", 18, -220)
 
   f.btnApply = C:CreateButton(f, "", 100, 22, function()
     local code = f.ddLanguage:GetValue() or "enUS"
@@ -2151,7 +1613,7 @@ function UI:BuildLocalizationPanel()
     if ns.UISkin then
       ns.UISkin:EnsureOptionsDefaults(ns.db.options)
       local theme = f.ddTheme and f.ddTheme:GetValue() or "modern"
-      if theme == "modern" or theme == "classic" then
+      if theme == "modern" or theme == "sky" or theme == "classic" then
         ns.db.options.uiTheme = theme
       end
       ns.db.options.uiTexturePath = U.Trim((f.editTexture and f.editTexture:GetText()) or "")
@@ -2205,6 +1667,9 @@ function UI:RefreshQuickState()
   if self.cbRulesOnly then
     self.cbRulesOnly:SetChecked(ns.db.options.rulesOnlyMode == true)
   end
+  if self.cbAggregateGroup then
+    self.cbAggregateGroup:SetChecked(ns.db.options.aggregateByGroup == true)
+  end
   if self.ddChannel then
     self.ddChannel:SetValue(ns.db.options.soundChannel or "Master")
   end
@@ -2221,631 +1686,3 @@ function UI:RefreshQuickState()
   self:RefreshResourcePreview()
 end
 
-function UI:RefreshGroupDropdown()
-  local options = D:GetGroupOptions()
-  self.ddGroup:SetOptions(options)
-  if #options == 0 then
-    self.ddGroup:SetValue(nil)
-  elseif not hasOption(options, self.ddGroup:GetValue()) then
-    self.ddGroup:SetValue(options[1].value)
-  end
-end
-
-function UI:RefreshIconCustomVisibility(mode)
-  mode = mode or self.ddIconMode:GetValue() or "spell"
-  local guided = ns.db and ns.db.options and ns.db.options.uiGuidedMode == true
-  local show = (self.activeTab == "display") and (mode == "custom") and (not guided)
-  if show then
-    self.lblTexture:Show()
-    self.editTexture:Show()
-    self.textureHelp:Show()
-  else
-    self.lblTexture:Hide()
-    self.editTexture:Hide()
-    self.textureHelp:Hide()
-  end
-end
-
-function UI:BuildAuraRowState(row)
-  local item = row and row.item or nil
-  local spellID = tonumber(item and item.spellID) or 0
-  local issues = {}
-  local status = "ok"
-
-  local spellName = ns.AuraAPI and ns.AuraAPI.GetSpellName and ns.AuraAPI:GetSpellName(spellID) or ""
-  if spellName == "" then
-    spellName = "Spell " .. tostring(spellID)
-  end
-  local auraName = U.Trim(tostring(item and item.displayName or ""))
-  if auraName == "" then
-    auraName = spellName
-  end
-
-  local ruleCount = 0
-  if ns.ProcRules and ns.ProcRules.GetUserRulesForAura and spellID > 0 then
-    local rules = ns.ProcRules:GetUserRulesForAura(spellID) or {}
-    ruleCount = #rules
-  end
-
-  if ns.db and ns.db.options and ns.db.options.rulesOnlyMode == true and ruleCount <= 0 then
-    status = "warn"
-    issues[#issues + 1] = tr("row_warn_missing_rule")
-  end
-  if item and item.iconMode == "custom" and U.Trim(tostring(item.customTexture or "")) == "" then
-    status = "warn"
-    issues[#issues + 1] = tr("row_warn_missing_texture")
-  end
-  if item and (not item.groupID or not (ns.db and ns.db.groups and ns.db.groups[item.groupID])) then
-    status = "warn"
-    issues[#issues + 1] = tr("row_warn_missing_group")
-  end
-
-  local texture = nil
-  if ns.AuraAPI and ns.AuraAPI.GetDisplayTextureForItem then
-    texture = ns.AuraAPI:GetDisplayTextureForItem(item, nil)
-  end
-  if not texture and ns.AuraAPI and ns.AuraAPI.GetSpellTexture then
-    texture = ns.AuraAPI:GetSpellTexture(spellID)
-  end
-  if not texture then
-    texture = 136243
-  end
-
-  local unitLabel = tostring(row and row.unit or "player")
-  unitLabel = unitLabel:gsub("^%l", string.upper)
-  local groupID = tostring(item and item.groupID or "group")
-  local groupName = (ns.db and ns.db.groups and ns.db.groups[groupID] and ns.db.groups[groupID].name) or groupID
-  local statusText = status == "ok" and tr("row_status_ok") or tr("row_status_warn")
-  local statusColor = status == "ok" and "|cff6be39d" or "|cffffaa44"
-  local meta = string.format("%s | %s | rules:%d", unitLabel, groupName, ruleCount)
-
-  return {
-    spellID = spellID,
-    name = auraName,
-    meta = meta,
-    icon = texture,
-    status = status,
-    statusText = statusColor .. statusText .. "|r",
-    issues = issues,
-  }
-end
-
-function UI:RebuildAuraList()
-  local rows = D:ListEntries(self.editFilter:GetText())
-  self.listRows = rows
-  local rowWidth = self:GetListRowWidth()
-  local rowHeight = 24
-
-  for i = 1, #rows do
-    local row = rows[i]
-    local view = self:BuildAuraRowState(row)
-    local btn = self.listButtons[i]
-    if not btn then
-      btn = CreateFrame("Button", nil, self.listContent, "BackdropTemplate")
-      btn:SetSize(rowWidth, rowHeight)
-      btn.bg = btn:CreateTexture(nil, "BACKGROUND")
-      btn.bg:SetAllPoints()
-      self:ApplyListButtonState(btn, "normal")
-      btn.icon = btn:CreateTexture(nil, "ARTWORK")
-      btn.icon:SetSize(18, 18)
-      btn.icon:SetPoint("LEFT", 6, 0)
-      btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-      btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      btn.text:SetPoint("LEFT", btn.icon, "RIGHT", 6, 0)
-      btn.text:SetPoint("RIGHT", -72, 0)
-      btn.text:SetJustifyH("LEFT")
-      btn.text:SetWordWrap(false)
-      btn.meta = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-      btn.meta:SetPoint("BOTTOMLEFT", btn.icon, "BOTTOMRIGHT", 6, 1)
-      btn.meta:SetPoint("BOTTOMRIGHT", -64, 1)
-      btn.meta:SetJustifyH("LEFT")
-      btn.meta:SetWordWrap(false)
-      btn.meta:Hide()
-      btn.status = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      btn.status:SetPoint("RIGHT", -6, 0)
-      btn.status:SetJustifyH("RIGHT")
-      btn:SetScript("OnEnter", function(selfBtn)
-        if selfBtn.key ~= self.selectedKey then
-          self:ApplyListButtonState(selfBtn, "hover")
-        end
-        if selfBtn.rowState and selfBtn.rowState.status == "warn" then
-          GameTooltip:SetOwner(selfBtn, "ANCHOR_RIGHT")
-          GameTooltip:AddLine(selfBtn.rowState.name or "Aura", 1.0, 0.9, 0.2)
-          for ii = 1, #(selfBtn.rowState.issues or {}) do
-            GameTooltip:AddLine("- " .. tostring(selfBtn.rowState.issues[ii]), 1.0, 0.4, 0.4)
-          end
-          GameTooltip:Show()
-        end
-      end)
-      btn:SetScript("OnLeave", function(selfBtn)
-        if selfBtn.key ~= self.selectedKey then
-          self:ApplyListButtonState(selfBtn, "normal")
-        end
-        GameTooltip:Hide()
-      end)
-      btn:SetScript("OnMouseDown", function(selfBtn)
-        self:SelectAura(selfBtn.key)
-      end)
-      self.listButtons[i] = btn
-    else
-      btn:SetSize(rowWidth, rowHeight)
-    end
-
-    btn.key = row.key
-    btn.rowState = view
-    btn:SetPoint("TOPLEFT", 0, -((i - 1) * (rowHeight + 2)))
-    local label = view.name .. " (" .. tostring(view.spellID) .. ")"
-    if #label > 32 then
-      label = label:sub(1, 29) .. "..."
-    end
-    btn.text:SetText(label)
-    btn.meta:SetText("")
-    btn.status:SetText(view.statusText)
-    btn.icon:SetTexture(view.icon)
-
-    if row.key == self.selectedKey and self.editorMode == "edit" then
-      self:ApplyListButtonState(btn, "selected")
-    else
-      self:ApplyListButtonState(btn, "normal")
-    end
-
-    btn:Show()
-  end
-
-  for i = #rows + 1, #self.listButtons do
-    self.listButtons[i]:Hide()
-  end
-
-  self.listContent:SetSize(rowWidth, math.max(32, #rows * (rowHeight + 2)))
-end
-
-function UI:HideAutocomplete()
-  if self.autoFrame then
-    self.autoFrame:Hide()
-  end
-  self.autoRows = {}
-end
-
-function UI:ApplyAutocompleteRow(row)
-  if not row then
-    return
-  end
-  -- Store spellID to avoid locale/name mismatches when resolving.
-  self.editSpell:SetText(tostring(row.id))
-  self.editSpell:HighlightText()
-  self:HideAutocomplete()
-end
-
-function UI:RefreshAutocomplete()
-  if self.suppressAutocomplete then
-    return
-  end
-  local query = U.Trim(self.editSpell:GetText() or "")
-  local numeric = tonumber(query) ~= nil
-  if query == "" or ((not numeric) and #query < 2) then
-    self:HideAutocomplete()
-    return
-  end
-
-  local rows = ns.SpellCatalog:Search(query, 8)
-  if #rows == 0 then
-    self:HideAutocomplete()
-    return
-  end
-
-  self.autoRows = rows
-  local width = 224
-  local rowHeight = 18
-  self.autoFrame:SetSize(width, (#rows * rowHeight) + 6)
-
-  for i = 1, #rows do
-    local row = rows[i]
-    local btn = self.autoButtons[i]
-    if not btn then
-      btn = CreateFrame("Button", nil, self.autoFrame)
-      btn:SetSize(width - 8, rowHeight)
-      btn:SetPoint("TOPLEFT", 4, -((i - 1) * rowHeight) - 3)
-      btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      btn.text:SetPoint("LEFT", 2, 0)
-      btn.text:SetPoint("RIGHT", -2, 0)
-      btn.text:SetJustifyH("LEFT")
-      btn.bg = btn:CreateTexture(nil, "BACKGROUND")
-      btn.bg:SetAllPoints()
-      if ns.UISkin then
-        local r, g, b, a = ns.UISkin:GetListRowColor("normal")
-        btn.bg:SetColorTexture(r, g, b, a)
-      else
-        btn.bg:SetColorTexture(0.08, 0.08, 0.08, 0.65)
-      end
-      btn:SetScript("OnEnter", function(selfBtn)
-        if ns.UISkin then
-          local r, g, b, a = ns.UISkin:GetListRowColor("hover")
-          selfBtn.bg:SetColorTexture(r, g, b, a)
-        else
-          selfBtn.bg:SetColorTexture(0.2, 0.28, 0.45, 0.8)
-        end
-      end)
-      btn:SetScript("OnLeave", function(selfBtn)
-        if ns.UISkin then
-          local r, g, b, a = ns.UISkin:GetListRowColor("normal")
-          selfBtn.bg:SetColorTexture(r, g, b, a)
-        else
-          selfBtn.bg:SetColorTexture(0.08, 0.08, 0.08, 0.65)
-        end
-      end)
-      btn:SetScript("OnMouseDown", function(selfBtn)
-        self:ApplyAutocompleteRow(selfBtn.row)
-      end)
-      self.autoButtons[i] = btn
-    end
-
-    btn.row = row
-    btn.text:SetText(("%s (%d)"):format(row.name or ("Spell " .. tostring(row.id)), row.id or 0))
-    btn:Show()
-  end
-
-  for i = #rows + 1, #self.autoButtons do
-    self.autoButtons[i]:Hide()
-  end
-
-  self.autoFrame:Show()
-end
-
-function UI:ReadSoundRow(state, model)
-  local row = self.soundControls[state]
-  local token = row.dropdown:GetValue()
-  local path = U.Trim(row.pathEdit:GetText() or "")
-  local field = "soundOn" .. state:gsub("^%l", string.upper)
-
-  if token == "file" then
-    if path == "" then
-      return nil, string.format(tr("msg_audio_path_missing"), state)
-    end
-    model[field] = "file:" .. path
-    return true
-  end
-
-  model[field] = token or "default"
-  return true
-end
-
-function UI:CollectFormModel()
-  local barTextureValue = U.Trim((self.editBarTexture and self.editBarTexture:GetText()) or "")
-  if self.ddBarTexturePreset then
-    local presetValue = self.ddBarTexturePreset:GetValue()
-    if type(presetValue) == "string" and presetValue ~= "" and presetValue ~= "custom" then
-      barTextureValue = presetValue
-    end
-  end
-  local model = {
-    spellInput = U.Trim(self.editSpell:GetText() or ""),
-    displayName = U.Trim(self.editAuraName:GetText() or ""),
-    unit = self.ddUnit:GetValue() or "player",
-    groupID = self.ddGroup:GetValue() or "important_procs",
-    onlyMine = self.cbOnlyMine:GetChecked() == true,
-    alert = self.cbAlert:GetChecked() == true,
-    iconMode = self.ddIconMode:GetValue() or "spell",
-    customTexture = U.Trim(self.editTexture:GetText() or ""),
-    barTexture = barTextureValue,
-    timerVisual = self.ddTimerVisual:GetValue() or "icon",
-    customText = U.Trim(self.editCustomText:GetText() or ""),
-    resourceConditionEnabled = self.cbResourceCondition:GetChecked() == true,
-    resourceMinPct = tonumber(U.Trim(self.editResourceMin:GetText() or "")) or 0,
-    resourceMaxPct = tonumber(U.Trim(self.editResourceMax:GetText() or "")) or 100,
-    lowTimeThreshold = tonumber(U.Trim(self.editLowTimeAura:GetText() or "")) or 0,
-    timerAnchor = self.ddTimerAnchor:GetValue() or "BOTTOM",
-    timerOffsetX = tonumber(U.Trim(self.editTimerOffsetX:GetText() or "")) or 0,
-    timerOffsetY = tonumber(U.Trim(self.editTimerOffsetY:GetText() or "")) or -1,
-    customTextAnchor = self.ddCustomAnchor:GetValue() or "TOP",
-    customTextOffsetX = tonumber(U.Trim(self.editCustomOffsetX:GetText() or "")) or 0,
-    customTextOffsetY = tonumber(U.Trim(self.editCustomOffsetY:GetText() or "")) or 2,
-  }
-
-  local customGroupID = safeLower(U.Trim(self.editGroupCustom:GetText() or ""))
-  if customGroupID ~= "" then
-    model.groupID = customGroupID
-  end
-
-  local okGain, errGain = self:ReadSoundRow("gain", model)
-  if not okGain then
-    return nil, errGain
-  end
-
-  local okLow, errLow = self:ReadSoundRow("low", model)
-  if not okLow then
-    return nil, errLow
-  end
-
-  local okExpire, errExpire = self:ReadSoundRow("expire", model)
-  if not okExpire then
-    return nil, errExpire
-  end
-
-  if model.spellInput == "" then
-    return nil, tr("msg_spell_missing")
-  end
-
-  return model
-end
-
-function UI:ApplyModelToForm(model)
-  model = model or D:BuildDefaultCreateModel()
-
-  self.suppressAutocomplete = true
-  self.editSpell:SetText(tostring(model.spellInput or model.spellID or ""))
-  self.editAuraName:SetText(tostring(model.displayName or ""))
-  self.ddUnit:SetValue(D:NormalizeUnit(model.unit))
-
-  self:RefreshGroupDropdown()
-  local options = D:GetGroupOptions()
-  local groupID = model.groupID or "important_procs"
-  if hasOption(options, groupID) then
-    self.ddGroup:SetValue(groupID)
-    self.editGroupCustom:SetText("")
-  else
-    if #options > 0 then
-      self.ddGroup:SetValue(options[1].value)
-    end
-    self.editGroupCustom:SetText(groupID)
-  end
-
-  self.cbOnlyMine:SetChecked(model.onlyMine == true)
-  self.cbAlert:SetChecked(model.alert ~= false)
-  self.ddIconMode:SetValue(model.iconMode == "custom" and "custom" or "spell")
-  self.editTexture:SetText(model.customTexture or "")
-  self.ddTimerVisual:SetValue(tostring(model.timerVisual or "icon"))
-  if self.editBarTexture then
-    self.editBarTexture:SetText(tostring(model.barTexture or ""))
-  end
-  self:SyncBarTexturePresetFromPath(model.barTexture or "")
-  self:RefreshIconCustomVisibility(model.iconMode)
-  self:RefreshBarTextureVisibility(model.timerVisual)
-  self.editCustomText:SetText(tostring(model.customText or ""))
-  self.cbResourceCondition:SetChecked(model.resourceConditionEnabled == true)
-  self.editResourceMin:SetText(tostring(model.resourceMinPct or 0))
-  self.editResourceMax:SetText(tostring(model.resourceMaxPct or 100))
-  local lowTimeValue = tonumber(model.lowTimeThreshold) or 0
-  self.editLowTimeAura:SetText(lowTimeValue > 0 and tostring(lowTimeValue) or "")
-  self.ddTimerAnchor:SetValue(tostring(model.timerAnchor or "BOTTOM"))
-  self.editTimerOffsetX:SetText(tostring(model.timerOffsetX or 0))
-  self.editTimerOffsetY:SetText(tostring(model.timerOffsetY or -1))
-  self.ddCustomAnchor:SetValue(tostring(model.customTextAnchor or "TOP"))
-  self.editCustomOffsetX:SetText(tostring(model.customTextOffsetX or 0))
-  self.editCustomOffsetY:SetText(tostring(model.customTextOffsetY or 2))
-
-  for _, state in ipairs({ "gain", "low", "expire" }) do
-    local token = model["soundOn" .. state:gsub("^%l", string.upper)] or "default"
-    local mode, path = parseSoundToken(token)
-    local row = self.soundControls[state]
-    row.dropdown:SetValue(mode)
-    row.pathEdit:SetText(path or "")
-  end
-  self.suppressAutocomplete = false
-  self:HideAutocomplete()
-  self:SyncRuleAuraBinding()
-  self:RefreshEditorHealth()
-end
-
-function UI:SetEditorTitle(text)
-  self.editorTitle:SetText(text or "Aura")
-end
-
-function UI:RefreshEditorHealth()
-  if not self.editorHealth or not self.editorGuide then
-    return
-  end
-
-  local spellInput = U.Trim((self.editSpell and self.editSpell:GetText()) or "")
-  local spellID = tonumber(spellInput) or nil
-  local inEdit = self.editorMode == "edit" and self.selectedKey ~= nil
-  local hasSpell = spellInput ~= ""
-  local rulesOnly = ns.db and ns.db.options and ns.db.options.rulesOnlyMode == true
-  local ruleCount = 0
-
-  if spellID and spellID > 0 and ns.ProcRules and ns.ProcRules.GetUserRulesForAura then
-    local rules = ns.ProcRules:GetUserRulesForAura(spellID) or {}
-    ruleCount = #rules
-  end
-
-  local ready = true
-  local guide = tr("editor_health_ready")
-  if not hasSpell then
-    ready = false
-    guide = tr("editor_health_spell_missing")
-  elseif rulesOnly and ruleCount <= 0 then
-    ready = false
-    guide = tr("editor_health_rule_missing")
-  end
-
-  local modeLabel = inEdit and tr("editor_health_mode_edit") or tr("editor_health_mode_create")
-  local healthLabel = ready and ("|cff6be39d" .. tr("row_status_ok") .. "|r") or ("|cffffaa44" .. tr("row_status_warn") .. "|r")
-  self.editorHealth:SetText(string.format("%s  |  %s", modeLabel, healthLabel))
-  self.editorGuide:SetText(guide)
-end
-
-function UI:EnterCreateMode()
-  self.editorMode = "create"
-  self.selectedKey = nil
-  self.modelSnapshot = D:BuildDefaultCreateModel()
-  self:SetEditorTitle(tr("editor_new"))
-  self:ApplyModelToForm(self.modelSnapshot)
-  self:RebuildAuraList()
-  self:RefreshRulesList()
-  self:HideAutocomplete()
-  self:RefreshEditorHealth()
-end
-
-function UI:SelectAura(key)
-  local entry = D:ResolveEntry(key)
-  if not entry then
-    self:EnterCreateMode()
-    return
-  end
-
-  self.editorMode = "edit"
-  self.selectedKey = key
-  self.modelSnapshot = D:BuildEditableModel(entry)
-  local titleName = U.Trim(self.modelSnapshot.displayName or "")
-  if titleName == "" then
-    titleName = (self.modelSnapshot.spellName ~= "" and self.modelSnapshot.spellName or tostring(self.modelSnapshot.spellID))
-  end
-  self:SetEditorTitle(string.format(tr("editor_edit"), titleName))
-  self:ApplyModelToForm(self.modelSnapshot)
-  if ns.db and ns.db.options and ns.db.options.uiWorkspace == "auras" then
-    self:SetWorkspaceMode("editor", true)
-  end
-  self:RebuildAuraList()
-  self:RefreshRulesList()
-  self:HideAutocomplete()
-  self:RefreshEditorHealth()
-end
-
-function UI:SaveCurrentAura()
-  local model, err = self:CollectFormModel()
-  if not model then
-    info(err)
-    return
-  end
-
-  -- One form handles both create and edit flows to keep behavior consistent.
-  if self.editorMode == "create" then
-    local key, addErr = D:AddEntry(model)
-    if not key then
-      info(addErr or tr("msg_add_fail"))
-      return
-    end
-    info(tr("msg_add_ok"))
-    self:SelectAura(key)
-    return
-  end
-
-  if not self.selectedKey then
-    info(tr("msg_select_missing"))
-    return
-  end
-
-  local newKey, saveErr = D:UpdateEntry(self.selectedKey, model)
-  if not newKey then
-    info(saveErr or tr("msg_update_fail"))
-    return
-  end
-  info(tr("msg_update_ok"))
-  self:SelectAura(newKey)
-  self:RefreshEditorHealth()
-end
-
-function UI:ResetCurrentForm()
-  if self.editorMode == "edit" and self.selectedKey then
-    self:SelectAura(self.selectedKey)
-    return
-  end
-  self:EnterCreateMode()
-  self:RefreshEditorHealth()
-end
-
-function UI:DeleteSelected()
-  if not self.selectedKey then
-    info(tr("msg_remove_pick"))
-    return
-  end
-  local removed = D:DeleteEntry(self.selectedKey)
-  if removed > 0 then
-    info(tr("msg_remove_ok"))
-  end
-  self:EnterCreateMode()
-  self:RefreshEditorHealth()
-end
-
-function UI:DuplicateSelected()
-  if not self.selectedKey then
-    info(tr("msg_duplicate_pick"))
-    return
-  end
-
-  local entry = D:ResolveEntry(self.selectedKey)
-  if not entry then
-    info(tr("msg_duplicate_missing"))
-    return
-  end
-
-  local model = D:BuildEditableModel(entry)
-  model.spellInput = model.spellID
-  local key, err = D:AddEntry(model)
-  if not key then
-    info(err or tr("msg_duplicate_fail"))
-    return
-  end
-  info(tr("msg_duplicate_ok"))
-  self:SelectAura(key)
-  self:RefreshEditorHealth()
-end
-
-function UI:Refresh()
-  if not self.frame or not self.frame:IsShown() then
-    return
-  end
-  self:EnsureUXOptionsDefaults()
-  self:ApplySkin()
-  self:RefreshQuickState()
-  self:ApplyWorkspaceLayout()
-  self:RefreshGroupDropdown()
-  self:RebuildAuraList()
-
-  if self.editorMode == "edit" and self.selectedKey then
-    local entry = D:ResolveEntry(self.selectedKey)
-    if entry then
-      self:SelectAura(self.selectedKey)
-      return
-    end
-  end
-
-  if self.editorMode ~= "edit" then
-    self:ApplyModelToForm(self.modelSnapshot)
-  else
-    self:EnterCreateMode()
-  end
-  self:ApplyGuidedMode()
-end
-
-function UI:Open()
-  self:BuildFrame()
-
-  if ns.Localization then
-    ns.Localization:EnsureOptionsDefaults(ns.db.options)
-  end
-  if ns.UISkin then
-    ns.UISkin:EnsureOptionsDefaults(ns.db.options)
-  end
-  self:EnsureUXOptionsDefaults()
-  -- Keep default editing experience stable and predictable.
-  ns.db.options.uiWorkspace = "split"
-  -- Le opzioni audio sono tenute coerenti qui prima di leggere/scrivere campi UI.
-  S:EnsureOptionsDefaults(ns.db.options)
-  self:ApplyLocalization()
-  self:ApplySkin()
-
-  self.frame:Show()
-  self:RefreshQuickState()
-  self:ApplyWorkspaceLayout()
-  self:RefreshGroupDropdown()
-  self:RebuildAuraList()
-
-  if self.selectedKey and D:ResolveEntry(self.selectedKey) then
-    self:SelectAura(self.selectedKey)
-    return
-  end
-
-  if #self.listRows > 0 then
-    self:SelectAura(self.listRows[1].key)
-  else
-    self:EnterCreateMode()
-  end
-  self:ApplyGuidedMode()
-end
-
-function UI:Close()
-  if self.frame then
-    self:HideAutocomplete()
-    self.frame:Hide()
-  end
-end

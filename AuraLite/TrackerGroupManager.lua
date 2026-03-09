@@ -124,6 +124,19 @@ local function buildCustomText(row, remaining)
   return text
 end
 
+local function updateCustomText(icon, row, remaining)
+  if not icon or not row then
+    return
+  end
+  if type(row.customText) ~= "string" or row.customText == "" then
+    icon.customText:SetText("")
+    icon.customText:Hide()
+    return
+  end
+  icon.customText:SetText(buildCustomText(row, remaining))
+  icon.customText:SetShown(icon.customText:GetText() ~= "")
+end
+
 local function setIconBorderColor(icon, r, g, b, a)
   if not icon or not icon.borderEdges then
     return
@@ -243,16 +256,25 @@ local function createIcon(parent)
   f.cdBar:SetStatusBarColor(0.2, 0.9, 0.35, 0.95)
   f.cdBar:Hide()
 
-  f.count = f:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    -- Dedicated text layer to keep text readable above status bars/cooldowns.
+  f.textLayer = CreateFrame("Frame", nil, f)
+  f.textLayer:SetAllPoints()
+  f.textLayer:SetFrameLevel(f:GetFrameLevel() + 8)
+
+  f.count = f.textLayer:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+  f.count:SetDrawLayer("OVERLAY", 7)
   f.count:SetPoint("BOTTOMRIGHT", -2, 2)
 
-  f.timer = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.timer = f.textLayer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.timer:SetDrawLayer("OVERLAY", 7)
   f.timer:SetPoint("TOP", f, "BOTTOM", 0, -1)
 
-  f.source = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.source = f.textLayer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.source:SetDrawLayer("OVERLAY", 6)
   f.source:SetPoint("TOPLEFT", 2, -2)
 
-  f.customText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.customText = f.textLayer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.customText:SetDrawLayer("OVERLAY", 6)
   f.customText:SetPoint("BOTTOM", f, "TOP", 0, 2)
   f.customText:SetText("")
 
@@ -310,7 +332,7 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
   local layout = (groupConfig and groupConfig.layout) or {}
   local iconSize = tonumber(layout.iconSize) or 36
   local spacing = tonumber(layout.spacing) or 4
-  local direction = tostring(layout.direction or "RIGHT")
+  local direction = tostring(layout.direction or "RIGHT"):upper()
 
   if ns.db.options.compactMode then
     iconSize = math.max(24, iconSize - 8)
@@ -353,12 +375,20 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
     icon._layoutDirection = direction
     icon:SetSize(iconSize, iconSize)
     icon:ClearAllPoints()
+
     if direction == "LEFT" then
       icon:SetPoint("RIGHT", frame, "RIGHT", -cursor, 0)
+      cursor = cursor + slotWidth + spacing
+    elseif direction == "UP" then
+      icon:SetPoint("BOTTOM", frame, "BOTTOM", 0, cursor)
+      cursor = cursor + iconSize + spacing
+    elseif direction == "DOWN" then
+      icon:SetPoint("TOP", frame, "TOP", 0, -cursor)
+      cursor = cursor + iconSize + spacing
     else
       icon:SetPoint("LEFT", frame, "LEFT", cursor, 0)
+      cursor = cursor + slotWidth + spacing
     end
-    cursor = cursor + slotWidth + spacing
   end
 
   for idx = #entries + 1, #frame.icons do
@@ -369,10 +399,21 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
 
   local contentCount = #entries
   local width = 160
-  if contentCount > 0 then
-    width = math.max(160, cursor - spacing)
-  end
   local height = iconSize + 14
+  if contentCount > 0 then
+    if direction == "UP" or direction == "DOWN" then
+      local maxSlotWidth = iconSize
+      for idx = 1, #entries do
+        local icon = frame.icons[idx]
+        maxSlotWidth = math.max(maxSlotWidth, tonumber(icon and icon._slotWidth) or iconSize)
+      end
+      width = math.max(160, maxSlotWidth)
+      height = math.max(iconSize + 14, (contentCount * (iconSize + spacing)) - spacing + 14)
+    else
+      width = math.max(160, cursor - spacing)
+      height = iconSize + 14
+    end
+  end
   frame:SetSize(width, height)
   return iconSize
 end
@@ -389,7 +430,11 @@ function G:Render(activeByGroup)
     local groupConfig = ns.db.groups[groupID]
     local entries = self.activeByGroup[groupID] or {}
     local frame = self:EnsureGroupFrame(groupID)
-    ns.Dragger:ApplyPosition(frame, groupID)
+    if ns.db and ns.db.locked == true then
+      ns.Dragger:ApplyPosition(frame, groupID)
+    elseif not frame._alPositionApplied then
+      ns.Dragger:ApplyPosition(frame, groupID)
+    end
 
     frame.label:SetText((groupConfig and groupConfig.name) or groupID)
     local iconSize = self:RenderLayout(frame, groupID, entries, groupConfig)
@@ -402,6 +447,16 @@ function G:Render(activeByGroup)
       end
 
       icon.row = row
+      local baseLevel = icon:GetFrameLevel()
+      if icon.cdBar and icon.cdBar.SetFrameLevel then
+        icon.cdBar:SetFrameLevel(baseLevel + 1)
+      end
+      if icon.cooldown and icon.cooldown.SetFrameLevel then
+        icon.cooldown:SetFrameLevel(baseLevel + 2)
+      end
+      if icon.textLayer and icon.textLayer.SetFrameLevel then
+        icon.textLayer:SetFrameLevel(baseLevel + 8)
+      end
       row.groupID = row.groupID or groupID
       row.stateKey = makeRowKey(row, groupID)
       applyIconTexture(icon.icon, row.icon, row.fallbackIcon, row)
@@ -432,11 +487,15 @@ function G:Render(activeByGroup)
         icon.timer:SetPoint("RIGHT", icon.cdBarBG, "RIGHT", -4, 0)
         icon.timer:SetJustifyH("RIGHT")
       else
-        icon.cdBar:SetPoint("BOTTOMLEFT", icon, "BOTTOMLEFT", 1, 1)
-        icon.cdBar:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", -1, 1)
-        icon.cdBar:SetHeight(math.max(4, math.floor(iconSize * 0.16)))
-        icon.cdBarBG:SetPoint("TOPLEFT", icon.cdBar, "TOPLEFT", -1, 1)
-        icon.cdBarBG:SetPoint("BOTTOMRIGHT", icon.cdBar, "BOTTOMRIGHT", 1, -1)
+        icon.cdBar:ClearAllPoints()
+        icon.cdBarBG:ClearAllPoints()
+        local barHeight = math.max(4, math.floor(iconSize * 0.16))
+        -- Keep icon-mode anchors rooted on icon to prevent cdBar/cdBarBG circular dependency.
+        icon.cdBarBG:SetPoint("BOTTOMLEFT", icon, "BOTTOMLEFT", 0, 0)
+        icon.cdBarBG:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 0, 0)
+        icon.cdBarBG:SetHeight(barHeight + 2)
+        icon.cdBar:SetPoint("TOPLEFT", icon.cdBarBG, "TOPLEFT", 1, -1)
+        icon.cdBar:SetPoint("BOTTOMRIGHT", icon.cdBarBG, "BOTTOMRIGHT", -1, 1)
         icon.cooldown:Show()
         icon.cdBar:Hide()
         icon.cdBarBG:Hide()
@@ -446,8 +505,7 @@ function G:Render(activeByGroup)
       icon.timer:SetText("")
       icon.timer:Hide()
       applyTextPosition(icon.customText, icon, row.customTextAnchor, row.customTextOffsetX, row.customTextOffsetY, "TOP", 0, 2)
-      icon.customText:SetText(buildCustomText(row, nil))
-      icon.customText:SetShown(icon.customText:GetText() ~= "")
+      updateCustomText(icon, row, nil)
 
       local previous = prevState[row.stateKey]
       nextState[row.stateKey] = {
@@ -479,6 +537,7 @@ function G:Render(activeByGroup)
       icon:Show()
     end
     local contentCount = #entries
+    frame.activeIconCount = contentCount
 
     if ns.state.editMode or (not ns.db.locked) or contentCount > 0 then
       frame:Show()
@@ -507,8 +566,10 @@ function G:UpdateVisuals()
   local defaultThreshold = tonumber(ns.db.options.lowTimeThreshold) or 3
 
   for _, frame in pairs(self.frames) do
-    for _, icon in ipairs(frame.icons) do
-      local row = icon.row
+    local activeCount = tonumber(frame.activeIconCount) or #frame.icons
+    for idx = 1, activeCount do
+      local icon = frame.icons[idx]
+      local row = icon and icon.row
       if row then
         local state = self.stateByKey[row.stateKey]
         local timerVisual = tostring(row.timerVisual or "icon"):lower()
@@ -522,8 +583,7 @@ function G:UpdateVisuals()
             icon.timer:SetText("")
             icon.timer:Hide()
           end
-          icon.customText:SetText(buildCustomText(row, remaining))
-          icon.customText:SetShown(icon.customText:GetText() ~= "")
+          updateCustomText(icon, row, remaining)
           if hasSideBar then
             local ratio = remaining / row.duration
             if ratio < 0 then
@@ -566,8 +626,7 @@ function G:UpdateVisuals()
         elseif row.canCompute and (not row.duration or row.duration == 0) then
           icon.timer:SetText("")
           icon.timer:Hide()
-          icon.customText:SetText(buildCustomText(row, nil))
-          icon.customText:SetShown(icon.customText:GetText() ~= "")
+          updateCustomText(icon, row, nil)
           icon.cdBar:SetValue(0)
           icon.cdBar:Hide()
           icon.cdBarBG:Hide()
@@ -578,8 +637,7 @@ function G:UpdateVisuals()
         else
           icon.timer:SetText("")
           icon.timer:Hide()
-          icon.customText:SetText(buildCustomText(row, nil))
-          icon.customText:SetShown(icon.customText:GetText() ~= "")
+          updateCustomText(icon, row, nil)
           icon.cdBar:SetValue(0)
           icon.cdBar:Hide()
           icon.cdBarBG:Hide()
@@ -603,3 +661,11 @@ function G:EnsureTicker()
 end
 
 G.UpdateTimers = G.UpdateVisuals
+
+
+
+
+
+
+
+

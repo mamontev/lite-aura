@@ -9,6 +9,9 @@ function D:ApplyPosition(frame, key)
   if not ns.db or not ns.db.positions then
     return
   end
+  if frame and frame._alDragging then
+    return
+  end
   local p = ns.db.positions[key]
   if type(p) ~= "table" then
     return
@@ -19,6 +22,7 @@ function D:ApplyPosition(frame, key)
   end
   frame:ClearAllPoints()
   frame:SetPoint(p.point or "CENTER", UIParent, p.relativePoint or "CENTER", tonumber(p.x) or 0, tonumber(p.y) or 0)
+  frame._alPositionApplied = true
   self.pendingPositions[key] = nil
 end
 
@@ -50,6 +54,7 @@ function D:SavePosition(frame, key)
     x = x,
     y = y,
   }
+  frame._alPositionApplied = true
 end
 
 function D:CanMove()
@@ -104,11 +109,13 @@ function D:MakeMovable(frame, key)
       return
     end
 
+    f._alDragging = true
     f:StartMoving()
   end)
 
   frame:SetScript("OnDragStop", function(f)
     f:StopMovingOrSizing()
+    f._alDragging = false
     self:SavePosition(f, key)
   end)
 
