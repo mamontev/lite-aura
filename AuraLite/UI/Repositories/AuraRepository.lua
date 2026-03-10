@@ -3,6 +3,7 @@ local _, ns = ...
 ns.UIV2 = ns.UIV2 or {}
 local UI = ns.UIV2
 local B = UI.Bindings
+local RuleRepo = UI.RuleRepository
 
 UI.AuraRepository = UI.AuraRepository or {}
 local R = UI.AuraRepository
@@ -129,6 +130,40 @@ function R:CreateDraft()
   return cloneShallow(draft)
 end
 
+function R:DeleteAura(auraId)
+  auraId = tostring(auraId or "")
+  if auraId == "" then
+    return false, "missing aura id"
+  end
+
+  local meta = self._draftMeta[auraId]
+  if meta and meta.isNew then
+    self._drafts[auraId] = nil
+    self._draftMeta[auraId] = nil
+    return true
+  end
+
+  if isRealMode() then
+    local draft = self._drafts[auraId] or ensureDraftFromEntry(auraId)
+    local auraSpellID = tonumber(draft and draft.spellID)
+    if auraSpellID and auraSpellID > 0 and RuleRepo and RuleRepo.DeleteRulesForAura then
+      RuleRepo:DeleteRulesForAura(auraSpellID)
+    end
+
+    if not ns.SettingsData or not ns.SettingsData.DeleteEntry then
+      return false, "delete unavailable"
+    end
+
+    local removed = ns.SettingsData:DeleteEntry(auraId)
+    if tonumber(removed) ~= 1 then
+      return false, "delete failed"
+    end
+  end
+
+  self._drafts[auraId] = nil
+  self._draftMeta[auraId] = nil
+  return true
+end
 function R:SaveDraft(draft)
   if type(draft) ~= "table" then
     return false, nil, "invalid draft"
@@ -145,6 +180,9 @@ function R:SaveDraft(draft)
   end
 
   local model = B:ToSettingsDataModel(draft)
+  if ns.Debug and ns.Debug.Logf then
+    ns.Debug:Logf("AuraRepository SaveDraft id=%s metaSource=%s draft.unit=%s model.unit=%s spellID=%s", tostring(id), tostring((self._draftMeta[id] and self._draftMeta[id].sourceKey) or id), tostring(draft.unit or ""), tostring(model and model.unit or ""), tostring(draft.spellID or ""))
+  end
   local meta = self._draftMeta[id] or { isNew = B:IsDraftID(id), sourceKey = B:IsDraftID(id) and nil or id }
 
   local savedKey, err
@@ -172,3 +210,5 @@ function R:SaveDraft(draft)
 
   return true, savedKey
 end
+
+

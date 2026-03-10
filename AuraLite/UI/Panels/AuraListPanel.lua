@@ -107,12 +107,12 @@ function AuraListPanel:AcquireRow(index, rowType)
     btn.icon:SetPoint("LEFT", 6, 0)
     btn.icon:SetSize(22, 22)
 
-    btn.nameText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    btn.nameText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     btn.nameText:SetPoint("TOPLEFT", btn.icon, "TOPRIGHT", 8, 1)
     btn.nameText:SetPoint("RIGHT", -84, 0)
     btn.nameText:SetJustifyH("LEFT")
 
-    btn.metaText = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    btn.metaText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.metaText:SetPoint("BOTTOMLEFT", btn.icon, "BOTTOMRIGHT", 8, -1)
     btn.metaText:SetPoint("RIGHT", -84, 0)
     btn.metaText:SetJustifyH("LEFT")
@@ -165,7 +165,12 @@ function AuraListPanel:Render()
     else
       btn.auraId = row.id
       btn.icon:SetTexture(row.icon or 134400)
-      btn.nameText:SetText(string.format("%s (%s)", tostring(row.name or "Aura"), tostring(row.spellID or "?")))
+
+      local auraName = tostring(row.name or "")
+      if auraName == "" then
+        auraName = "Aura " .. tostring(row.spellID or "?")
+      end
+      btn.nameText:SetText(string.format("%s (%s)", auraName, tostring(row.spellID or "?")))
       btn.metaText:SetText(string.format("%s | %s", tostring(row.unit or "player"), tostring(row.trigger or "Rule")))
 
       local status = tostring(row.status or "ok")

@@ -7,6 +7,7 @@ local UI = ns.UIV2
 local Panels = UI.Panels
 local E = UI.Events
 local S = UI.State
+local FieldFactory = UI.FieldFactory
 
 local AuraWizard = {}
 AuraWizard.__index = AuraWizard
@@ -39,8 +40,55 @@ local function toSpellID(value)
   return ""
 end
 
+local function soundOptions()
+  if ns.SoundManager and ns.SoundManager.GetDropdownOptions then
+    return ns.SoundManager:GetDropdownOptions(true)
+  end
+  return {
+    { value = "default", label = "Default" },
+    { value = "none", label = "None" },
+  }
+end
+
+local function setDropdownText(dropdown, value, options)
+  value = tostring(value or "")
+  for i = 1, #(options or {}) do
+    local row = options[i]
+    if tostring(row.value) == value then
+      UIDropDownMenu_SetText(dropdown, row.label)
+      return
+    end
+  end
+  UIDropDownMenu_SetText(dropdown, value ~= "" and value or "Choose...")
+end
+
+local function applyUnitMode(model, unit)
+  model.unit = unit or "player"
+  model.triggerType = (model.unit == "target") and "aura" or "cast"
+  if model.triggerType == "aura" then
+    model.actionMode = "produce"
+  end
+end
+
+function AuraWizard:SyncSpellBindings(stepName)
+  self.editAField.key = "editA"
+  self.editAField.widget = "text"
+  self.editBField.key = "editB"
+  self.editBField.widget = "text"
+
+  if stepName == "Type" then
+    self.editBField.key = "spellID"
+    self.editBField.widget = "spellid"
+  elseif stepName == "Trigger" and tostring(self.model.unit or "player") ~= "target" then
+    self.editAField.key = "castSpellIDs"
+    self.editAField.widget = "spellcsv"
+  end
+end
+
 function AuraWizard:RenderStep()
   local stepName = STEPS[self.step] or "Type"
+  local isTargetAura = tostring(self.model.unit or "player") == "target"
+
   self.lblStep:SetText(string.format("Step %d/%d - %s", self.step, #STEPS, stepName))
   self.editA:SetShown(false)
   self.editB:SetShown(false)
@@ -49,6 +97,10 @@ function AuraWizard:RenderStep()
   self.lblA:SetText("")
   self.lblB:SetText("")
   self.review:SetText("")
+  self.stepNote:SetText("")
+  self.stepNote:Hide()
+
+  self:SyncSpellBindings(stepName)
 
   if stepName == "Type" then
     self.lblA:SetText("Aura Name")
@@ -59,21 +111,47 @@ function AuraWizard:RenderStep()
     self.editB:SetText(tostring(self.model.spellID or ""))
     self.editB:SetShown(true)
   elseif stepName == "Trigger" then
-    self.lblA:SetText("WHEN Cast SpellIDs (CSV)")
-    self.editA:SetText(tostring(self.model.castSpellIDs or ""))
-    self.editA:SetShown(true)
+    if isTargetAura then
+      self.lblA:SetText("Target Aura Check")
+      self.stepNote:SetPoint("TOPLEFT", 10, -74)
+      self.stepNote:SetPoint("RIGHT", -18, 0)
+      self.stepNote:SetText("Target tracking is direct: no cast list and no produce/consume rule are required.")
+      self.stepNote:Show()
+    else
+      self.lblA:SetText("WHEN Cast SpellIDs (CSV)")
+      self.editA:SetText(tostring(self.model.castSpellIDs or ""))
+      self.editA:SetShown(true)
+    end
 
-    self.lblB:SetText("Action")
-    self.ddA:SetShown(true)
-    UIDropDownMenu_SetText(self.ddA, self.model.actionMode == "consume" and "Consume" or "Produce")
+    self.lblB:SetText("Track Aura On")
+    self.ddB:SetShown(true)
+    setDropdownText(self.ddB, self.model.unit or "player", {
+      { value = "player", label = "Player" },
+      { value = "target", label = "Target" },
+    })
   elseif stepName == "Display" then
     self.lblA:SetText("Display Mode")
     self.ddA:SetShown(true)
-    UIDropDownMenu_SetText(self.ddA, tostring(self.model.displayMode or "iconbar"))
+    setDropdownText(self.ddA, self.model.displayMode or "iconbar", {
+      { value = "icon", label = "Icon" },
+      { value = "bar", label = "Bar" },
+      { value = "iconbar", label = "Icon + Bar" },
+    })
 
-    self.lblB:SetText("Unit")
-    self.ddB:SetShown(true)
-    UIDropDownMenu_SetText(self.ddB, tostring(self.model.unit or "player"))
+    if isTargetAura then
+      self.lblB:SetText("Target Tracking")
+      self.stepNote:SetPoint("TOPLEFT", 10, -130)
+      self.stepNote:SetPoint("RIGHT", -18, 0)
+      self.stepNote:SetText("Target auras use the real aura presence on the target, so the action selector is disabled here.")
+      self.stepNote:Show()
+    else
+      self.lblB:SetText("Action")
+      self.ddB:SetShown(true)
+      setDropdownText(self.ddB, self.model.actionMode or "produce", {
+        { value = "produce", label = "Produce" },
+        { value = "consume", label = "Consume" },
+      })
+    end
   elseif stepName == "Behavior" then
     self.lblA:SetText("Duration (sec)")
     self.editA:SetText(tostring(self.model.duration or 8))
@@ -84,21 +162,21 @@ function AuraWizard:RenderStep()
     self.editB:SetShown(true)
   elseif stepName == "Sound" then
     self.lblA:SetText("Sound On Show")
-    self.editA:SetText(tostring(self.model.soundOnShow or "default"))
-    self.editA:SetShown(true)
+    self.ddA:SetShown(true)
+    setDropdownText(self.ddA, self.model.soundOnShow or "default", soundOptions())
 
     self.lblB:SetText("Sound On Expire")
-    self.editB:SetText(tostring(self.model.soundOnExpire or "none"))
-    self.editB:SetShown(true)
+    self.ddB:SetShown(true)
+    setDropdownText(self.ddB, self.model.soundOnExpire or "none", soundOptions())
   elseif stepName == "Review" then
     local lines = {
       "Name: " .. tostring(self.model.name or ""),
       "Aura SpellID: " .. tostring(self.model.spellID or ""),
-      "Cast SpellIDs: " .. tostring(self.model.castSpellIDs or ""),
-      "Action: " .. tostring(self.model.actionMode or "produce"),
+      "Track On: " .. tostring(self.model.unit or "player"),
+      "Trigger: " .. (isTargetAura and "Direct target aura" or ("Cast " .. tostring(self.model.castSpellIDs or ""))),
+      "Action: " .. (isTargetAura and "Direct aura tracking" or tostring(self.model.actionMode or "produce")),
       "Display: " .. tostring(self.model.displayMode or "iconbar"),
       "Duration: " .. tostring(self.model.duration or 8),
-      "Unit: " .. tostring(self.model.unit or "player"),
       "Group: " .. tostring(self.model.group or "important_procs"),
     }
     self.review:SetText(table.concat(lines, "\n"))
@@ -115,22 +193,22 @@ function AuraWizard:SyncFromFields()
     self.model.name = tostring(self.editA:GetText() or "")
     self.model.spellID = toSpellID(self.editB:GetText())
   elseif stepName == "Trigger" then
-    self.model.castSpellIDs = tostring(self.editA:GetText() or "")
+    if tostring(self.model.unit or "player") ~= "target" then
+      self.model.castSpellIDs = tostring(self.editA:GetText() or "")
+    end
   elseif stepName == "Behavior" then
     self.model.duration = tonumber(self.editA:GetText()) or 8
     self.model.lowTime = tonumber(self.editB:GetText()) or 3
-  elseif stepName == "Sound" then
-    self.model.soundOnShow = tostring(self.editA:GetText() or "default")
-    self.model.soundOnExpire = tostring(self.editB:GetText() or "none")
   end
 end
 
 function AuraWizard:Open(anchor)
   self.model = UI.Bindings and UI.Bindings:NewDraft("") or {}
   self.model.displayMode = "iconbar"
-  self.model.unit = "player"
   self.model.group = "important_procs"
-  self.model.actionMode = "produce"
+  self.model.soundOnShow = self.model.soundOnShow or "default"
+  self.model.soundOnExpire = self.model.soundOnExpire or "none"
+  applyUnitMode(self.model, "player")
   self.step = 1
   if anchor then
     self.frame:ClearAllPoints()
@@ -144,6 +222,8 @@ function AuraWizard:Create(parent)
   local o = setmetatable({}, self)
   o.step = 1
   o.model = {}
+  o.editAField = { key = "editA", widget = "text" }
+  o.editBField = { key = "editB", widget = "text" }
 
   o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
   o.frame:SetSize(390, 330)
@@ -183,26 +263,34 @@ function AuraWizard:Create(parent)
       return
     end
     local stepName = STEPS[o.step]
-    local function add(value, label)
+    local function add(value, label, onPick)
       local info = UIDropDownMenu_CreateInfo()
       info.text = label
       info.func = function()
-        if stepName == "Trigger" then
-          o.model.actionMode = value
-        elseif stepName == "Display" then
-          o.model.displayMode = value
-        end
+        onPick(value)
         o:RenderStep()
       end
       UIDropDownMenu_AddButton(info, level)
     end
-    if stepName == "Trigger" then
-      add("produce", "Produce")
-      add("consume", "Consume")
-    elseif stepName == "Display" then
-      add("icon", "icon")
-      add("bar", "bar")
-      add("iconbar", "iconbar")
+
+    if stepName == "Display" then
+      add("icon", "Icon", function(value)
+        o.model.displayMode = value
+      end)
+      add("bar", "Bar", function(value)
+        o.model.displayMode = value
+      end)
+      add("iconbar", "Icon + Bar", function(value)
+        o.model.displayMode = value
+      end)
+    elseif stepName == "Sound" then
+      local rows = soundOptions()
+      for i = 1, #rows do
+        local row = rows[i]
+        add(row.value, row.label, function(value)
+          o.model.soundOnShow = value
+        end)
+      end
     end
   end)
 
@@ -214,27 +302,60 @@ function AuraWizard:Create(parent)
       return
     end
     local stepName = STEPS[o.step]
-    if stepName ~= "Display" then
-      return
-    end
-    local function add(value, label)
+    local function add(value, label, onPick)
       local info = UIDropDownMenu_CreateInfo()
       info.text = label
       info.func = function()
-        o.model.unit = value
+        onPick(value)
         o:RenderStep()
       end
       UIDropDownMenu_AddButton(info, level)
     end
-    add("player", "player")
-    add("target", "target")
+
+    if stepName == "Trigger" then
+      add("player", "Player", function(value)
+        applyUnitMode(o.model, value)
+      end)
+      add("target", "Target", function(value)
+        applyUnitMode(o.model, value)
+      end)
+    elseif stepName == "Display" and tostring(o.model.unit or "player") ~= "target" then
+      add("produce", "Produce", function(value)
+        o.model.actionMode = value
+      end)
+      add("consume", "Consume", function(value)
+        o.model.actionMode = value
+      end)
+    elseif stepName == "Sound" then
+      local rows = soundOptions()
+      for i = 1, #rows do
+        local row = rows[i]
+        add(row.value, row.label, function(value)
+          o.model.soundOnExpire = value
+        end)
+      end
+    end
   end)
+
+  o.stepNote = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  o.stepNote:SetJustifyH("LEFT")
+  o.stepNote:SetJustifyV("TOP")
+  o.stepNote:Hide()
 
   o.review = o.frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   o.review:SetPoint("TOPLEFT", 10, -64)
   o.review:SetPoint("RIGHT", -12, 0)
   o.review:SetJustifyH("LEFT")
   o.review:SetJustifyV("TOP")
+
+  if FieldFactory and FieldFactory.AttachSpellResolver then
+    FieldFactory.AttachSpellResolver(o.frame, o.editA, o.editAField, function(key, value)
+      o.model[key] = value
+    end)
+    FieldFactory.AttachSpellResolver(o.frame, o.editB, o.editBField, function(key, value)
+      o.model[key] = value
+    end)
+  end
 
   o.btnPrev = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
   o.btnPrev:SetSize(80, 22)
@@ -296,3 +417,4 @@ end
 
 Panels.AuraWizard = AuraWizard
 UI.AuraWizard = AuraWizard
+

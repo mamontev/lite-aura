@@ -10,6 +10,45 @@ ns.state = ns.state or {
 
 local initialized = false
 
+local function getAddonVersion()
+  if C_AddOns and type(C_AddOns.GetAddOnMetadata) == "function" then
+    local version = C_AddOns.GetAddOnMetadata(addonName, "Version")
+    if type(version) == "string" and version ~= "" then
+      return version
+    end
+  end
+  if type(GetAddOnMetadata) == "function" then
+    local version = GetAddOnMetadata(addonName, "Version")
+    if type(version) == "string" and version ~= "" then
+      return version
+    end
+  end
+  return "unknown"
+end
+
+local function printStartupBanner()
+  local version = getAddonVersion()
+  local line1 = "|cffffd200[AuraLite]|r    _____                        .____    .__  __          "
+  local line2 = "|cffffd200[AuraLite]|r   /  _  \\  __ ______________    |    |   |__|/  |_  ____  "
+  local line3 = "|cffffd200[AuraLite]|r  /  /_\\  \\|  |  \\_  __ \\__  \\   |    |   |  \\   __\\/ __ \\ "
+  local line4 = "|cffffd200[AuraLite]|r /    |    \\  |  /|  | \\/ __ \\_ |    |___|  ||  | \\  ___/ "
+  local line5 = "|cffffd200[AuraLite]|r \\____|__  /____/ |__|  (____  / |_______ \\__||__|  \\___  >"
+  local line6 = string.format("|cffffd200[AuraLite]|r         \\/                  \\/          \\/             \\/  v%s", tostring(version))
+
+  if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage(line1)
+    DEFAULT_CHAT_FRAME:AddMessage(line2)
+    DEFAULT_CHAT_FRAME:AddMessage(line3)
+    DEFAULT_CHAT_FRAME:AddMessage(line4)
+    DEFAULT_CHAT_FRAME:AddMessage(line5)
+    DEFAULT_CHAT_FRAME:AddMessage(line6)
+  end
+
+  if ns.Debug and ns.Debug.Log then
+    ns.Debug:Log(string.format("Startup banner shown. version=%s", tostring(version)))
+  end
+end
+
 function ns:RebuildWatchIndex()
   if not self.db then
     return
@@ -37,6 +76,7 @@ function ns:Initialize()
   if self.OptionsIntegration and self.OptionsIntegration.Register then
     self.OptionsIntegration:Register()
   end
+  printStartupBanner()
   if self.Debug then
     self.Debug:Log("Addon initialized.")
   end
@@ -44,8 +84,11 @@ function ns:Initialize()
 end
 
 function ns:RegisterRuntimeEvents()
-  -- Hard-safe mode: cast success uses hook+poll confirmation, not protected cast events.
+  -- Safe mode: avoid protected cast events that can taint the Blizzard UI.
   self.state.runtimeEventsRegistered = false
+  if self.Debug and self.Debug.Log then
+    self.Debug:Log("Runtime cast events disabled (safe mode).")
+  end
 end
 
 function ns:UnregisterRuntimeEvents()
@@ -84,5 +127,11 @@ ns.frame:RegisterEvent("UI_ERROR_MESSAGE")
 SLASH_AURALITE1 = "/al"
 SLASH_AURALITE2 = "/auralite"
 SlashCmdList.AURALITE = function(msg)
+  if ns.UIV2 and ns.UIV2.Bootstrap and ns.UIV2.Bootstrap.HandleSlash then
+    ns.UIV2.Bootstrap:HandleSlash(msg)
+    return
+  end
   ns.ConfigUI:HandleSlash(msg)
 end
+
+

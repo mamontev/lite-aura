@@ -36,20 +36,34 @@ local function loadSpecOptions(model)
   return { { value = "", label = "Any Spec" } }
 end
 
+local function soundOptions()
+  if ns.SoundManager and ns.SoundManager.GetDropdownOptions then
+    return ns.SoundManager:GetDropdownOptions(true)
+  end
+  return {
+    { value = "default", label = "Default" },
+    { value = "none", label = "None" },
+  }
+end
+
 Schemas.EditorTabs = {
   { key = "Trigger", label = "Trigger", fields = {
+    { key = "unit", label = "Track Aura On", widget = "dropdown", options = {
+      { value = "player", label = "Player" },
+      { value = "target", label = "Target" },
+    } },
     { key = "ruleName", label = "Rule Name", widget = "text", required = false },
     { key = "ruleID", label = "Rule ID", widget = "text", required = false },
-    { key = "castSpellIDs", label = "WHEN Cast SpellIDs (CSV)", widget = "text", required = true },
-    { key = "spellID", label = "THEN Aura SpellID", widget = "text", required = true },
+    { key = "castSpellIDs", label = "WHEN Cast SpellIDs (CSV)", widget = "spellcsv", required = true },
+    { key = "spellID", label = "THEN Aura SpellID", widget = "spellid", required = true },
   } },
   { key = "Conditions", label = "Conditions", fields = {
     { key = "conditionLogic", label = "Condition Logic", widget = "dropdown", options = {
       { value = "all", label = "AND (all)" },
       { value = "any", label = "OR (any)" },
     } },
-    { key = "talentSpellIDs", label = "Talent SpellIDs (CSV)", widget = "text" },
-    { key = "requiredAuraSpellIDs", label = "Required Aura SpellIDs (CSV)", widget = "text" },
+    { key = "talentSpellIDs", label = "Talent SpellIDs (CSV)", widget = "spellcsv" },
+    { key = "requiredAuraSpellIDs", label = "Required Aura SpellIDs (CSV)", widget = "spellcsv" },
     { key = "inCombatOnly", label = "In Combat Only", widget = "checkbox" },
   } },
   { key = "Actions", label = "Actions", fields = {
@@ -61,10 +75,6 @@ Schemas.EditorTabs = {
   } },
   { key = "Display", label = "Display", fields = {
     { key = "name", label = "Aura Name", widget = "text" },
-    { key = "unit", label = "Unit", widget = "dropdown", options = {
-      { value = "player", label = "Player" },
-      { value = "target", label = "Target" },
-    } },
     { key = "group", label = "Group ID", widget = "text" },
     { key = "displayMode", label = "Display Mode", widget = "dropdown", options = {
       { value = "icon", label = "Icon" },
@@ -74,8 +84,8 @@ Schemas.EditorTabs = {
     { key = "lowTime", label = "Low-Time Threshold", widget = "number", min = 0, max = 60 },
   } },
   { key = "Sound", label = "Sound", fields = {
-    { key = "soundOnShow", label = "Sound On Show", widget = "text" },
-    { key = "soundOnExpire", label = "Sound On Expire", widget = "text" },
+    { key = "soundOnShow", label = "Sound On Show", widget = "dropdown", optionsProvider = soundOptions },
+    { key = "soundOnExpire", label = "Sound On Expire", widget = "dropdown", optionsProvider = soundOptions },
   } },
   { key = "Advanced", label = "Advanced", fields = {
     { key = "loadClassToken", label = "Load: Class", widget = "dropdown", optionsProvider = loadClassOptions },
@@ -93,3 +103,4 @@ function Schemas:GetTab(tabKey)
   end
   return self.EditorTabs[1]
 end
+

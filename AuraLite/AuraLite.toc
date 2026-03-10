@@ -39,6 +39,7 @@ UI\UIEvents.lua
 UI\UIState.lua
 UI\ValidationBus.lua
 UI\UIBindings.lua
+UI\SpellInput.lua
 UI\Schemas\EditorTabs.lua
 UI\FieldFactory.lua
 UI\Repositories\AuraRepository.lua
@@ -52,9 +53,5 @@ UI\Panels\AuraWizard.lua
 UI\Panels\GlobalPanel.lua
 UI\Panels\ConfigFrame.lua
 UI\UIBootstrap.lua
-SettingsUI.lua
-SettingsUI.Rules.lua
-SettingsUI.Auras.lua
-SettingsUI.MediaWidgets.lua
 OptionsIntegration.lua
 Core.lua

@@ -12,20 +12,15 @@ B._legacyHookInstalled = B._legacyHookInstalled or false
 local function ensureDbDefaults()
   ns.db = ns.db or {}
   ns.db.settings = ns.db.settings or {}
-  if ns.db.settings.uiV2 == nil then
-    ns.db.settings.uiV2 = false
-  end
+  ns.db.settings.uiV2 = true
 end
 
 function B:IsEnabled()
   ensureDbDefaults()
-  return ns.db and ns.db.settings and ns.db.settings.uiV2 == true
+  return true
 end
 
 function B:OpenConfig()
-  if not self:IsEnabled() then
-    return false
-  end
   if UI.ConfigFrame and UI.ConfigFrame.Open then
     UI.ConfigFrame:Open()
     return true
@@ -34,9 +29,6 @@ function B:OpenConfig()
 end
 
 function B:ToggleConfig()
-  if not self:IsEnabled() then
-    return false
-  end
   if UI.ConfigFrame and UI.ConfigFrame.Toggle then
     UI.ConfigFrame:Toggle()
     return true
@@ -44,11 +36,7 @@ function B:ToggleConfig()
   return false
 end
 
-function B:FallbackOpen(msg)
-  if ns.SettingsUI and ns.SettingsUI.Open then
-    ns.SettingsUI:Open()
-    return
-  end
+function B:FallbackCommand(msg)
   if ns.ConfigUI and ns.ConfigUI.HandleSlash then
     ns.ConfigUI:HandleSlash(msg or "")
   end
@@ -56,12 +44,14 @@ end
 
 function B:HandleSlash(msg)
   local cmd = tostring(msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-  if cmd == "v2" or cmd == "ui2" or cmd == "newui" or cmd == "" then
-    if self:IsEnabled() and self:ToggleConfig() then
+
+  if cmd == "" or cmd == "v2" or cmd == "ui2" or cmd == "newui" or cmd == "config" or cmd == "ui" or cmd == "options" then
+    if self:ToggleConfig() then
       return
     end
   end
-  self:FallbackOpen(msg)
+
+  self:FallbackCommand(msg)
 end
 
 function B:RegisterSlashCommands()
@@ -86,12 +76,10 @@ function B:InstallLegacySlashHook()
 
   local original = ns.ConfigUI.HandleSlash
   ns.ConfigUI.HandleSlash = function(selfRef, msg)
-    if B:IsEnabled() then
-      local normalized = tostring(msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-      if normalized == "" or normalized == "v2" or normalized == "ui2" or normalized == "newui" then
-        if B:ToggleConfig() then
-          return
-        end
+    local normalized = tostring(msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if normalized == "" or normalized == "v2" or normalized == "ui2" or normalized == "newui" or normalized == "config" or normalized == "ui" or normalized == "options" then
+      if B:ToggleConfig() then
+        return
       end
     end
     return original(selfRef, msg)

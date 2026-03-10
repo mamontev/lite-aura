@@ -55,6 +55,16 @@ function B:IsDraftID(auraId)
   return type(auraId) == "string" and auraId:find("^__new__:") ~= nil
 end
 
+function B:IsDirectAuraTracking(draft)
+  if type(draft) ~= "table" then
+    return false
+  end
+  if tostring(draft.triggerType or "") == "aura" then
+    return true
+  end
+  return tostring(draft.unit or "player") == "target"
+end
+
 function B:DraftFromEditableModel(model)
   model = model or {}
   local specList = parseCSVNumbers(model.loadSpecIDs)
@@ -64,9 +74,10 @@ function B:DraftFromEditableModel(model)
     spellID = tostring(model.spellID or ""),
     unit = tostring(model.unit or "player"),
     group = tostring(model.groupID or "important_procs"),
-    triggerType = "cast",
+    triggerType = (tostring(model.unit or "player") == "target") and "aura" or "cast",
     castSpellIDs = "",
     ruleName = "",
+    ruleID = "",
     conditionLogic = "all",
     talentSpellIDs = "",
     requiredAuraSpellIDs = "",
@@ -94,6 +105,7 @@ function B:NewDraft(auraId)
     triggerType = "cast",
     castSpellIDs = "",
     ruleName = "",
+    ruleID = "",
     conditionLogic = "all",
     talentSpellIDs = "",
     requiredAuraSpellIDs = "",
@@ -114,14 +126,18 @@ end
 function B:ToSettingsDataModel(draft)
   draft = draft or {}
   local specIDs = parseCSVNumbers(draft.loadSpecID)
+  local normalizedUnit = trim(draft.unit) ~= "" and trim(draft.unit) or "player"
+  if ns.Debug and ns.Debug.Logf then
+    ns.Debug:Logf("UIBindings ToSettingsDataModel draft.id=%s draft.unit=%s normalized.unit=%s spellID=%s", tostring(draft.id or ""), tostring(draft.unit or ""), tostring(normalizedUnit), tostring(draft.spellID or ""))
+  end
   return {
     spellInput = trim(draft.spellID),
     displayName = trim(draft.name),
-    unit = trim(draft.unit) ~= "" and trim(draft.unit) or "player",
+    unit = normalizedUnit,
     groupID = trim(draft.group) ~= "" and trim(draft.group) or "important_procs",
     loadClassToken = trim(draft.loadClassToken):upper(),
     loadSpecIDs = specIDs,
-    layoutGroupEnabled = false,
+    layoutGroupEnabled = draft.layoutGroupEnabled ~= false,
     instanceUID = trim(draft.instanceUID),
     onlyMine = draft.onlyMine == true,
     alert = true,
@@ -147,6 +163,10 @@ function B:ToSettingsDataModel(draft)
 end
 
 function B:ToRuleModel(draft, auraSpellID)
+  if self:IsDirectAuraTracking(draft) then
+    return nil
+  end
+
   local castIDs = parseCSVNumbers(draft and draft.castSpellIDs)
   if #castIDs == 0 then
     local n = firstNumber(draft and draft.spellID)
@@ -163,11 +183,14 @@ function B:ToRuleModel(draft, auraSpellID)
   local mode = (tostring(draft and draft.actionMode or "produce") == "consume") and "consume" or "produce"
   local baseID = trim((draft and draft.ruleID) or "")
   if baseID == "" then
-    baseID = string.format("ui2_%d_%s", auraID, mode)
+    baseID = string.format("ui2_%d", auraID)
+  else
+    baseID = baseID:gsub("_produce$", ""):gsub("_consume$", "")
   end
+  local finalID = baseID .. "_" .. mode
 
   return {
-    id = baseID,
+    id = finalID,
     name = trim((draft and draft.ruleName) or (draft and draft.name) or ""),
     castSpellIDs = castIDs,
     auraSpellID = auraID,
@@ -179,6 +202,7 @@ function B:ToRuleModel(draft, auraSpellID)
     requiredAuraSpellIDs = parseCSVNumbers(draft and draft.requiredAuraSpellIDs),
     requireInCombat = draft and draft.inCombatOnly == true,
     actionMode = mode,
+    idBase = baseID,
   }
 end
 
@@ -199,7 +223,10 @@ function B:ApplyRuleToDraft(draft, rule)
     out[1] = tostring(tonumber(rule.eventSpellID))
   end
   draft.castSpellIDs = toCSV(out)
-  draft.ruleID = tostring(rule.id or "")
+  draft.triggerType = (#out > 0) and "cast" or (draft.triggerType or "cast")
+
+  local rid = tostring(rule.id or "")
+  draft.ruleID = rid:gsub("_produce$", ""):gsub("_consume$", "")
   draft.ruleName = tostring(rule.name or "")
 
   local thenActions = rule.thenActions or {}
@@ -245,3 +272,6 @@ end
 function B:ParseCSVNumbers(value)
   return parseCSVNumbers(value)
 end
+
+
+

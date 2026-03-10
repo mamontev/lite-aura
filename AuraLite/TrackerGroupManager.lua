@@ -278,6 +278,11 @@ local function createIcon(parent)
   f.customText:SetPoint("BOTTOM", f, "TOP", 0, 2)
   f.customText:SetText("")
 
+  f.nameText = f.textLayer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  f.nameText:SetDrawLayer("OVERLAY", 6)
+  f.nameText:SetJustifyH("LEFT")
+  f.nameText:SetText("")
+
   f.lowGlow = f:CreateTexture(nil, "OVERLAY")
   f.lowGlow:SetAllPoints()
   f.lowGlow:SetColorTexture(1, 0.15, 0.1, 0.0)
@@ -293,6 +298,8 @@ local function createGroupFrame(groupID)
 
   f.label = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   f.label:SetPoint("BOTTOMLEFT", 0, 2)
+  f.label:SetText("")
+  f.label:Hide()
 
   f.back = f:CreateTexture(nil, "BACKGROUND")
   f.back:SetAllPoints()
@@ -436,7 +443,8 @@ function G:Render(activeByGroup)
       ns.Dragger:ApplyPosition(frame, groupID)
     end
 
-    frame.label:SetText((groupConfig and groupConfig.name) or groupID)
+    frame.label:SetText("")
+    frame.label:Hide()
     local iconSize = self:RenderLayout(frame, groupID, entries, groupConfig)
 
     for idx, row in ipairs(entries) do
@@ -470,13 +478,14 @@ function G:Render(activeByGroup)
       local barWidth = tonumber(icon._barWidth) or math.max(90, math.floor(iconSize * 2.6))
       if hasSideBar then
         local barOnLeft = tostring(icon._layoutDirection or "RIGHT"):upper() == "LEFT"
+        local barHeight = 16
         icon.cdBarBG:ClearAllPoints()
+        icon.cdBarBG:SetSize(barWidth, barHeight + 2)
         if barOnLeft then
-          icon.cdBarBG:SetPoint("TOPRIGHT", icon, "TOPLEFT", -6, -1)
+          icon.cdBarBG:SetPoint("CENTER", icon, "CENTER", -6 - (barWidth / 2) - (iconSize / 2), 0)
         else
-          icon.cdBarBG:SetPoint("TOPLEFT", icon, "TOPRIGHT", 6, -1)
+          icon.cdBarBG:SetPoint("CENTER", icon, "CENTER", 6 + (barWidth / 2) + (iconSize / 2), 0)
         end
-        icon.cdBarBG:SetSize(barWidth, iconSize - 2)
         icon.cdBar:ClearAllPoints()
         icon.cdBar:SetPoint("TOPLEFT", icon.cdBarBG, "TOPLEFT", 1, -1)
         icon.cdBar:SetPoint("BOTTOMRIGHT", icon.cdBarBG, "BOTTOMRIGHT", -1, 1)
@@ -506,6 +515,24 @@ function G:Render(activeByGroup)
       icon.timer:Hide()
       applyTextPosition(icon.customText, icon, row.customTextAnchor, row.customTextOffsetX, row.customTextOffsetY, "TOP", 0, 2)
       updateCustomText(icon, row, nil)
+
+      local auraLabel = tostring(row.displayName or "")
+      if auraLabel == "" then
+        auraLabel = (ns.AuraAPI and ns.AuraAPI.GetSpellName and ns.AuraAPI:GetSpellName(row.spellID)) or ("Spell " .. tostring(row.spellID or "?"))
+      end
+      icon.nameText:SetText(auraLabel)
+      icon.nameText:ClearAllPoints()
+      if hasSideBar and icon.cdBarBG and icon.cdBarBG:IsShown() then
+        icon.nameText:SetPoint("LEFT", icon.cdBarBG, "LEFT", 4, 0)
+        icon.nameText:SetPoint("RIGHT", icon.cdBarBG, "RIGHT", -30, 0)
+        icon.nameText:SetJustifyH("LEFT")
+      else
+        icon.nameText:SetPoint("TOP", icon, "BOTTOM", 0, -1)
+        icon.nameText:SetPoint("LEFT", icon, "LEFT", 0, 0)
+        icon.nameText:SetPoint("RIGHT", icon, "RIGHT", 0, 0)
+        icon.nameText:SetJustifyH("CENTER")
+      end
+      icon.nameText:SetShown(auraLabel ~= "")
 
       local previous = prevState[row.stateKey]
       nextState[row.stateKey] = {
@@ -539,7 +566,7 @@ function G:Render(activeByGroup)
     local contentCount = #entries
     frame.activeIconCount = contentCount
 
-    if ns.state.editMode or (not ns.db.locked) or contentCount > 0 then
+    if contentCount > 0 then
       frame:Show()
     else
       frame:Hide()
@@ -593,9 +620,7 @@ function G:UpdateVisuals()
               ratio = 1
             end
             icon.cdBar:SetValue(ratio)
-            local r = 1 - ratio
-            local g = ratio
-            icon.cdBar:SetStatusBarColor(r, g, 0.15, 0.95)
+            icon.cdBar:SetStatusBarColor(0.16, 0.64, 1.0, 0.95)
             icon.cdBar:Show()
             icon.cdBarBG:Show()
           else
@@ -661,6 +686,14 @@ function G:EnsureTicker()
 end
 
 G.UpdateTimers = G.UpdateVisuals
+
+
+
+
+
+
+
+
 
 
 

@@ -6,6 +6,8 @@ ns.UIV2.Widgets = ns.UIV2.Widgets or {}
 local UI = ns.UIV2
 local W = UI.Widgets
 
+local SpellInput = UI.SpellInput
+
 local ConditionTree = {}
 ConditionTree.__index = ConditionTree
 
@@ -38,6 +40,7 @@ function ConditionTree:SetDraft(draft)
   self.editAuras:SetText(self.draft.requiredAuraSpellIDs or "")
   self.cbCombat:SetChecked(self.draft.inCombatOnly == true)
   self:UpdateSummary()
+  self:UpdateHints(false)
 end
 
 function ConditionTree:UpdateSummary()
@@ -60,7 +63,29 @@ function ConditionTree:UpdateSummary()
   self.summary:SetText(table.concat(parts, " + "))
 end
 
+function ConditionTree:UpdateHints(apply)
+  if SpellInput then
+    local normTalent, prevTalent, okTalent = SpellInput:ResolveSpellCSVInput(self.editTalents:GetText())
+    local normAura, prevAura, okAura = SpellInput:ResolveSpellCSVInput(self.editAuras:GetText())
+    self.talentHint:SetText(prevTalent or "")
+    self.auraHint:SetText(prevAura or "")
+    if apply then
+      if okTalent then
+        self.editTalents:SetText(normTalent)
+      end
+      if okAura then
+        self.editAuras:SetText(normAura)
+      end
+    end
+  else
+    self.talentHint:SetText("")
+    self.auraHint:SetText("")
+  end
+end
+
 function ConditionTree:NotifyChanged()
+  self.draft.talentSpellIDs = tostring(self.editTalents:GetText() or "")
+  self.draft.requiredAuraSpellIDs = tostring(self.editAuras:GetText() or "")
   self:UpdateSummary()
   if self.onChanged then
     self.onChanged(self.draft)
@@ -72,7 +97,7 @@ function ConditionTree:Create(parent, onChanged)
   o.onChanged = onChanged
 
   o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-  o.frame:SetHeight(186)
+  o.frame:SetHeight(226)
   createBackdrop(o.frame)
 
   o.title = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -102,32 +127,50 @@ function ConditionTree:Create(parent, onChanged)
 
   local lblTal = o.frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   lblTal:SetPoint("TOPLEFT", 10, -54)
-  lblTal:SetText("Talent SpellIDs (CSV)")
+  lblTal:SetText("Talent SpellIDs (name or CSV)")
 
   o.editTalents = CreateFrame("EditBox", nil, o.frame, "InputBoxTemplate")
   o.editTalents:SetAutoFocus(false)
-  o.editTalents:SetSize(240, 22)
+  o.editTalents:SetSize(280, 22)
   o.editTalents:SetPoint("TOPLEFT", 10, -70)
-  o.editTalents:SetScript("OnTextChanged", function(edit)
-    o.draft.talentSpellIDs = tostring(edit:GetText() or "")
+  o.editTalents:SetScript("OnTextChanged", function()
+    o:UpdateHints(false)
+    o:NotifyChanged()
+  end)
+  o.editTalents:SetScript("OnEditFocusLost", function()
+    o:UpdateHints(true)
     o:NotifyChanged()
   end)
 
+  o.talentHint = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  o.talentHint:SetPoint("TOPLEFT", 10, -94)
+  o.talentHint:SetPoint("RIGHT", -10, 0)
+  o.talentHint:SetJustifyH("LEFT")
+
   local lblAura = o.frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  lblAura:SetPoint("TOPLEFT", 10, -96)
-  lblAura:SetText("Required Aura SpellIDs (CSV)")
+  lblAura:SetPoint("TOPLEFT", 10, -112)
+  lblAura:SetText("Required Aura SpellIDs (name or CSV)")
 
   o.editAuras = CreateFrame("EditBox", nil, o.frame, "InputBoxTemplate")
   o.editAuras:SetAutoFocus(false)
-  o.editAuras:SetSize(240, 22)
-  o.editAuras:SetPoint("TOPLEFT", 10, -112)
-  o.editAuras:SetScript("OnTextChanged", function(edit)
-    o.draft.requiredAuraSpellIDs = tostring(edit:GetText() or "")
+  o.editAuras:SetSize(280, 22)
+  o.editAuras:SetPoint("TOPLEFT", 10, -128)
+  o.editAuras:SetScript("OnTextChanged", function()
+    o:UpdateHints(false)
+    o:NotifyChanged()
+  end)
+  o.editAuras:SetScript("OnEditFocusLost", function()
+    o:UpdateHints(true)
     o:NotifyChanged()
   end)
 
+  o.auraHint = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  o.auraHint:SetPoint("TOPLEFT", 10, -152)
+  o.auraHint:SetPoint("RIGHT", -10, 0)
+  o.auraHint:SetJustifyH("LEFT")
+
   o.cbCombat = CreateFrame("CheckButton", nil, o.frame, "UICheckButtonTemplate")
-  o.cbCombat:SetPoint("TOPLEFT", 260, -72)
+  o.cbCombat:SetPoint("TOPLEFT", 300, -72)
   o.cbCombat:SetScript("OnClick", function(btn)
     o.draft.inCombatOnly = btn:GetChecked() == true
     o:NotifyChanged()
@@ -138,7 +181,7 @@ function ConditionTree:Create(parent, onChanged)
   o.cbCombatLabel:SetText("In combat only")
 
   o.summary = o.frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  o.summary:SetPoint("TOPLEFT", 260, -100)
+  o.summary:SetPoint("TOPLEFT", 300, -100)
   o.summary:SetPoint("RIGHT", -10, 0)
   o.summary:SetJustifyH("LEFT")
   o.summary:SetText("IF AND <none>")

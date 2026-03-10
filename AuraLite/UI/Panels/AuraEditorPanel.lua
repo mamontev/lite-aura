@@ -28,16 +28,29 @@ local function createBackdrop(frame)
   frame:SetBackdropBorderColor(0.12, 0.50, 0.82, 0.90)
 end
 
+local function isDirectAuraTracking(draft)
+  if UI and UI.Bindings and UI.Bindings.IsDirectAuraTracking then
+    return UI.Bindings:IsDirectAuraTracking(draft)
+  end
+  return tostring(draft and draft.unit or "player") == "target"
+end
+
 local function setTabVisual(btn, active)
   if not btn then
     return
   end
+
+  local fs = btn.GetFontString and btn:GetFontString() or btn.Text
   if active then
     btn:SetNormalFontObject("GameFontNormal")
-    btn:SetTextColor(1.0, 0.85, 0.2)
+    if fs and fs.SetTextColor then
+      fs:SetTextColor(1.0, 0.85, 0.2)
+    end
   else
     btn:SetNormalFontObject("GameFontHighlight")
-    btn:SetTextColor(0.8, 0.88, 1.0)
+    if fs and fs.SetTextColor then
+      fs:SetTextColor(0.8, 0.88, 1.0)
+    end
   end
 end
 
@@ -57,7 +70,7 @@ function AuraEditorPanel:ValidateDraft()
     issues[#issues + 1] = { severity = "error", path = "spellID", message = "Aura SpellID is required." }
   end
 
-  if tostring(self.draft.triggerType or "cast") == "cast" and tostring(self.draft.castSpellIDs or "") == "" then
+  if not isDirectAuraTracking(self.draft) and tostring(self.draft.triggerType or "cast") == "cast" and tostring(self.draft.castSpellIDs or "") == "" then
     issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "WHEN cast list is empty." }
   end
 
@@ -78,11 +91,40 @@ function AuraEditorPanel:UpdateHeader()
   self.subtitle:SetText(string.format("SpellID: %s | Unit: %s | Group: %s", tostring(self.draft.spellID or "?"), tostring(self.draft.unit or "player"), tostring(self.draft.group or "-")))
 end
 
+function AuraEditorPanel:ApplyRuleMode(mode)
+  if not self.draft or isDirectAuraTracking(self.draft) then
+    return
+  end
+  mode = (tostring(mode or "produce") == "consume") and "consume" or "produce"
+  self.triggerEditMode = mode
+  self.draft.actionMode = mode
+
+  local auraSpellID = tonumber(self.draft.spellID)
+  local rule = nil
+  if RuleRepo and RuleRepo.GetRuleForAuraByMode and auraSpellID and auraSpellID > 0 then
+    rule = RuleRepo:GetRuleForAuraByMode(auraSpellID, mode)
+  end
+
+  if rule and UI and UI.Bindings and UI.Bindings.ApplyRuleToDraft then
+    UI.Bindings:ApplyRuleToDraft(self.draft, rule)
+  else
+    local base = auraSpellID and ("aura" .. tostring(auraSpellID)) or "aura"
+    self.draft.ruleID = base
+    self.draft.ruleName = (mode == "consume") and "Consume Aura" or "Show Aura"
+    self.draft.castSpellIDs = tostring(self.draft.castSpellIDs or "")
+    self.draft.conditionLogic = self.draft.conditionLogic or "all"
+    self.draft.talentSpellIDs = tostring(self.draft.talentSpellIDs or "")
+    self.draft.requiredAuraSpellIDs = (mode == "consume" and auraSpellID) and tostring(auraSpellID) or tostring(self.draft.requiredAuraSpellIDs or "")
+    self.draft.duration = tonumber(self.draft.duration) or 8
+  end
+
+  if self.ruleBuilder and self.ruleBuilder.SetDraft then
+    self.ruleBuilder:SetDraft(self.draft)
+  end
+end
 function AuraEditorPanel:LoadAura(auraId)
   self.draft = Repo:GetAuraDraft(auraId)
-  if RuleRepo and RuleRepo.ApplyPrimaryRuleToDraft then
-    self.draft = RuleRepo:ApplyPrimaryRuleToDraft(self.draft)
-  end
+  self.triggerEditMode = self.triggerEditMode or "produce"
   self.currentAuraId = self.draft and self.draft.id or auraId
 
   self:UpdateHeader()
@@ -97,6 +139,20 @@ function AuraEditorPanel:OnFieldChanged(key, value)
   end
 
   self.draft[key] = value
+
+  if key == "unit" then
+    self.draft.triggerType = (tostring(value or "player") == "target") and "aura" or "cast"
+    if self.draft.triggerType == "aura" then
+      self.draft.actionMode = "produce"
+    end
+    if S and S.SetDirty then
+      S:SetDirty(true)
+    end
+    self:UpdateHeader()
+    self:ValidateDraft()
+    self:RenderTab(self.currentTab or "Trigger")
+    return
+  end
 
   if key == "loadClassToken" and (self.currentTab == "Advanced" or self.currentTab == "Conditions") then
     self:RenderTab(self.currentTab)
@@ -145,9 +201,10 @@ function AuraEditorPanel:ClearTabContent()
 end
 
 function AuraEditorPanel:RenderGenericFields(tab, yStart)
+  local fields = tab.fields or tab or {}
   local y = yStart
-  for i = 1, #(tab.fields or {}) do
-    local field = tab.fields[i]
+  for i = 1, #fields do
+    local field = fields[i]
     local widget = FieldFactory:CreateField(self.content, field, self.draft, function(fKey, fValue)
       self:OnFieldChanged(fKey, fValue)
     end)
@@ -179,44 +236,114 @@ function AuraEditorPanel:RenderTab(tabKey)
 
   local y = -12
 
-  if tabKey == "Trigger" and Widgets.RuleBuilderWidget and Widgets.RuleBuilderWidget.Create then
-    self.ruleBuilder = Widgets.RuleBuilderWidget:Create(self.content, function()
-      if S and S.SetDirty then
-        S:SetDirty(true)
+  if tabKey == "Trigger" then
+    if isDirectAuraTracking(self.draft) then
+      local infoFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
+      createBackdrop(infoFrame)
+      infoFrame:SetHeight(72)
+      infoFrame:SetPoint("TOPLEFT", 12, y)
+      infoFrame:SetPoint("RIGHT", -14, 0)
+
+      local info = infoFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      info:SetPoint("TOPLEFT", 10, -10)
+      info:SetPoint("RIGHT", -10, 0)
+      info:SetJustifyH("LEFT")
+      info:SetText("Target auras are tracked directly on the target. Cast triggers and Produce/Consume rules are disabled for this mode.")
+
+      self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
+      y = y - 82
+    elseif Widgets.RuleBuilderWidget and Widgets.RuleBuilderWidget.Create then
+      local modeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
+      createBackdrop(modeFrame)
+      modeFrame:SetHeight(34)
+      modeFrame:SetPoint("TOPLEFT", 12, y)
+      modeFrame:SetPoint("RIGHT", -14, 0)
+
+      local modeLabel = modeFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+      modeLabel:SetPoint("LEFT", 10, 0)
+      modeLabel:SetText("Editing Rule:")
+
+      local btnShow = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
+      btnShow:SetSize(128, 22)
+      btnShow:SetPoint("LEFT", modeLabel, "RIGHT", 8, 0)
+      btnShow:SetText("Show / Produce")
+
+      local btnConsume = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
+      btnConsume:SetSize(128, 22)
+      btnConsume:SetPoint("LEFT", btnShow, "RIGHT", 6, 0)
+      btnConsume:SetText("Consume / Hide")
+
+      local activeMode = (tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "consume") and "consume" or "produce"
+      if not self.ruleBuilder or not self.ruleBuilder.frame then
+        self:ApplyRuleMode(activeMode)
       end
-      self:ValidateDraft()
-      self:RenderTab("Trigger")
-    end)
-    self.ruleBuilder.frame:SetPoint("TOPLEFT", 12, y)
-    self.ruleBuilder.frame:SetPoint("RIGHT", -14, 0)
-    self.ruleBuilder.frame:Show()
-    self.ruleBuilder:SetDraft(self.draft)
-    y = y - self.ruleBuilder.frame:GetHeight() - 10
 
-    local descFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
-    createBackdrop(descFrame)
-    descFrame:SetHeight(56)
-    descFrame:SetPoint("TOPLEFT", 12, y)
-    descFrame:SetPoint("RIGHT", -14, 0)
+      local function refreshModeButtons()
+        local isConsume = tostring(self.triggerEditMode or "produce") == "consume"
+        setTabVisual(btnShow, not isConsume)
+        setTabVisual(btnConsume, isConsume)
+      end
 
-    local lbl = descFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    lbl:SetPoint("TOPLEFT", 10, -8)
-    lbl:SetText("Persisted rule")
+      btnShow:SetScript("OnClick", function()
+        self:ApplyRuleMode("produce")
+        if S and S.SetDirty then
+          S:SetDirty(true)
+        end
+        self:RenderTab("Trigger")
+      end)
+      btnConsume:SetScript("OnClick", function()
+        self:ApplyRuleMode("consume")
+        if S and S.SetDirty then
+          S:SetDirty(true)
+        end
+        self:RenderTab("Trigger")
+      end)
+      refreshModeButtons()
 
-    local text = descFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    text:SetPoint("TOPLEFT", 10, -26)
-    text:SetPoint("RIGHT", -10, 0)
-    text:SetJustifyH("LEFT")
+      self.fieldWidgets[#self.fieldWidgets + 1] = modeFrame
+      y = y - 40
 
-    local desc = ""
-    local sid = tonumber(self.draft.spellID)
-    if sid and sid > 0 and RuleRepo and RuleRepo.DescribeRuleForAura then
-      desc = RuleRepo:DescribeRuleForAura(sid)
+      self.ruleBuilder = Widgets.RuleBuilderWidget:Create(self.content, function()
+        if S and S.SetDirty then
+          S:SetDirty(true)
+        end
+        self:ValidateDraft()
+        self:RenderTab("Trigger")
+      end)
+      self.ruleBuilder.frame:SetPoint("TOPLEFT", 12, y)
+      self.ruleBuilder.frame:SetPoint("RIGHT", -14, 0)
+      self.ruleBuilder.frame:Show()
+      self.ruleBuilder:SetDraft(self.draft)
+      y = y - self.ruleBuilder.frame:GetHeight() - 10
+
+      local descFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
+      createBackdrop(descFrame)
+      descFrame:SetHeight(98)
+      descFrame:SetPoint("TOPLEFT", 12, y)
+      descFrame:SetPoint("RIGHT", -14, 0)
+
+      local lbl = descFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+      lbl:SetPoint("TOPLEFT", 10, -8)
+      lbl:SetText("Persisted rules for this aura")
+
+      local text = descFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+      text:SetPoint("TOPLEFT", 10, -24)
+      text:SetPoint("RIGHT", -10, 0)
+      text:SetJustifyH("LEFT")
+
+      local desc = ""
+      local sid = tonumber(self.draft.spellID)
+      if sid and sid > 0 and RuleRepo and RuleRepo.DescribeRuleForAura then
+        desc = RuleRepo:DescribeRuleForAura(sid)
+      end
+      if desc == "" then
+        desc = "No persisted rules yet. Create one Show rule and one Consume rule from the selector above, then Save Aura."
+      end
+      text:SetText(desc)
+
+      self.fieldWidgets[#self.fieldWidgets + 1] = descFrame
+      y = y - 106
     end
-    text:SetText(desc ~= "" and desc or "No persisted rule yet. Save aura to apply trigger rule.")
-
-    self.fieldWidgets[#self.fieldWidgets + 1] = descFrame
-    y = y - 64
   elseif tabKey == "Conditions" and Widgets.ConditionTreeWidget and Widgets.ConditionTreeWidget.Create then
     self.conditionTree = Widgets.ConditionTreeWidget:Create(self.content, function()
       if S and S.SetDirty then
@@ -233,7 +360,26 @@ function AuraEditorPanel:RenderTab(tabKey)
   end
 
   if tabKey ~= "Conditions" then
-    y = self:RenderGenericFields(tab, y)
+    local fields = tab.fields or {}
+    if isDirectAuraTracking(self.draft) and tabKey == "Trigger" then
+      local filtered = {}
+      for i = 1, #fields do
+        local key = fields[i].key
+        if key ~= "ruleName" and key ~= "ruleID" and key ~= "castSpellIDs" then
+          filtered[#filtered + 1] = fields[i]
+        end
+      end
+      fields = filtered
+    elseif isDirectAuraTracking(self.draft) and tabKey == "Actions" then
+      local filtered = {}
+      for i = 1, #fields do
+        if fields[i].key ~= "actionMode" then
+          filtered[#filtered + 1] = fields[i]
+        end
+      end
+      fields = filtered
+    end
+    y = self:RenderGenericFields(fields, y)
   end
 
   self.content:SetHeight(math.max(360, -y + 20))
@@ -247,6 +393,33 @@ function AuraEditorPanel:SelectTab(tabKey)
   self:RenderTab(tabKey)
 end
 
+function AuraEditorPanel:DeleteCurrent()
+  if not self.draft or not self.draft.id or tostring(self.draft.id) == "" then
+    V:SetStatus("warn", "No aura selected.")
+    return
+  end
+
+  local deleted, err = Repo and Repo.DeleteAura and Repo:DeleteAura(self.draft.id)
+  if not deleted then
+    V:SetStatus("error", tostring(err or "Delete failed"))
+    return
+  end
+
+  self.currentAuraId = nil
+  self.draft = nil
+  self:UpdateHeader()
+  self:ClearTabContent()
+  if S and S.SetDirty then
+    S:SetDirty(false)
+  end
+  if S and S.SetSelectedAura then
+    S:SetSelectedAura(nil, "delete")
+  end
+  V:SetStatus("ok", "Aura deleted.")
+  if E then
+    E:Emit(E.Names.FILTER_CHANGED, { key = "delete", value = true })
+  end
+end
 function AuraEditorPanel:SaveCurrent()
   if not self.draft then
     return
@@ -284,6 +457,7 @@ function AuraEditorPanel:Create(parent)
   local o = setmetatable({}, self)
   o.fieldWidgets = {}
   o.currentTab = "Trigger"
+  o.triggerEditMode = "produce"
 
   o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
   o.frame:SetAllPoints()
@@ -342,11 +516,19 @@ function AuraEditorPanel:Create(parent)
   end)
 
   o.btnReset = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-  o.btnReset:SetSize(110, 24)
+  o.btnReset:SetSize(90, 24)
   o.btnReset:SetPoint("LEFT", o.btnSave, "RIGHT", 8, 0)
   o.btnReset:SetText("Reset")
   o.btnReset:SetScript("OnClick", function()
     o:LoadAura(o.currentAuraId)
+  end)
+
+  o.btnDelete = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
+  o.btnDelete:SetSize(90, 24)
+  o.btnDelete:SetPoint("LEFT", o.btnReset, "RIGHT", 8, 0)
+  o.btnDelete:SetText("Delete")
+  o.btnDelete:SetScript("OnClick", function()
+    o:DeleteCurrent()
   end)
 
   if E then
@@ -395,3 +577,5 @@ function AuraEditorPanel:Create(parent)
 end
 
 Panels.AuraEditorPanel = AuraEditorPanel
+
+

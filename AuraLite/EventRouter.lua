@@ -4,11 +4,13 @@ ns.EventRouter = ns.EventRouter or {}
 local E = ns.EventRouter
 E.lastProcessedCast = E.lastProcessedCast or {}
 E.lastCooldownRefresh = E.lastCooldownRefresh or 0
-E.ruleCastPollState = E.ruleCastPollState or {}
-E.pendingCastAttempts = E.pendingCastAttempts or {}
+E.castResolverStates = E.castResolverStates or {}
+E.castResolverTokenCounter = E.castResolverTokenCounter or 0
+E.castResolverLastConfirmAt = E.castResolverLastConfirmAt or {}
+E.castResolverGlobalGateUntil = E.castResolverGlobalGateUntil or 0
+E.castResolverFailGateUntilBySpell = E.castResolverFailGateUntilBySpell or {}
 E.hookedTriggerSet = E.hookedTriggerSet or {}
 E.hookedTriggerRevision = E.hookedTriggerRevision or -1
-E.lastUiErrorAt = E.lastUiErrorAt or 0
 E.lastRawAttempt = E.lastRawAttempt or nil
 E.lastRefreshSummary = E.lastRefreshSummary or { key = "", at = 0 }
 
@@ -21,6 +23,27 @@ local function trimSafe(text)
 end
 
 local processPlayerCast
+local getActiveGlobalCooldownEndAt
+local isSpellOffGlobalCooldown
+local getResolverGateEndAt
+
+local RESOLVER_ATTRIBUTION_WINDOW = 0.08
+local RESOLVER_MAX_AGE = 0.45
+local RESOLVER_RESTRICTED_MIN_AGE = 0.12
+local RESOLVER_RESTRICTED_MAX_AGE = 0.35
+local RESOLVER_CONFIRM_DEDUPE = 0.20
+local RESOLVER_DUPLICATE_OPEN_WINDOW = 0.18
+local RESOLVER_BLOCKED_REUSE_WINDOW = 0.04
+local RESOLVER_GCD_REUSE_MARGIN = 0.03
+local RESOLVER_GCD_FALLBACK_DURATION = 0.75
+local RESOLVER_FAIL_GATE_DURATION = 0.10
+
+-- Conservative off-GCD overrides. We can expand this list as we validate
+-- concrete spells in logs or from curated references.
+local OFF_GCD_SPELLS = {
+  [2565] = true,   -- Shield Block
+  [23920] = true,  -- Spell Reflection
+}
 
 local function getSpellDebugName(spellID)
   spellID = tonumber(spellID)
@@ -306,6 +329,231 @@ function E:RefreshHookedTriggerSet()
   self.hookedTriggerRevision = revision
 end
 
+local function nextResolverToken(self)
+  self.castResolverTokenCounter = (tonumber(self.castResolverTokenCounter) or 0) + 1
+  return self.castResolverTokenCounter
+end
+
+local function getResolverStates(self)
+  self.castResolverStates = self.castResolverStates or {}
+  return self.castResolverStates
+end
+
+local function logResolverOutcome(state, outcome, detail, now)
+  if type(state) ~= "table" then
+    return
+  end
+  now = tonumber(now) or GetTime()
+  ns.Debug:Logf(
+    "CastResolver outcome=%s token=%d spellID=%d name=%s detail=%s age=%.2f",
+    tostring(outcome or "unknown"),
+    tonumber(state.attemptToken) or 0,
+    tonumber(state.spellID) or 0,
+    tostring(getSpellDebugName(state.spellID)),
+    tostring(detail or "none"),
+    math.max(0, now - (tonumber(state.attemptAt) or 0))
+  )
+end
+
+local function expireResolverState(self, state, reason, now)
+  if type(state) ~= "table" then
+    return
+  end
+  local states = getResolverStates(self)
+  local current = states[state.spellID]
+  if current ~= state then
+    return
+  end
+  state.status = "expired"
+  ns.Debug:Logf(
+    "CastResolver attempt_expire token=%d spellID=%d reason=%s age=%.2f",
+    tonumber(state.attemptToken) or 0,
+    tonumber(state.spellID) or 0,
+    tostring(reason or "expired"),
+    math.max(0, (tonumber(now) or GetTime()) - (tonumber(state.attemptAt) or 0))
+  )
+  logResolverOutcome(state, "cast expired unresolved", tostring(reason or "expired"), now)
+  states[state.spellID] = nil
+end
+
+local function blockResolverState(self, state, reason, now)
+  if type(state) ~= "table" or state.status ~= "attempted" then
+    return false
+  end
+  local states = getResolverStates(self)
+  if states[state.spellID] ~= state then
+    return false
+  end
+  state.status = "blocked"
+  state.lastErrorAt = tonumber(now) or GetTime()
+  state.blockReason = tostring(reason or "ui_error")
+  ns.Debug:Logf(
+    "CastResolver attempt_block token=%d spellID=%d reason=%s age=%.2f",
+    tonumber(state.attemptToken) or 0,
+    tonumber(state.spellID) or 0,
+    tostring(state.blockReason),
+    math.max(0, (tonumber(state.lastErrorAt) or 0) - (tonumber(state.attemptAt) or 0))
+  )
+  logResolverOutcome(state, "cast failed by game", tostring(state.blockReason), now)
+  self.castResolverFailGateUntilBySpell = self.castResolverFailGateUntilBySpell or {}
+  self.castResolverFailGateUntilBySpell[state.spellID] = (tonumber(now) or GetTime()) + RESOLVER_FAIL_GATE_DURATION
+  states[state.spellID] = nil
+  return true
+end
+
+local function confirmResolverState(self, state, sourceTag, now)
+  if type(state) ~= "table" or state.status ~= "attempted" then
+    return false
+  end
+  local states = getResolverStates(self)
+  if states[state.spellID] ~= state then
+    return false
+  end
+  now = tonumber(now) or GetTime()
+  self.castResolverLastConfirmAt = self.castResolverLastConfirmAt or {}
+  local lastConfirm = tonumber(self.castResolverLastConfirmAt[state.spellID]) or 0
+  if (now - lastConfirm) < RESOLVER_CONFIRM_DEDUPE then
+    expireResolverState(self, state, "duplicate_confirm", now)
+    return false
+  end
+  self.castResolverLastConfirmAt[state.spellID] = now
+  state.status = "confirmed"
+  state.lastConfirmAt = now
+  ns.Debug:Logf(
+    "CastResolver attempt_confirm token=%d spellID=%d via=%s age=%.2f restricted=%s",
+    tonumber(state.attemptToken) or 0,
+    tonumber(state.spellID) or 0,
+    tostring(sourceTag or state.sourceTag or "resolver"),
+    math.max(0, now - (tonumber(state.attemptAt) or 0)),
+    tostring(state.restricted == true)
+  )
+  logResolverOutcome(state, "cast confirmed", tostring(sourceTag or state.sourceTag or "resolver"), now)
+  if state.offGCD ~= true then
+    local gateUntil = tonumber(state.gcdEndAt) or 0
+    local usedFallback = false
+    if gateUntil <= now then
+      gateUntil, usedFallback = getResolverGateEndAt(now)
+    end
+    if gateUntil and gateUntil > now then
+      self.castResolverGlobalGateUntil = math.max(tonumber(self.castResolverGlobalGateUntil) or 0, gateUntil)
+      ns.Debug:Verbosef(
+        "CastResolver global_gate spellID=%d until=%.2f remaining=%.2f fallback=%s",
+        tonumber(state.spellID) or 0,
+        tonumber(self.castResolverGlobalGateUntil) or 0,
+        math.max(0, (tonumber(self.castResolverGlobalGateUntil) or 0) - now),
+        tostring(usedFallback == true)
+      )
+    end
+  end
+  states[state.spellID] = nil
+  processPlayerCast(self, state.spellID, sourceTag or state.sourceTag or "resolver")
+  return true
+end
+
+local function openResolverState(self, spellID, sourceTag, now)
+  local states = getResolverStates(self)
+  local previous = states[spellID]
+  local offGCD = isSpellOffGlobalCooldown(spellID)
+  local gcdEndAt = nil
+  if not offGCD then
+    gcdEndAt = getResolverGateEndAt(now)
+  end
+  local openDelta = math.abs((tonumber(now) or GetTime()) - (tonumber(previous and previous.attemptAt) or 0))
+  if type(previous) == "table"
+    and previous.status == "attempted"
+    and tostring(previous.sourceTag or "") == tostring(sourceTag or "HOOK")
+    and openDelta <= RESOLVER_DUPLICATE_OPEN_WINDOW
+  then
+    ns.Debug:Verbosef(
+      "CastResolver attempt_reuse token=%d spellID=%d source=%s state=%s",
+      tonumber(previous.attemptToken) or 0,
+      tonumber(spellID) or 0,
+      tostring(sourceTag or "HOOK"),
+      tostring(previous.status or "unknown")
+    )
+    return previous
+  end
+  if type(previous) == "table"
+    and previous.status == "attempted"
+    and tostring(previous.sourceTag or "") == tostring(sourceTag or "HOOK")
+    and gcdEndAt
+  then
+    ns.Debug:Verbosef(
+      "CastResolver attempt_reuse token=%d spellID=%d source=%s state=%s until_gcd=%.2f",
+      tonumber(previous.attemptToken) or 0,
+      tonumber(spellID) or 0,
+      tostring(sourceTag or "HOOK"),
+      tostring(previous.status or "unknown"),
+      math.max(0, gcdEndAt - (tonumber(now) or GetTime()))
+    )
+    return previous
+  end
+  if type(previous) == "table"
+    and previous.status == "blocked"
+    and tostring(previous.sourceTag or "") == tostring(sourceTag or "HOOK")
+    and openDelta <= RESOLVER_BLOCKED_REUSE_WINDOW
+  then
+    ns.Debug:Verbosef(
+      "CastResolver attempt_reuse token=%d spellID=%d source=%s state=%s",
+      tonumber(previous.attemptToken) or 0,
+      tonumber(spellID) or 0,
+      tostring(sourceTag or "HOOK"),
+      tostring(previous.status or "unknown")
+    )
+    return previous
+  end
+  if type(previous) == "table"
+    and previous.status == "blocked"
+    and tostring(previous.sourceTag or "") == tostring(sourceTag or "HOOK")
+    and gcdEndAt
+  then
+    ns.Debug:Verbosef(
+      "CastResolver attempt_reuse token=%d spellID=%d source=%s state=%s until_gcd=%.2f",
+      tonumber(previous.attemptToken) or 0,
+      tonumber(spellID) or 0,
+      tostring(sourceTag or "HOOK"),
+      tostring(previous.status or "unknown"),
+      math.max(0, gcdEndAt - (tonumber(now) or GetTime()))
+    )
+    return previous
+  end
+
+  local token = nextResolverToken(self)
+  if type(previous) == "table" then
+    ns.Debug:Logf(
+      "CastResolver attempt_supersede old=%d new=%d spellID=%d prev=%s",
+      tonumber(previous.attemptToken) or 0,
+      tonumber(token) or 0,
+      tonumber(spellID) or 0,
+      tostring(previous.status or "unknown")
+    )
+  end
+  local state = {
+    spellID = spellID,
+    attemptAt = tonumber(now) or GetTime(),
+    gcdEndAt = gcdEndAt,
+    sourceTag = tostring(sourceTag or "HOOK"),
+    restricted = ns.AuraAPI:IsSecretCooldownsRestricted(spellID),
+    offGCD = offGCD,
+    attemptToken = token,
+    lastErrorAt = 0,
+    lastConfirmAt = 0,
+    status = "attempted",
+    blockReason = nil,
+    restrictedFallbackUsed = false,
+  }
+  states[spellID] = state
+  ns.Debug:Logf(
+    "CastResolver attempt_open token=%d spellID=%d source=%s restricted=%s offGCD=%s",
+    tonumber(token) or 0,
+    tonumber(spellID) or 0,
+    tostring(sourceTag or "HOOK"),
+    tostring(state.restricted == true),
+    tostring(state.offGCD == true)
+  )
+  return state
+end
+
 local function queueCastAttempt(self, spellID, sourceTag)
   spellID = normalizeQueuedSpellID(spellID)
   if not spellID or spellID <= 0 then
@@ -314,11 +562,47 @@ local function queueCastAttempt(self, spellID, sourceTag)
 
   self:RefreshHookedTriggerSet()
   local tracked = self.hookedTriggerSet and self.hookedTriggerSet[spellID] == true
+  local now = GetTime()
+  local state = nil
+  if tracked then
+    local failGateUntilBySpell = self.castResolverFailGateUntilBySpell or {}
+    local failGateUntil = tonumber(failGateUntilBySpell[spellID]) or 0
+    local globalGateUntil = tonumber(self.castResolverGlobalGateUntil) or 0
+    if globalGateUntil > now and not isSpellOffGlobalCooldown(spellID) then
+      ns.Debug:Verbosef(
+        "CastResolver attempt_suppressed spellID=%d source=%s reason=global_gate remaining=%.2f",
+        tonumber(spellID) or 0,
+        tostring(sourceTag or "HOOK"),
+        math.max(0, globalGateUntil - now)
+      )
+      logResolverOutcome({
+        attemptToken = 0,
+        spellID = spellID,
+        attemptAt = now,
+      }, "cast suppressed by gcd gate", tostring(sourceTag or "HOOK"), now)
+    elseif failGateUntil > now then
+      ns.Debug:Verbosef(
+        "CastResolver attempt_suppressed spellID=%d source=%s reason=fail_gate remaining=%.2f",
+        tonumber(spellID) or 0,
+        tostring(sourceTag or "HOOK"),
+        math.max(0, failGateUntil - now)
+      )
+      logResolverOutcome({
+        attemptToken = 0,
+        spellID = spellID,
+        attemptAt = now,
+      }, "cast suppressed by fail gate", tostring(sourceTag or "HOOK"), now)
+    else
+      state = openResolverState(self, spellID, sourceTag, now)
+    end
+  end
+
   self.lastRawAttempt = {
     spellID = spellID,
     source = tostring(sourceTag or "HOOK"),
     tracked = tracked == true,
-    at = GetTime(),
+    at = now,
+    attemptToken = state and state.attemptToken or nil,
   }
   ns.Debug:Throttled(
     "cast-attempt-raw-" .. tostring(spellID) .. "-" .. tostring(sourceTag or "HOOK"),
@@ -328,36 +612,6 @@ local function queueCastAttempt(self, spellID, sourceTag)
     tostring(getSpellDebugName(spellID)),
     tostring(sourceTag or "HOOK"),
     tostring(tracked)
-  )
-  if not tracked then
-    return
-  end
-
-  local queue = self.pendingCastAttempts or {}
-  self.pendingCastAttempts = queue
-  local now = GetTime()
-  local last = queue[#queue]
-  if last and last.spellID == spellID and (now - (last.at or 0)) < 0.05 then
-    ns.Debug:Verbosef("Skip duplicate cast attempt spellID=%d source=%s", spellID, tostring(sourceTag or "HOOK"))
-    return
-  end
-  if #queue >= 20 then
-    table.remove(queue, 1)
-  end
-
-  queue[#queue + 1] = {
-    spellID = spellID,
-    at = now,
-    source = tostring(sourceTag or "HOOK"),
-    restricted = ns.AuraAPI:IsSecretCooldownsRestricted(spellID),
-  }
-  ns.Debug:Logf(
-    "Cast attempt queued spellID=%d name=%s source=%s q=%d restricted=%s",
-    spellID,
-    tostring(getSpellDebugName(spellID)),
-    tostring(sourceTag or "HOOK"),
-    #queue,
-    tostring(ns.AuraAPI:IsSecretCooldownsRestricted(spellID))
   )
 end
 
@@ -382,6 +636,46 @@ local function getRawGlobalCooldownData()
     startTime = startTime,
     duration = duration,
   }
+end
+
+isSpellOffGlobalCooldown = function(spellID)
+  spellID = tonumber(spellID)
+  if not spellID or spellID <= 0 then
+    return false
+  end
+  local profileOverrides = ns.db and ns.db.offGCDSpellOverrides
+  if type(profileOverrides) == "table" and profileOverrides[spellID] ~= nil then
+    return profileOverrides[spellID] == true
+  end
+  return OFF_GCD_SPELLS[spellID] == true
+end
+
+getActiveGlobalCooldownEndAt = function(now)
+  local gcdData = getRawGlobalCooldownData()
+  if type(gcdData) ~= "table" then
+    return nil
+  end
+
+  now = tonumber(now) or GetTime()
+  local startTime = tonumber(gcdData.startTime) or 0
+  local duration = tonumber(gcdData.duration) or 0
+  local endAt = startTime + duration
+  if startTime <= 0 or duration <= 0.05 then
+    return nil
+  end
+  if now >= (endAt - RESOLVER_GCD_REUSE_MARGIN) then
+    return nil
+  end
+  return endAt
+end
+
+getResolverGateEndAt = function(now)
+  now = tonumber(now) or GetTime()
+  local gateUntil = getActiveGlobalCooldownEndAt(now)
+  if gateUntil and gateUntil > now then
+    return gateUntil, false
+  end
+  return now + RESOLVER_GCD_FALLBACK_DURATION, true
 end
 
 local function isGlobalCooldownOnlyForSpell(spellCooldown, gcdData)
@@ -418,12 +712,12 @@ function E:EnsureFallbackPoller()
       return
     end
     if not (ns.state and ns.state.runtimeEventsRegistered == true) then
-      local confirmed = self:ConfirmPendingCastAttempts()
-      if confirmed then
-        return
-      end
       local triggered = self:PollRuleCastEdges()
       if triggered then
+        return
+      end
+      local confirmed = self:ConfirmPendingCastAttempts()
+      if confirmed then
         return
       end
     end
@@ -475,7 +769,7 @@ function E:EnsureCastHooks()
   end
 
   self.castHooksInstalled = true
-  ns.Debug:Log("Cast hooks installed (attempt queue + confirmation).")
+  ns.Debug:Log("Cast hooks installed (cast resolver active).")
 end
 
 function E:BuildRowsForUnit(unit)
@@ -487,6 +781,7 @@ function E:BuildRowsForUnit(unit)
 
   for _, item in ipairs(list) do
     if isAuraLoadAllowed(item, playerClassToken, playerSpecID) then
+      local directAuraTracking = unit ~= "player"
       local selectedInUnlock = isSelectedAuraInUnlock(unit, item)
       local effectiveGroupID = resolveDisplayGroupID(unit, item)
       if selectedInUnlock then
@@ -494,7 +789,7 @@ function E:BuildRowsForUnit(unit)
         ensureIndependentGroup(effectiveGroupID, tostring(item and item.groupID or "important_procs"), item)
       end
       local aura = nil
-      if not rulesOnlyMode then
+      if directAuraTracking or not rulesOnlyMode then
         aura = ns.AuraAPI:GetAuraBySpellID(unit, item.spellID)
       end
 
@@ -515,7 +810,7 @@ function E:BuildRowsForUnit(unit)
       end
       local cooldown = nil
       local cooldownRestricted = false
-      if (not rulesOnlyMode) and (not aura) and unit == "player" then
+      if (not directAuraTracking) and (not rulesOnlyMode) and (not aura) and unit == "player" then
         cooldownRestricted = ns.AuraAPI:IsSecretCooldownsRestricted(item.spellID)
         if cooldownRestricted then
           cooldown = getEstimatedCooldown(item.spellID)
@@ -586,34 +881,7 @@ function E:BuildRowsForUnit(unit)
           soundOnExpire = item.soundOnExpire or "default",
           isPlaceholder = false,
         }
-      elseif selectedInUnlock then
-        local fake = ns.TestMode:BuildPlaceholder(item, unit)
-        fake.groupID = effectiveGroupID
-        fake.displayName = item.displayName or ""
-        fake.customText = item.customText or ""
-        fake.timerVisual = item.timerVisual or "icon"
-        fake.barTexture = item.barTexture or ""
-        fake.timerAnchor = item.timerAnchor or "BOTTOM"
-        fake.timerOffsetX = tonumber(item.timerOffsetX) or 0
-        fake.timerOffsetY = tonumber(item.timerOffsetY) or -1
-        fake.customTextAnchor = item.customTextAnchor or "TOP"
-        fake.customTextOffsetX = tonumber(item.customTextOffsetX) or 0
-        fake.customTextOffsetY = tonumber(item.customTextOffsetY) or 2
-        fake.resourceConditionEnabled = item.resourceConditionEnabled == true
-        fake.resourceMinPct = tonumber(item.resourceMinPct) or 0
-        fake.resourceMaxPct = tonumber(item.resourceMaxPct) or 100
-        fake.lowTimeThreshold = tonumber(item.lowTimeThreshold) or 0
-        fake.soundOnGain = item.soundOnGain or "default"
-        fake.soundOnLow = item.soundOnLow or "default"
-        fake.soundOnExpire = item.soundOnExpire or "default"
-        fake.iconMode = item.iconMode or "spell"
-        fake.customTexture = item.customTexture or ""
-        fake.icon = ns.AuraAPI:GetDisplayTextureForItem(item, nil)
-        fake.fallbackIcon = ns.AuraAPI:SelectBestTexture(ns.AuraAPI:GetSpellTexture(item.spellID), 136243)
-        fake.isPlaceholder = true
-        rowsByGroup[effectiveGroupID] = rowsByGroup[effectiveGroupID] or {}
-        rowsByGroup[effectiveGroupID][#rowsByGroup[effectiveGroupID] + 1] = fake
-      elseif ns.TestMode:IsEnabled() then
+      elseif selectedInUnlock or ns.TestMode:IsEnabled() or (ns.db and ns.db.locked == false) then
         local fake = ns.TestMode:BuildPlaceholder(item, unit)
         fake.groupID = effectiveGroupID
         fake.displayName = item.displayName or ""
@@ -811,21 +1079,22 @@ end
 
 function E:UI_ERROR_MESSAGE(msgType, message)
   local now = GetTime()
-
-  local affectsTrackedQueue = true
   local raw = self.lastRawAttempt
-  if raw and (now - (tonumber(raw.at) or 0)) <= 0.25 and raw.tracked == false then
-    affectsTrackedQueue = false
-  end
+  local rawSpellID = tonumber(raw and raw.spellID)
+  local rawToken = tonumber(raw and raw.attemptToken)
+  local affectsTrackedResolver = false
 
-  if affectsTrackedQueue then
-    self.lastUiErrorAt = now
+  if raw and raw.tracked == true and rawSpellID and rawToken and (now - (tonumber(raw.at) or 0)) <= RESOLVER_ATTRIBUTION_WINDOW then
+    local state = self.castResolverStates and self.castResolverStates[rawSpellID] or nil
+    if state and tonumber(state.attemptToken) == rawToken then
+      affectsTrackedResolver = blockResolverState(self, state, "ui_error", now) == true
+    end
   end
 
   ns.Debug:Logf(
     "Event UI_ERROR_MESSAGE type=%s affectsTracked=%s rawSpell=%s rawTracked=%s msg=%s",
     tostring(msgType),
-    tostring(affectsTrackedQueue),
+    tostring(affectsTrackedResolver),
     tostring(raw and raw.spellID or "nil"),
     tostring(raw and raw.tracked == true),
     tostring(message)
@@ -871,70 +1140,37 @@ function E:PollRuleCastEdges()
   if ns.state and ns.state.runtimeEventsRegistered == true then
     return false
   end
-  if not ns.ProcRules or not ns.ProcRules.GetTriggerSpellIDs then
-    return false
-  end
 
-  local queue = self.pendingCastAttempts
-  if type(queue) ~= "table" or #queue == 0 then
+  local states = self.castResolverStates
+  if type(states) ~= "table" or not next(states) then
     return false
   end
 
   local now = GetTime()
-  local pendingBySpell = {}
-  for i = #queue, 1, -1 do
-    local attempt = queue[i]
-    local age = now - (tonumber(attempt and attempt.at) or 0)
-    if not attempt or age > 1.20 then
-      table.remove(queue, i)
-    elseif age <= 0.70 then
-      local sid = tonumber(attempt.spellID)
-      if sid and sid > 0 then
-        pendingBySpell[sid] = true
-      end
-    end
-  end
-  if not next(pendingBySpell) then
-    return false
-  end
-
-  self:RefreshHookedTriggerSet()
   local triggered = false
-  self.ruleCastPollState = self.ruleCastPollState or {}
   local gcdData = getRawGlobalCooldownData()
 
-  for spellID in pairs(pendingBySpell) do
-    if self.hookedTriggerSet and self.hookedTriggerSet[spellID] then
-      local state = self.ruleCastPollState[spellID]
-      if not state then
-        state = { onCd = false, startTime = 0, lastFire = 0 }
-        self.ruleCastPollState[spellID] = state
-      end
-
+  for spellID, state in pairs(states) do
+    local age = now - (tonumber(state and state.attemptAt) or 0)
+    if type(state) ~= "table" or age > RESOLVER_MAX_AGE then
+      expireResolverState(self, state, "timeout", now)
+    elseif state.status == "attempted" then
       local cd = ns.AuraAPI:GetSpellCooldownData(spellID)
-      local onCd = cd ~= nil
-      local gcdOnly = onCd and isGlobalCooldownOnlyForSpell(cd, gcdData)
-      if gcdOnly then
-        onCd = false
-      end
-      local startTime = onCd and (tonumber(cd.startTime) or 0) or 0
-      local nearStart = onCd and startTime > 0 and (now - startTime) >= -0.05 and (now - startTime) <= 0.45
-      local startedNow = onCd and (not state.onCd) and nearStart
-      local restarted = onCd and state.onCd and startTime > ((state.startTime or 0) + 0.05) and nearStart
-      local fire = startedNow or restarted
-
-      state.onCd = onCd
-      state.startTime = startTime
-
-      if fire and (now - (state.lastFire or 0)) > 0.25 then
-        state.lastFire = now
-        processPlayerCast(self, spellID, "POLL_COOLDOWN_EDGE")
-        for i = #queue, 1, -1 do
-          if tonumber(queue[i] and queue[i].spellID) == spellID then
-            table.remove(queue, i)
+      local cdStart = cd and tonumber(cd.startTime) or 0
+      local cdNearAttempt = cdStart > 0 and cdStart >= ((state.attemptAt or 0) - 0.08) and cdStart <= (now + 0.05)
+      if cdNearAttempt and not isGlobalCooldownOnlyForSpell(cd, gcdData) then
+        if confirmResolverState(self, state, "HOOK_CD_CONFIRM", now) then
+          triggered = true
+        end
+      else
+        local gcdStart = gcdData and tonumber(gcdData.startTime) or 0
+        local gcdNearAttempt = gcdStart > 0 and gcdStart >= ((state.attemptAt or 0) - 0.08) and gcdStart <= (now + 0.05)
+        local blockedForAttempt = tonumber(state.lastErrorAt or 0) >= (state.attemptAt or 0)
+        if gcdNearAttempt and state.restricted ~= true and state.offGCD ~= true and not blockedForAttempt then
+          if confirmResolverState(self, state, "HOOK_GCD_CONFIRM", now) then
+            triggered = true
           end
         end
-        triggered = true
       end
     end
   end
@@ -943,68 +1179,32 @@ function E:PollRuleCastEdges()
 end
 
 function E:ConfirmPendingCastAttempts()
-  local queue = self.pendingCastAttempts
-  if type(queue) ~= "table" or #queue == 0 then
+  local states = self.castResolverStates
+  if type(states) ~= "table" or not next(states) then
     return false
   end
 
   local now = GetTime()
   local confirmedAny = false
 
-  local gcd = getRawGlobalCooldownData()
-
-  for i = #queue, 1, -1 do
-    local attempt = queue[i]
-    local age = now - (tonumber(attempt and attempt.at) or 0)
-    if not attempt or age > 1.20 then
-      table.remove(queue, i)
-    else
-      local confirmed = false
-      local sourceTag = nil
-
-      local cd = ns.AuraAPI:GetSpellCooldownData(attempt.spellID)
-      if cd then
-        local startTime = tonumber(cd.startTime) or 0
-        if startTime > 0 and startTime >= ((attempt.at or 0) - 0.08) and startTime <= (now + 0.05) then
-          confirmed = true
-          sourceTag = "HOOK_CD_CONFIRM"
-        end
-      end
-
-      if (not confirmed) and gcd then
-        local gcdStart = tonumber(gcd.startTime) or 0
-        if gcdStart > 0 and gcdStart >= ((attempt.at or 0) - 0.08) and gcdStart <= (now + 0.05) then
-          confirmed = true
-          sourceTag = "HOOK_GCD_CONFIRM"
-        end
-      end
-
-      if (not confirmed)
-        and InCombatLockdown()
-        and attempt.restricted == true
-        and age >= 0.08
-        and age <= 0.55
+  for spellID, state in pairs(states) do
+    local age = now - (tonumber(state and state.attemptAt) or 0)
+    if type(state) ~= "table" or age > RESOLVER_MAX_AGE then
+      expireResolverState(self, state, "timeout", now)
+    elseif state.status == "blocked" then
+      -- Blocked attempts remain invalid until superseded or expired.
+    elseif state.status == "attempted" then
+      local blockedForAttempt = tonumber(state.lastErrorAt or 0) >= (state.attemptAt or 0)
+      if state.restricted == true
+        and state.restrictedFallbackUsed ~= true
+        and age >= RESOLVER_RESTRICTED_MIN_AGE
+        and age <= RESOLVER_RESTRICTED_MAX_AGE
+        and not blockedForAttempt
       then
-        local lastErrAt = tonumber(self.lastUiErrorAt) or 0
-        local hasRecentError = lastErrAt >= ((attempt.at or 0) - 0.02)
-        if not hasRecentError then
-          confirmed = true
-          sourceTag = "HOOK_RESTRICTED_NOERROR"
+        state.restrictedFallbackUsed = true
+        if confirmResolverState(self, state, "HOOK_RESTRICTED_NOERROR", now) then
+          confirmedAny = true
         end
-      end
-
-      if confirmed then
-        ns.Debug:Logf(
-          "Cast attempt confirmed spellID=%d name=%s via=%s age=%.2f restricted=%s",
-          tonumber(attempt.spellID) or 0,
-          tostring(getSpellDebugName(attempt.spellID)),
-          tostring(sourceTag or attempt.source or "HOOK_CONFIRM"),
-          tonumber(age) or 0,
-          tostring(attempt.restricted == true)
-        )
-        processPlayerCast(self, attempt.spellID, sourceTag or attempt.source or "HOOK_CONFIRM")
-        table.remove(queue, i)
-        confirmedAny = true
       end
     end
   end
@@ -1067,6 +1267,8 @@ processPlayerCast = function(self, spellID, sourceTag)
       spellID,
       tostring(sourceTag or "cast")
     )
+    self:RefreshAll()
+    return
   end
 
   handleCooldownEvent(self)
@@ -1109,6 +1311,18 @@ function E:COMBAT_LOG_EVENT_UNFILTERED()
   end
   processPlayerCast(self, spellID, "COMBAT_LOG_EVENT_UNFILTERED")
 end
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

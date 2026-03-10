@@ -347,6 +347,59 @@ function A:GetDisplayTextureForItem(item, aura)
   return self:SelectBestTexture(auraIcon, spellIcon, 136243)
 end
 
+local function scanUnitAurasBySpellID(unit, spellID)
+  spellID = tonumber(spellID)
+  if not unit or not spellID then
+    return nil
+  end
+
+  local function matchesAuraSpellID(aura)
+    local auraSpellID = aura and (aura.spellId or aura.spellID)
+    if not A:IsSafeNumber(auraSpellID) then
+      return false
+    end
+    return tonumber(auraSpellID) == spellID
+  end
+
+  if AuraUtil and type(AuraUtil.ForEachAura) == "function" then
+    local found = nil
+    local function visitor(aura)
+      if matchesAuraSpellID(aura) then
+        found = aura
+        return true
+      end
+      return false
+    end
+    pcall(AuraUtil.ForEachAura, unit, "HARMFUL", nil, visitor, true)
+    if found then
+      return found
+    end
+    pcall(AuraUtil.ForEachAura, unit, "HELPFUL", nil, visitor, true)
+    if found then
+      return found
+    end
+  end
+
+  if C_UnitAuras and type(C_UnitAuras.GetAuraDataByIndex) == "function" then
+    local function scanFilter(filter)
+      for index = 1, 255 do
+        local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, index, filter)
+        if not ok or aura == nil then
+          break
+        end
+        if matchesAuraSpellID(aura) then
+          return aura
+        end
+      end
+      return nil
+    end
+
+    return scanFilter("HARMFUL") or scanFilter("HELPFUL")
+  end
+
+  return nil
+end
+
 function A:GetAuraBySpellID(unit, spellID)
   if not unit or not spellID then
     return nil
@@ -354,19 +407,19 @@ function A:GetAuraBySpellID(unit, spellID)
 
   if C_UnitAuras and C_UnitAuras.GetUnitAuraBySpellID then
     local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, spellID)
-    if ok then
+    if ok and aura then
       return aura
     end
   end
 
   if unit == "player" and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
     local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
-    if ok then
+    if ok and aura then
       return aura
     end
   end
 
-  return nil
+  return scanUnitAurasBySpellID(unit, spellID)
 end
 
 function A:IsPlayerAuraPresentBySpellID(spellID)
@@ -457,3 +510,4 @@ function A:GetSourceLabel(aura)
   local txt = tostring(sourceUnit):upper()
   return txt:sub(1, 3)
 end
+

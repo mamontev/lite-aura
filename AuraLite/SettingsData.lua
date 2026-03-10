@@ -497,7 +497,7 @@ function D:BuildDefaultCreateModel()
     unit = "player",
     instanceUID = "",
     groupID = "important_procs",
-    layoutGroupEnabled = false,
+    layoutGroupEnabled = true,
     loadClassToken = "",
     loadSpecIDs = {},
     onlyMine = true,
@@ -556,7 +556,7 @@ function D:BuildWatchItemFromModel(model)
     spellID = spellID,
     instanceUID = instanceUID,
     groupID = groupID,
-    layoutGroupEnabled = normalizeBool(model.layoutGroupEnabled, false),
+    layoutGroupEnabled = normalizeBool(model.layoutGroupEnabled, true),
     loadClassToken = normalizeClassToken(model.loadClassToken),
     loadSpecIDs = normalizeSpecIDList(model.loadSpecIDs),
     onlyMine = normalizeBool(model.onlyMine, true),
@@ -647,6 +647,9 @@ function D:DeleteEntry(key)
   ns.Debug:Logf("UI DeleteEntry key=%s", tostring(key))
   return 1
 end
+
+
+
 
 
 

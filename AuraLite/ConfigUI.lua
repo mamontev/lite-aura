@@ -520,16 +520,11 @@ function C:HandleSlash(rawInput)
   local cmd = (tokens[1] or ""):lower()
 
   if cmd == "config" or cmd == "ui" or cmd == "options" then
-    if cmd == "options" and ns.OptionsIntegration and ns.OptionsIntegration.OpenBlizzardCategory then
-      ns.OptionsIntegration:OpenBlizzardCategory()
+    if ns.UIV2 and ns.UIV2.ConfigFrame and ns.UIV2.ConfigFrame.Toggle then
+      ns.UIV2.ConfigFrame:Toggle()
       return
     end
-
-    if ns.SettingsUI and ns.SettingsUI.Open then
-      ns.SettingsUI:Open()
-    else
-      msg("Settings UI not loaded.")
-    end
+    msg("UI V2 not loaded.")
     return
   end
 
@@ -753,3 +748,4 @@ function C:HandleSlash(rawInput)
 
   printHelp()
 end
+

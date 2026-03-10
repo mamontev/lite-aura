@@ -47,20 +47,21 @@ function GlobalPanel:Create(parent)
   title:SetPoint("TOPLEFT", 10, -8)
   title:SetText("Global")
 
-  o.btnSettings = makeButton(o.frame, "Open Classic Settings", 210, function()
-    if ns.SettingsUI and ns.SettingsUI.Open then
-      ns.SettingsUI:Open()
+  o.btnSettings = makeButton(o.frame, "Open Interface Options", 210, function()
+    if ns.OptionsIntegration and ns.OptionsIntegration.OpenBlizzardCategory then
+      ns.OptionsIntegration:OpenBlizzardCategory()
+    elseif ns.UIV2 and ns.UIV2.ConfigFrame and ns.UIV2.ConfigFrame.Open then
+      ns.UIV2.ConfigFrame:Open()
     end
     o.frame:Hide()
   end)
   o.btnSettings:SetPoint("TOPLEFT", 14, -30)
 
   o.btnLocalization = makeButton(o.frame, "Localization", 210, function()
-    if ns.SettingsUI and ns.SettingsUI.OpenLocalizationPanel then
-      ns.SettingsUI:OpenLocalizationPanel()
-    elseif ns.SettingsUI and ns.SettingsUI.Open then
-      ns.SettingsUI:Open()
+    if ns.OptionsIntegration and ns.OptionsIntegration.OpenBlizzardCategory then
+      ns.OptionsIntegration:OpenBlizzardCategory()
     end
+    o.frame:Hide()
   end)
   o.btnLocalization:SetPoint("TOPLEFT", 14, -58)
 
