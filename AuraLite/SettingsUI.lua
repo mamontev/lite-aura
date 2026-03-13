@@ -276,11 +276,6 @@ function UI:EnsureUXOptionsDefaults()
   else
     options.rulesOnlyMode = options.rulesOnlyMode == true
   end
-  if options.aggregateByGroup == nil then
-    options.aggregateByGroup = false
-  else
-    options.aggregateByGroup = options.aggregateByGroup == true
-  end
   local workspace = tostring(options.uiWorkspace or "split")
   if not validWorkspaceModes[workspace] then
     workspace = "split"
@@ -761,12 +756,6 @@ function UI:BuildGlobalOptionsPanel()
   end)
   self.cbRulesOnly:SetPoint("TOPLEFT", 16, -152)
 
-  self.cbAggregateGroup = C:CreateCheckBox(f, tr("lbl_aggregate_group"), function(checked)
-    ns.db.options.aggregateByGroup = checked == true
-    ns.EventRouter:RefreshAll()
-  end)
-  self.cbAggregateGroup:SetPoint("TOPLEFT", 16, -180)
-
   self.lblChannel = C:CreateLabel(f, tr("lbl_channel"), "GameFontHighlightSmall")
   self.lblChannel:SetPoint("TOPLEFT", 282, -40)
   self.ddChannel = C:CreateDropdown(f, 130)
@@ -1075,13 +1064,10 @@ function UI:BuildFrame()
   self.cbAlert = C:CreateCheckBox(right, tr("lbl_low_alert"), nil)
   self.cbAlert:SetPoint("TOPLEFT", 394, -208)
   if self.cbAlert.text then self.cbAlert.text:SetWidth(180) end
-  self.cbMoveWithGroup = C:CreateCheckBox(right, tr("lbl_move_with_group"), nil)
-  self.cbMoveWithGroup:SetPoint("TOPLEFT", 394, -234)
-  if self.cbMoveWithGroup.text then self.cbMoveWithGroup.text:SetWidth(220) end
   self.lblLowTimeAura = C:CreateLabel(right, tr("lbl_low_time_aura"), "GameFontHighlightSmall")
-  self.lblLowTimeAura:SetPoint("TOPLEFT", 394, -262)
+  self.lblLowTimeAura:SetPoint("TOPLEFT", 394, -234)
   self.editLowTimeAura = C:CreateEditBox(right, 56, 20, false)
-  self.editLowTimeAura:SetPoint("TOPLEFT", 394, -278)
+  self.editLowTimeAura:SetPoint("TOPLEFT", 394, -250)
   self.editLowTimeAura:SetNumeric(false)
 
   self.lblLoadClass = C:CreateLabel(right, tr("lbl_load_class"), "GameFontHighlightSmall")
@@ -1223,7 +1209,7 @@ function UI:BuildFrame()
     self.lblUnit, self.ddUnit,
     self.lblGroup, self.ddGroup,
     self.lblGroupCustom, self.editGroupCustom,
-    self.cbOnlyMine, self.cbAlert, self.cbMoveWithGroup,
+    self.cbOnlyMine, self.cbAlert,
     self.lblLowTimeAura, self.editLowTimeAura,
     self.cbResourceCondition, self.lblResourceRange,
     self.editResourceMin, self.editResourceMax, self.lblResourceCurrent,
@@ -1394,9 +1380,6 @@ function UI:ApplyLocalization()
   if self.cbRulesOnly and self.cbRulesOnly.text then
     self.cbRulesOnly.text:SetText(tr("lbl_rules_only"))
   end
-  if self.cbAggregateGroup and self.cbAggregateGroup.text then
-    self.cbAggregateGroup.text:SetText(tr("lbl_aggregate_group"))
-  end
   if self.lblChannel then
     self.lblChannel:SetText(tr("lbl_channel"))
   end
@@ -1416,9 +1399,6 @@ function UI:ApplyLocalization()
   self.lblGroupCustom:SetText(tr("lbl_group_custom"))
   self.cbOnlyMine.text:SetText(tr("lbl_only_mine"))
   self.cbAlert.text:SetText(tr("lbl_low_alert"))
-  if self.cbMoveWithGroup and self.cbMoveWithGroup.text then
-    self.cbMoveWithGroup.text:SetText(tr("lbl_move_with_group"))
-  end
   self.lblLowTimeAura:SetText(tr("lbl_low_time_aura"))
   if self.lblLoadClass then self.lblLoadClass:SetText(tr("lbl_load_class")) end
   if self.lblLoadSpec then self.lblLoadSpec:SetText(tr("lbl_load_spec")) end
@@ -1666,9 +1646,6 @@ function UI:RefreshQuickState()
   self.cbGuided:SetChecked(ns.db.options.uiGuidedMode == true)
   if self.cbRulesOnly then
     self.cbRulesOnly:SetChecked(ns.db.options.rulesOnlyMode == true)
-  end
-  if self.cbAggregateGroup then
-    self.cbAggregateGroup:SetChecked(ns.db.options.aggregateByGroup == true)
   end
   if self.ddChannel then
     self.ddChannel:SetValue(ns.db.options.soundChannel or "Master")

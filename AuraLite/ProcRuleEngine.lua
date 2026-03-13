@@ -172,57 +172,6 @@ local function isRulesOnlyMode()
   return ns.db and ns.db.options and ns.db.options.rulesOnlyMode == true
 end
 
-local function ensureRuleAuraTrackedOnPlayer(auraSpellID)
-  auraSpellID = tonumber(auraSpellID)
-  if not auraSpellID or auraSpellID <= 0 then
-    return
-  end
-  if not ns.db then
-    return
-  end
-
-  ns.db.watchlist = type(ns.db.watchlist) == "table" and ns.db.watchlist or {}
-  ns.db.watchlist.player = type(ns.db.watchlist.player) == "table" and ns.db.watchlist.player or {}
-
-  local list = ns.db.watchlist.player
-  for i = 1, #list do
-    if tonumber(list[i].spellID) == auraSpellID then
-      return
-    end
-  end
-
-  local added = false
-  if ns.Registry and ns.Registry.AddWatch then
-    local item = ns.Registry:AddWatch("player", {
-      spellID = auraSpellID,
-      groupID = "important_procs",
-      onlyMine = true,
-      alert = true,
-      timerVisual = "icon",
-      lowTimeThreshold = 0,
-    })
-    added = item ~= nil
-  end
-
-  if not added then
-    list[#list + 1] = {
-      spellID = auraSpellID,
-      groupID = "important_procs",
-      onlyMine = true,
-      alert = true,
-      timerVisual = "icon",
-      lowTimeThreshold = 0,
-    }
-    if ns.RebuildWatchIndex then
-      ns:RebuildWatchIndex()
-    end
-  end
-
-  if ns.Debug then
-    ns.Debug:Logf("Auto-track enabled for rule aura spellID=%d on player.", auraSpellID)
-  end
-end
-
 local LEGACY_RULES = {
   {
     id = "warrior_phalanx_legacy",
@@ -583,10 +532,6 @@ function P:RefreshContext()
     if not self.knownSyntheticAuras[auraSpellID] then
       states[auraSpellID] = nil
     end
-  end
-
-  for auraSpellID in pairs(self.knownSyntheticAuras or {}) do
-    ensureRuleAuraTrackedOnPlayer(auraSpellID)
   end
 
   local legacyCount = 0

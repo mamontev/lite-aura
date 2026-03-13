@@ -5,6 +5,7 @@ local S = ns.SoundManager
 
 local SK = SOUNDKIT or {}
 local ADDON_SOUND_BASE = "Interface\\AddOns\\AuraLite\\Media\\Sounds\\"
+local WA_SOUND_BASE = ADDON_SOUND_BASE .. "WeakAuras\\"
 S.lastPlayByKey = S.lastPlayByKey or {}
 S.catalogLoaded = S.catalogLoaded == true
 S.stateThrottle = S.stateThrottle or {
@@ -47,6 +48,46 @@ S.presets = {
   urgent_alarm = {
     label = "Urgent Alarm (Addon)",
     file = ADDON_SOUND_BASE .. "urgent_alarm.wav",
+  },
+  nerd_robot_blip = {
+    label = "Nerd: Robot Blip",
+    file = WA_SOUND_BASE .. "RobotBlip.ogg",
+  },
+  nerd_synth_chord = {
+    label = "Nerd: Synth Chord",
+    file = WA_SOUND_BASE .. "SynthChord.ogg",
+  },
+  utility_error_beep = {
+    label = "Utility: Error Beep",
+    file = WA_SOUND_BASE .. "ErrorBeep.ogg",
+  },
+  utility_focus = {
+    label = "Utility: Focus",
+    file = WA_SOUND_BASE .. "Focus.ogg",
+  },
+  utility_run_away = {
+    label = "Utility: Run Away",
+    file = WA_SOUND_BASE .. "RunAway.ogg",
+  },
+  fun_bike_horn = {
+    label = "Fun: Bike Horn",
+    file = WA_SOUND_BASE .. "BikeHorn.ogg",
+  },
+  fun_oh_no = {
+    label = "Fun: Oh No",
+    file = WA_SOUND_BASE .. "OhNo.ogg",
+  },
+  fun_tada = {
+    label = "Fun: Tada Fanfare",
+    file = WA_SOUND_BASE .. "TadaFanfare.ogg",
+  },
+  fun_air_horn = {
+    label = "Fun: Air Horn",
+    file = WA_SOUND_BASE .. "AirHorn.ogg",
+  },
+  fun_glass = {
+    label = "Fun: Glass",
+    file = WA_SOUND_BASE .. "Glass.mp3",
   },
 }
 
@@ -360,6 +401,21 @@ function S:Play(token, state)
     return ok
   end
 
+  return false
+end
+
+function S:Preview(token, state)
+  self:EnsureCatalogLoaded()
+  local mode, value = self:ResolveToken(token, state or "gain")
+  if not mode then
+    return false
+  end
+  if mode == "kit" then
+    return safePlaySound(value, self:GetChannel())
+  end
+  if mode == "file" then
+    return safePlaySoundFile(value, self:GetChannel())
+  end
   return false
 end
 

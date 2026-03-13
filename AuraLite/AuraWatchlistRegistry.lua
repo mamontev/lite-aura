@@ -147,7 +147,7 @@ function R:NormalizeWatchItem(item, unit)
   end
 
   local spellID = tonumber(item.spellID)
-  local groupID = tostring(item.groupID or "important_procs")
+  local groupID = tostring(item.groupID or "")
   if not spellID then
     return nil
   end
@@ -198,13 +198,11 @@ end
 
 function R:Rebuild(profile)
   self.index = {}
-  self.byUnitGroup = {}
   self.hasResourceConditions = false
   self:EnsureLists(profile)
 
   for unit, list in pairs(profile.watchlist) do
     self.index[unit] = self.index[unit] or {}
-    self.byUnitGroup[unit] = self.byUnitGroup[unit] or {}
 
     for i = #list, 1, -1 do
       local normalized = self:NormalizeWatchItem(list[i], unit)
@@ -217,8 +215,6 @@ function R:Rebuild(profile)
 
     for _, item in ipairs(list) do
       self.index[unit][item.spellID] = true
-      self.byUnitGroup[unit][item.groupID] = self.byUnitGroup[unit][item.groupID] or {}
-      self.byUnitGroup[unit][item.groupID][#self.byUnitGroup[unit][item.groupID] + 1] = item
       if item.resourceConditionEnabled == true then
         self.hasResourceConditions = true
       end

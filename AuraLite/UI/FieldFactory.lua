@@ -347,6 +347,156 @@ local function createStatusbarPicker(holder, field, model, onChange)
   return control
 end
 
+local function createSoundPicker(holder, field, model, onChange)
+  holder:SetHeight(84)
+
+  local options = {}
+  if type(field.optionsProvider) == "function" then
+    options = field.optionsProvider(model) or {}
+  elseif type(field.options) == "table" then
+    options = field.options
+  end
+
+  local selectedValue = tostring(model[field.key] or "default")
+  local control = CreateFrame("Frame", nil, holder, "BackdropTemplate")
+  control:SetPoint("TOPLEFT", 0, -18)
+  control:SetSize(field.width or 320, 28)
+  control:SetBackdrop({
+    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+    edgeSize = 10,
+    insets = { left = 2, right = 2, top = 2, bottom = 2 },
+  })
+  control:SetBackdropColor(0.04, 0.08, 0.14, 0.88)
+  control:SetBackdropBorderColor(0.14, 0.42, 0.70, 0.88)
+
+  local valueText = control:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  valueText:SetPoint("LEFT", 8, 0)
+  valueText:SetPoint("RIGHT", -58, 0)
+  valueText:SetJustifyH("LEFT")
+
+  local playBtn = CreateFrame("Button", nil, control, "UIPanelButtonTemplate")
+  playBtn:SetSize(22, 22)
+  playBtn:SetPoint("RIGHT", -29, 0)
+  playBtn:SetText(">")
+  if Skin and Skin.SetButtonVariant then
+    Skin:SetButtonVariant(playBtn, "ghost")
+  end
+
+  local trigger = CreateFrame("Button", nil, control, "UIPanelButtonTemplate")
+  trigger:SetSize(24, 22)
+  trigger:SetPoint("RIGHT", -3, 0)
+  trigger:SetText("v")
+  if Skin and Skin.SetButtonVariant then
+    Skin:SetButtonVariant(trigger, "ghost")
+  end
+
+  local help = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  help:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 0, -4)
+  help:SetPoint("RIGHT", -4, 0)
+  help:SetJustifyH("LEFT")
+  help:SetText("Pick a sound, then use > to hear a preview.")
+
+  local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+  popup:SetFrameStrata("TOOLTIP")
+  popup:SetClampedToScreen(true)
+  popup:SetBackdrop({
+    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+    edgeSize = 10,
+    insets = { left = 2, right = 2, top = 2, bottom = 2 },
+  })
+  popup:SetBackdropColor(0.02, 0.05, 0.11, 0.97)
+  popup:SetBackdropBorderColor(0.14, 0.42, 0.70, 0.92)
+  popup:SetSize((field.width or 320) + 24, 228)
+  popup:Hide()
+
+  local popupHeader = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  popupHeader:SetPoint("TOPLEFT", 10, -10)
+  popupHeader:SetText("Aura Sounds")
+
+  local scroll = CreateFrame("ScrollFrame", nil, popup, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 8, -28)
+  scroll:SetPoint("BOTTOMRIGHT", -28, 8)
+
+  local content = CreateFrame("Frame", nil, scroll)
+  content:SetSize((field.width or 320), 1)
+  scroll:SetScrollChild(content)
+  popup.rows = popup.rows or {}
+
+  local function updateControl()
+    selectedValue = tostring(model[field.key] or "default")
+    if ns.SoundManager and ns.SoundManager.GetTokenLabel then
+      valueText:SetText(ns.SoundManager:GetTokenLabel(selectedValue, field.soundState or "gain"))
+    else
+      valueText:SetText(selectedValue)
+    end
+  end
+
+  local function closePopup()
+    popup:Hide()
+  end
+
+  local function selectValue(value)
+    model[field.key] = tostring(value or "default")
+    updateControl()
+    onChange(field.key, model[field.key])
+    closePopup()
+  end
+
+  local rowHeight = 24
+  for i = 1, #(options or {}) do
+    local row = CreateFrame("Button", nil, content)
+    row:SetPoint("TOPLEFT", 0, -((i - 1) * rowHeight))
+    row:SetSize((field.width or 320) - 8, rowHeight)
+    if Skin and Skin.ApplyClickableRow then
+      Skin:ApplyClickableRow(row, "row")
+    end
+    if Skin and Skin.SetClickableRowState then
+      row:SetScript("OnEnter", function(selfRow)
+        Skin:SetClickableRowState(selfRow, "hover")
+      end)
+      row:SetScript("OnLeave", function(selfRow)
+        Skin:SetClickableRowState(selfRow, "normal")
+      end)
+    end
+
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.text:SetPoint("LEFT", 8, 0)
+    row.text:SetPoint("RIGHT", -30, 0)
+    row.text:SetJustifyH("LEFT")
+    row.text:SetText(options[i].label or tostring(options[i].value or ""))
+    row.value = tostring(options[i].value or "")
+    row:SetScript("OnClick", function(selfRow)
+      selectValue(selfRow.value)
+    end)
+    popup.rows[i] = row
+  end
+  content:SetHeight(#options * rowHeight)
+
+  playBtn:SetScript("OnClick", function()
+    if ns.SoundManager and ns.SoundManager.Preview then
+      ns.SoundManager:Preview(model[field.key] or "default", field.soundState or "gain")
+    end
+  end)
+
+  trigger:SetScript("OnClick", function()
+    if popup:IsShown() then
+      closePopup()
+      return
+    end
+    popup:ClearAllPoints()
+    popup:SetPoint("TOPLEFT", control, "BOTTOMLEFT", -2, -4)
+    popup:Show()
+  end)
+
+  control:SetScript("OnHide", closePopup)
+  updateControl()
+  holder.control = control
+  holder.popup = popup
+  return control
+end
+
 local function createGroupSelect(holder, field, model, onChange)
   holder:SetHeight(114)
 
@@ -399,11 +549,10 @@ local function createGroupSelect(holder, field, model, onChange)
     control:SetValue(selectedValue or model[field.key] or model.groupID or "")
   end
 
-    local function commitGroup(groupID)
+  local function commitGroup(groupID)
     groupID = tostring(groupID or "")
     model[field.key] = groupID
     model.groupID = groupID
-    model.layoutGroupEnabled = groupID ~= ""
     refreshOptions(groupID)
     onChange(field.key, groupID)
   end
@@ -867,6 +1016,8 @@ function F:CreateField(parent, field, model, onChange)
     end)
   elseif field.widget == "bartexture" then
     control = createStatusbarPicker(holder, field, model, onChange)
+  elseif field.widget == "soundpicker" then
+    control = createSoundPicker(holder, field, model, onChange)
   else
     local box
     if multiline then

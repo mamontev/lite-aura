@@ -72,6 +72,35 @@ local function getTrackingSummary(draft)
   return "Rule-based cast trigger"
 end
 
+local function applyGroupConfigToDraft(draft, groupID)
+  if type(draft) ~= "table" then
+    return
+  end
+  groupID = tostring(groupID or "")
+  draft.group = groupID
+  draft.groupID = groupID
+  if groupID == "" then
+    draft.groupName = ""
+    draft.groupDirection = "RIGHT"
+    draft.groupSpacing = 4
+    draft.groupSort = "list"
+    draft.groupOffsetX = 0
+    draft.groupOffsetY = 0
+    return
+  end
+
+  if ns.SettingsData and ns.SettingsData.GetGroupConfig then
+    local groupConfig = ns.SettingsData:GetGroupConfig(groupID)
+    local layout = (groupConfig and groupConfig.layout) or {}
+    draft.groupName = tostring(groupConfig and groupConfig.name or draft.groupName or "")
+    draft.groupDirection = tostring(layout.direction or "RIGHT")
+    draft.groupSpacing = tonumber(layout.spacing) or 4
+    draft.groupSort = tostring(layout.sort or "list")
+    draft.groupOffsetX = tonumber(layout.nudgeX) or 0
+    draft.groupOffsetY = tonumber(layout.nudgeY) or 0
+  end
+end
+
 local function isTabAvailable(draft, tabKey, showAdvanced)
   if not draft then
     return false
@@ -255,19 +284,18 @@ function AuraEditorPanel:UpdateHeader()
       self.previewBannerText:SetText("No aura selected")
     end
     if self.previewBannerHint then
-      self.previewBannerHint:SetText("Pick an aura from the list to see a live draft preview here.")
+      self.previewBannerHint:SetText("")
     end
     return
   end
   self.titleText:SetText("")
   self.subtitle:SetText(string.format("Unit: %s | Tracking: %s", tostring(self.draft.unit or "player"), getTrackingSummary(self.draft)))
   if self.previewBannerText then
-    local dirty = S and S.Get and S:Get().dirty == true
     local auraName = tostring(self.draft.name or self.draft.displayName or "Selected Aura")
-    self.previewBannerText:SetText(string.format("%s | %s", auraName, dirty and "Unsaved changes" or "Saved"))
+    self.previewBannerText:SetText(auraName)
   end
   if self.previewBannerHint then
-    self.previewBannerHint:SetText("The selected aura is rendered as a preview placeholder while you edit. Display changes update live before you save.")
+    self.previewBannerHint:SetText("")
   end
 end
 
@@ -324,6 +352,9 @@ function AuraEditorPanel:LoadAura(auraId)
   self.draft = Repo:GetAuraDraft(auraId)
   self.triggerEditMode = self.triggerEditMode or "produce"
   self.currentAuraId = self.draft and self.draft.id or auraId
+  if S and S.SetDirty then
+    S:SetDirty(false)
+  end
 
   self:UpdateHeader()
   self:RefreshTabButtons()
@@ -337,6 +368,9 @@ function AuraEditorPanel:LoadAura(auraId)
   self:RenderTab(tab)
   self:ValidateDraft()
   self:RefreshLivePreview(true)
+  if S and S.SetDirty then
+    S:SetDirty(false)
+  end
 end
 
 function AuraEditorPanel:OnFieldChanged(key, value)
@@ -346,9 +380,12 @@ function AuraEditorPanel:OnFieldChanged(key, value)
 
   self.draft[key] = value
   if key == "group" then
-    self.draft.groupID = value
+    applyGroupConfigToDraft(self.draft, value)
   elseif key == "groupID" then
-    self.draft.group = value
+    applyGroupConfigToDraft(self.draft, value)
+  end
+  if self.suspendFieldChanges == true then
+    return
   end
 
   if key == "unit" then
@@ -494,6 +531,7 @@ function AuraEditorPanel:RenderTab(tabKey)
     setTabVisual(btn, key == tabKey)
   end
   self:RefreshTabButtons()
+  self.suspendFieldChanges = true
 
   local y = -12
 
@@ -672,6 +710,17 @@ function AuraEditorPanel:RenderTab(tabKey)
       (mode ~= "icon") and byKey.barSide or nil,
     })
 
+    if tostring(self.draft.groupID or self.draft.group or "") ~= "" then
+      y = self:RenderAppearanceCard(y, "Group Layout", "A grouped aura moves with its shared container. Use Movers to place the whole group.", {
+        byKey.groupName,
+        byKey.groupDirection,
+        byKey.groupSpacing,
+        byKey.groupSort,
+        byKey.groupOffsetX,
+        byKey.groupOffsetY,
+      })
+    end
+
     if mode == "icon" or mode == "iconbar" then
       y = self:RenderAppearanceCard(y, "Icon", "Adjust icon size for quick recognition.", {
         byKey.iconWidth,
@@ -737,6 +786,7 @@ function AuraEditorPanel:RenderTab(tabKey)
   end
 
   self.content:SetHeight(math.max(360, -y + 20))
+  self.suspendFieldChanges = false
   self:ValidateDraft()
 end
 
@@ -848,26 +898,29 @@ function AuraEditorPanel:Create(parent)
   createBackdrop(o.previewBanner)
   o.previewBanner:SetPoint("TOPLEFT", 10, -48)
   o.previewBanner:SetPoint("TOPRIGHT", -12, -48)
-  o.previewBanner:SetHeight(46)
+  o.previewBanner:SetHeight(30)
 
   o.previewBannerText = o.previewBanner:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  o.previewBannerText:SetPoint("TOPLEFT", 10, -8)
+  o.previewBannerText:SetPoint("LEFT", 10, 0)
+  o.previewBannerText:SetPoint("RIGHT", -10, 0)
+  o.previewBannerText:SetJustifyH("LEFT")
   o.previewBannerText:SetText("No aura selected")
 
   o.previewBannerHint = o.previewBanner:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   o.previewBannerHint:SetPoint("TOPLEFT", 10, -24)
   o.previewBannerHint:SetPoint("RIGHT", -10, 0)
   o.previewBannerHint:SetJustifyH("LEFT")
-  o.previewBannerHint:SetText("Pick an aura from the list to see a live draft preview here.")
+  o.previewBannerHint:SetText("")
+  o.previewBannerHint:Hide()
 
   o.tabStrip = CreateFrame("Frame", nil, o.frame)
-  o.tabStrip:SetPoint("TOPLEFT", 10, -98)
-  o.tabStrip:SetPoint("TOPRIGHT", -138, -98)
+  o.tabStrip:SetPoint("TOPLEFT", 10, -82)
+  o.tabStrip:SetPoint("TOPRIGHT", -138, -82)
   o.tabStrip:SetHeight(26)
 
   o.btnMode = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
   o.btnMode:SetSize(118, 22)
-  o.btnMode:SetPoint("TOPRIGHT", -12, -98)
+  o.btnMode:SetPoint("TOPRIGHT", -12, -82)
   o.btnMode:SetText("More Options")
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(o.btnMode, "ghost")
@@ -905,7 +958,7 @@ function AuraEditorPanel:Create(parent)
   end
 
   o.scroll = CreateFrame("ScrollFrame", nil, o.frame, "UIPanelScrollFrameTemplate")
-  o.scroll:SetPoint("TOPLEFT", 8, -126)
+  o.scroll:SetPoint("TOPLEFT", 8, -110)
   o.scroll:SetPoint("BOTTOMRIGHT", -28, 48)
 
   o.content = CreateFrame("Frame", nil, o.scroll)
@@ -962,16 +1015,23 @@ function AuraEditorPanel:Create(parent)
         S:SetSelectedAura(draft.id, "new")
       end
       o:LoadAura(draft.id)
+      if S and S.SetDirty then
+        S:SetDirty(true)
+      end
     end)
 
     E:On(E.Names.STATE_CHANGED, function(state)
       if not state or not o.status then
         return
       end
-      local dirtyTag = state.dirty and "Unsaved changes" or "All changes saved"
-      local tracking = getTrackingSummary(o.draft)
-      local mode = o.showAdvanced and "Full options" or "Simple setup"
-      o.status:SetText(dirtyTag .. " | " .. tracking .. " | " .. mode)
+      local dirty = state.dirty == true
+      if dirty then
+        o.status:SetTextColor(1.0, 0.84, 0.22)
+        o.status:SetText("Unsaved changes")
+      else
+        o.status:SetTextColor(0.30, 1.0, 0.5)
+        o.status:SetText("All changes saved")
+      end
       o:UpdateHeader()
     end)
   end
@@ -984,14 +1044,20 @@ function AuraEditorPanel:Create(parent)
       local status = snapshot and snapshot.status or "ok"
       local entries = snapshot and snapshot.entries or {}
       local msg = (#entries > 0 and entries[1].message) or "Ready"
+      local dirty = S and S.Get and S:Get().dirty == true
       if status == "error" then
         o.status:SetTextColor(1, 0.35, 0.35)
+        o.status:SetText(msg)
       elseif status == "warn" then
         o.status:SetTextColor(1, 0.82, 0.2)
+        o.status:SetText(msg)
+      elseif dirty then
+        o.status:SetTextColor(1.0, 0.84, 0.22)
+        o.status:SetText("Unsaved changes")
       else
         o.status:SetTextColor(0.30, 1.0, 0.5)
+        o.status:SetText("All changes saved")
       end
-      o.status:SetText(msg)
     end)
   end
 

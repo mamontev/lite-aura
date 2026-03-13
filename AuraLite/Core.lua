@@ -62,6 +62,9 @@ function ns:Initialize()
   end
 
   self.ProfileManager:Init()
+  if self.SettingsData and self.SettingsData.MigrateGroupLayoutState then
+    self.SettingsData:MigrateGroupLayoutState()
+  end
   if self.SpellCatalog and self.SpellCatalog.BuildStaticIndex then
     self.SpellCatalog:BuildStaticIndex()
   end

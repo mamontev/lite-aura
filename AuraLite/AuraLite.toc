@@ -16,6 +16,7 @@ Libs\AceGUI-3.0-SharedMediaWidgets\widget.xml
 Utils.lua
 Localization.lua
 MediaLibrary.lua
+StatusbarTextures.lua
 UISkin.lua
 PresetLibrary.lua
 ProfileManager.lua

@@ -6,19 +6,26 @@ ns.UIV2.Widgets = ns.UIV2.Widgets or {}
 local UI = ns.UIV2
 local W = UI.Widgets
 local E = UI.Events
+local Skin = ns.UISkin
 
 local RuleBuilder = {}
 RuleBuilder.__index = RuleBuilder
 
 local function createBackdrop(frame)
+  if Skin and Skin.ApplySection then
+    Skin:ApplySection(frame)
+    return
+  end
   frame:SetBackdrop({
-    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-    edgeSize = 10,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    bgFile = "Interface\\Buttons\\WHITE8x8",
+    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    tile = true,
+    tileSize = 8,
+    edgeSize = 1,
+    insets = { left = 1, right = 1, top = 1, bottom = 1 },
   })
-  frame:SetBackdropColor(0.02, 0.06, 0.14, 0.70)
-  frame:SetBackdropBorderColor(0.12, 0.52, 0.82, 0.86)
+  frame:SetBackdropColor(0.03, 0.08, 0.16, 0.72)
+  frame:SetBackdropBorderColor(0.18, 0.28, 0.40, 0.72)
 end
 
 local function trim(text)

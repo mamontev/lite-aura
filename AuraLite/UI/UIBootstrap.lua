@@ -7,8 +7,6 @@ UI.Bootstrap = UI.Bootstrap or {}
 local B = UI.Bootstrap
 
 B._slashRegistered = B._slashRegistered or false
-B._legacyHookInstalled = B._legacyHookInstalled or false
-
 local function ensureDbDefaults()
   ns.db = ns.db or {}
   ns.db.settings = ns.db.settings or {}
@@ -66,32 +64,9 @@ function B:RegisterSlashCommands()
   self._slashRegistered = true
 end
 
-function B:InstallLegacySlashHook()
-  if self._legacyHookInstalled then
-    return
-  end
-  if not ns.ConfigUI or type(ns.ConfigUI.HandleSlash) ~= "function" then
-    return
-  end
-
-  local original = ns.ConfigUI.HandleSlash
-  ns.ConfigUI.HandleSlash = function(selfRef, msg)
-    local normalized = tostring(msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    if normalized == "" or normalized == "v2" or normalized == "ui2" or normalized == "newui" or normalized == "config" or normalized == "ui" or normalized == "options" then
-      if B:ToggleConfig() then
-        return
-      end
-    end
-    return original(selfRef, msg)
-  end
-
-  self._legacyHookInstalled = true
-end
-
 function B:Initialize()
   ensureDbDefaults()
   self:RegisterSlashCommands()
-  self:InstallLegacySlashHook()
 end
 
 local initFrame = CreateFrame("Frame")

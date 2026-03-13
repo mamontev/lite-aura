@@ -29,7 +29,7 @@ local function ensureGroup(groupID)
 
   groupID = tostring(groupID or ""):lower()
   if groupID == "" then
-    groupID = "important_procs"
+    return ""
   end
 
   if not ns.db.groups[groupID] then
@@ -685,7 +685,7 @@ function C:HandleSlash(rawInput)
 
   if cmd == "addname" then
     local unit = tokens[2] or "player"
-    local groupID = tokens[3] or "important_procs"
+local groupID = tokens[3] or ""
     local spellName = rawInput:match("^%s*addname%s+%S+%s+%S+%s+(.+)$")
     if not spellName then
       msg("Usage: /al addname <unit> <group> <spell name>")

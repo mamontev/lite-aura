@@ -252,62 +252,14 @@ local function buildIndependentGroupID(unit, item)
   return string.format("aura_%s_%s_%d_%s", unitToken, groupToken, spellID, nameToken)
 end
 
-local function cloneLayoutSafe(layout)
-  if type(layout) ~= "table" then
-    return { iconSize = 36, spacing = 4, direction = "RIGHT" }
-  end
-  return {
-    iconSize = tonumber(layout.iconSize) or 36,
-    spacing = tonumber(layout.spacing) or 4,
-    direction = tostring(layout.direction or "RIGHT"),
-    nudgeX = tonumber(layout.nudgeX) or 0,
-    nudgeY = tonumber(layout.nudgeY) or 0,
-  }
-end
-local function ensureIndependentGroup(groupID, sourceGroupID, item)
-  if not ns.db or type(ns.db.groups) ~= "table" or type(ns.db.positions) ~= "table" then
-    return
-  end
-  if ns.db.groups[groupID] then
-    return
-  end
-  local maxOrder = 0
-  for _, cfg in pairs(ns.db.groups) do
-    maxOrder = math.max(maxOrder, tonumber(cfg and cfg.order) or 0)
-  end
-  local source = ns.db.groups[sourceGroupID]
-  local layout = cloneLayoutSafe(source and source.layout)
-  local spellID = tonumber(item and item.spellID) or 0
-  local name = trimSafe(tostring(item and item.displayName or ""))
-  if name == "" then
-    name = (ns.AuraAPI and ns.AuraAPI.GetSpellName and ns.AuraAPI:GetSpellName(spellID)) or ("Spell " .. tostring(spellID))
-  end
-  ns.db.groups[groupID] = {
-    id = groupID,
-    name = name,
-    order = maxOrder + 1,
-    layout = layout,
-  }
-  ns.db.positions[groupID] = ns.db.positions[groupID] or {
-    point = "CENTER",
-    relativePoint = "CENTER",
-    x = 0,
-    y = -72 - ((maxOrder + 1) * 52),
-  }
-end
-
 local function resolveDisplayGroupID(unit, item)
   local sourceGroupID = tostring(item and item.groupID or "")
-
-  if item and item.layoutGroupEnabled == true and sanitizeGroupToken(sourceGroupID) ~= "" then
-    local linkedGroupID = sanitizeGroupToken(sourceGroupID)
-    ensureIndependentGroup(linkedGroupID, sourceGroupID, item)
-    return linkedGroupID
+  local hasSharedGroup = sanitizeGroupToken(sourceGroupID) ~= ""
+  if item and hasSharedGroup then
+    return sanitizeGroupToken(sourceGroupID)
   end
 
-  local groupID = buildIndependentGroupID(unit, item)
-  ensureIndependentGroup(groupID, sourceGroupID, item)
-  return groupID
+  return buildIndependentGroupID(unit, item)
 end
 
 local function isSelectedAuraInUnlock(unit, item)
@@ -1120,9 +1072,11 @@ function E:BuildRowsForUnit(unit)
   local rowsByGroup = {}
   local list = ns.db.watchlist[unit] or {}
   local rulesOnlyMode = ns.db and ns.db.options and ns.db.options.rulesOnlyMode == true
+  local configPreviewVisible = isConfigPreviewVisible()
   local playerClassToken = getPlayerClassToken()
   local playerSpecID = getPlayerSpecID()
   local playerInCombat = InCombatLockdown() == true
+  local unitOrderMap = { player = 1, target = 2, focus = 3, pet = 4 }
 
   for _, item in ipairs(list) do
     if isAuraLoadAllowed(item, playerClassToken, playerSpecID, playerInCombat) then
@@ -1135,7 +1089,6 @@ function E:BuildRowsForUnit(unit)
       local effectiveGroupID = resolveDisplayGroupID(unit, renderItem)
       if selectedInUnlock or selectedPreview then
         effectiveGroupID = buildIndependentGroupID(unit, renderItem)
-    ensureIndependentGroup(effectiveGroupID, tostring(renderItem and renderItem.groupID or ""), renderItem)
       end
       local aura = nil
       if directAuraTracking or trackingMode == "estimated" or not rulesOnlyMode then
@@ -1255,9 +1208,15 @@ function E:BuildRowsForUnit(unit)
           soundOnGain = renderItem.soundOnGain or "default",
           soundOnLow = renderItem.soundOnLow or "default",
           soundOnExpire = renderItem.soundOnExpire or "default",
+          sortIndex = _,
+          unitOrder = unitOrderMap[unit] or 99,
           isPlaceholder = false,
         }
-      elseif selectedInUnlock or selectedPreview or ns.TestMode:IsEnabled() or (ns.db and ns.db.locked == false) then
+      elseif selectedInUnlock
+        or selectedPreview
+        or ns.TestMode:IsEnabled()
+        or ((ns.db and ns.db.locked == false) and not configPreviewVisible)
+      then
         local fake = ns.TestMode:BuildPlaceholder(renderItem, unit)
         fake.groupID = effectiveGroupID
         fake.displayName = renderItem.displayName or ""
@@ -1284,6 +1243,8 @@ function E:BuildRowsForUnit(unit)
         fake.soundOnGain = renderItem.soundOnGain or "default"
         fake.soundOnLow = renderItem.soundOnLow or "default"
         fake.soundOnExpire = renderItem.soundOnExpire or "default"
+        fake.sortIndex = _
+        fake.unitOrder = unitOrderMap[unit] or 99
         fake.iconMode = renderItem.iconMode or "spell"
         fake.customTexture = renderItem.customTexture or ""
         fake.icon = ns.AuraAPI:GetDisplayTextureForItem(renderItem, nil)
@@ -1303,7 +1264,10 @@ function E:RefreshAll()
   end
 
   local activeByGroup = {}
-  for unit, enabled in pairs(ns.db.units) do
+  local orderedUnits = { "player", "target", "focus", "pet" }
+  for i = 1, #orderedUnits do
+    local unit = orderedUnits[i]
+    local enabled = ns.db.units and ns.db.units[unit]
     if enabled then
       local rowsForUnit = self:BuildRowsForUnit(unit)
       mergeGroupRows(activeByGroup, rowsForUnit)
@@ -1364,7 +1328,11 @@ function E:PLAYER_LOGIN()
   self:RefreshAll()
 
   if ns.ProfileManager:IsFirstRun() then
-    ns.ConfigUI:ShowFirstRun()
+    if ns.UIV2 and ns.UIV2.ConfigFrame and ns.UIV2.ConfigFrame.Open then
+      ns.UIV2.ConfigFrame:Open()
+    elseif ns.ConfigUI and ns.ConfigUI.ShowFirstRun then
+      ns.ConfigUI:ShowFirstRun()
+    end
   end
 end
 

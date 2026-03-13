@@ -12,6 +12,74 @@ G.stateByKey = G.stateByKey or {}
 G.hasRendered = G.hasRendered or false
 G.layoutSigByGroup = G.layoutSigByGroup or {}
 
+local function isStandaloneContainer(groupID)
+  return type(groupID) == "string" and groupID:find("^aura_", 1) == 1
+end
+
+local function getContainerConfig(groupID)
+  if ns.SettingsData and ns.SettingsData.GetGroupConfig then
+    return ns.SettingsData:GetGroupConfig(groupID)
+  end
+  local cfg = ns.db and ns.db.groups and ns.db.groups[groupID]
+  if cfg then
+    return cfg
+  end
+  return {
+    id = groupID,
+    name = "",
+    order = 9999,
+    layout = {
+      iconSize = 36,
+      spacing = 4,
+      direction = "RIGHT",
+      sort = "list",
+      nudgeX = 0,
+      nudgeY = 0,
+    },
+  }
+end
+
+local function sortEntries(entries, groupConfig)
+  local sortMode = tostring(groupConfig and groupConfig.layout and groupConfig.layout.sort or "list"):lower()
+  table.sort(entries, function(a, b)
+    if sortMode == "name" then
+      local an = tostring(a and a.displayName or "")
+      local bn = tostring(b and b.displayName or "")
+      if an == "" and a and a.spellID and ns.AuraAPI and ns.AuraAPI.GetSpellName then
+        an = ns.AuraAPI:GetSpellName(a.spellID) or ""
+      end
+      if bn == "" and b and b.spellID and ns.AuraAPI and ns.AuraAPI.GetSpellName then
+        bn = ns.AuraAPI:GetSpellName(b.spellID) or ""
+      end
+      if an ~= bn then
+        return an < bn
+      end
+    elseif sortMode == "spell" then
+      local as = tonumber(a and a.spellID) or 0
+      local bs = tonumber(b and b.spellID) or 0
+      if as ~= bs then
+        return as < bs
+      end
+    end
+    local ao = tonumber(a and a.unitOrder) or 99
+    local bo = tonumber(b and b.unitOrder) or 99
+    if ao ~= bo then
+      return ao < bo
+    end
+    local ai = tonumber(a and a.sortIndex) or 9999
+    local bi = tonumber(b and b.sortIndex) or 9999
+    if ai ~= bi then
+      return ai < bi
+    end
+    local an = tostring(a and a.displayName or "")
+    local bn = tostring(b and b.displayName or "")
+    if an ~= bn then
+      return an < bn
+    end
+    return (tonumber(a and a.spellID) or 0) < (tonumber(b and b.spellID) or 0)
+  end)
+end
+
 local function getColorForUnit(unit)
   if unit == "player" then
     return 0.2, 0.8, 0.3
@@ -397,6 +465,8 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
   local iconSize = tonumber(layout.iconSize) or 36
   local spacing = tonumber(layout.spacing) or 4
   local direction = tostring(layout.direction or "RIGHT"):upper()
+  local nudgeX = tonumber(layout.nudgeX) or 0
+  local nudgeY = tonumber(layout.nudgeY) or 0
 
   if ns.db.options.compactMode then
     iconSize = math.max(24, iconSize - 8)
@@ -441,16 +511,16 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
     icon:ClearAllPoints()
 
     if direction == "LEFT" then
-      icon:SetPoint("RIGHT", frame, "RIGHT", -cursor, 0)
+      icon:SetPoint("RIGHT", frame, "RIGHT", -cursor + nudgeX, nudgeY)
       cursor = cursor + slotWidth + spacing
     elseif direction == "UP" then
-      icon:SetPoint("BOTTOM", frame, "BOTTOM", 0, cursor)
+      icon:SetPoint("BOTTOM", frame, "BOTTOM", nudgeX, cursor + nudgeY)
       cursor = cursor + rowIconHeight + spacing
     elseif direction == "DOWN" then
-      icon:SetPoint("TOP", frame, "TOP", 0, -cursor)
+      icon:SetPoint("TOP", frame, "TOP", nudgeX, -cursor + nudgeY)
       cursor = cursor + rowIconHeight + spacing
     else
-      icon:SetPoint("LEFT", frame, "LEFT", cursor, 0)
+      icon:SetPoint("LEFT", frame, "LEFT", cursor + nudgeX, nudgeY)
       cursor = cursor + slotWidth + spacing
     end
   end
@@ -484,15 +554,39 @@ end
 
 function G:Render(activeByGroup)
   self.activeByGroup = activeByGroup or {}
-  local groupIDs = U.KeysSortedByNumberField(ns.db.groups, "order")
+  local orderByGroup = {}
+  local groupIDs = {}
+  for groupID, cfg in pairs(ns.db.groups or {}) do
+    local hasEntries = type(self.activeByGroup[groupID]) == "table" and #self.activeByGroup[groupID] > 0
+    if hasEntries then
+      orderByGroup[groupID] = tonumber(cfg and cfg.order) or 9999
+      groupIDs[#groupIDs + 1] = groupID
+    end
+  end
+  for groupID, entries in pairs(self.activeByGroup) do
+    if type(entries) == "table" and #entries > 0 and not orderByGroup[groupID] then
+      local cfg = ns.db.groups and ns.db.groups[groupID]
+      orderByGroup[groupID] = tonumber(cfg and cfg.order) or 9999
+      groupIDs[#groupIDs + 1] = groupID
+    end
+  end
+  table.sort(groupIDs, function(a, b)
+    local left = orderByGroup[a] or 9999
+    local right = orderByGroup[b] or 9999
+    if left == right then
+      return tostring(a) < tostring(b)
+    end
+    return left < right
+  end)
   local prevState = self.stateByKey or {}
   local nextState = {}
   local allowTransitionSound = self.hasRendered == true
 
   for i = 1, #groupIDs do
     local groupID = groupIDs[i]
-    local groupConfig = ns.db.groups[groupID]
+    local groupConfig = getContainerConfig(groupID)
     local entries = self.activeByGroup[groupID] or {}
+    sortEntries(entries, groupConfig)
     local frame = self:EnsureGroupFrame(groupID)
     if ns.db and ns.db.locked == true then
       ns.Dragger:ApplyPosition(frame, groupID)
@@ -632,6 +726,16 @@ function G:Render(activeByGroup)
       frame:Show()
     else
       frame:Hide()
+    end
+  end
+
+  for groupID, frame in pairs(self.frames or {}) do
+    if not orderByGroup[groupID] then
+      frame.activeIconCount = 0
+      frame:Hide()
+      if isStandaloneContainer(groupID) then
+        self.frames[groupID] = nil
+      end
     end
   end
 

@@ -4,8 +4,8 @@ ns.OptionsIntegration = ns.OptionsIntegration or {}
 local O = ns.OptionsIntegration
 
 function O:OpenConfig()
-  if ns.SettingsUI and ns.SettingsUI.Open then
-    ns.SettingsUI:Open()
+  if ns.UIV2 and ns.UIV2.ConfigFrame and ns.UIV2.ConfigFrame.Open then
+    ns.UIV2.ConfigFrame:Open()
     return true
   end
   return false

@@ -164,6 +164,22 @@ local function normalizeBarSide(value)
   return "right"
 end
 
+local function normalizeGroupDirection(value)
+  value = tostring(value or "RIGHT"):upper()
+  if value == "LEFT" or value == "UP" or value == "DOWN" then
+    return value
+  end
+  return "RIGHT"
+end
+
+local function normalizeGroupSort(value)
+  value = safeLower(tostring(value or "list"))
+  if value == "name" or value == "spell" then
+    return value
+  end
+  return "list"
+end
+
 local function normalizeDuration(value, fallback)
   local n = tonumber(value)
   if not n then
@@ -428,7 +444,14 @@ function D:EnsureGroup(groupID, displayName)
       id = groupID,
       name = displayName and tostring(displayName) or (groupID:gsub("_", " "):gsub("^%l", string.upper)),
       order = maxOrder + 1,
-      layout = { iconSize = 36, spacing = 4, direction = "RIGHT" },
+      layout = {
+        iconSize = 36,
+        spacing = 4,
+        direction = "RIGHT",
+        sort = "list",
+        nudgeX = 0,
+        nudgeY = 0,
+      },
     }
 
     ns.db.positions[groupID] = ns.db.positions[groupID] or {
@@ -440,6 +463,82 @@ function D:EnsureGroup(groupID, displayName)
   elseif displayName and displayName ~= "" then
     ns.db.groups[groupID].name = displayName
   end
+
+  return groupID
+end
+
+function D:GetGroupConfig(groupID)
+  groupID = normalizeGroupID(groupID)
+  if groupID == "" then
+    return {
+      id = "",
+      name = "",
+      order = 9999,
+      layout = {
+        iconSize = 36,
+        spacing = 4,
+        direction = "RIGHT",
+        sort = "list",
+        nudgeX = 0,
+        nudgeY = 0,
+      },
+    }
+  end
+
+  local cfg = ns.db.groups[groupID]
+  if not cfg then
+    return {
+      id = groupID,
+      name = groupID:gsub("_", " "):gsub("^%l", string.upper),
+      order = 9999,
+      layout = {
+        iconSize = 36,
+        spacing = 4,
+        direction = "RIGHT",
+        sort = "list",
+        nudgeX = 0,
+        nudgeY = 0,
+      },
+    }
+  end
+
+  local layout = cfg.layout or {}
+  return {
+    id = groupID,
+    name = normalizeDisplayName(cfg.name ~= nil and cfg.name or groupID:gsub("_", " "):gsub("^%l", string.upper)),
+    order = tonumber(cfg.order) or 9999,
+    layout = {
+      iconSize = normalizeSize(layout.iconSize, 36, 12, 256),
+      spacing = normalizeSize(layout.spacing, 4, 0, 64),
+      direction = normalizeGroupDirection(layout.direction),
+      sort = normalizeGroupSort(layout.sort),
+      nudgeX = normalizeOffset(layout.nudgeX, 0),
+      nudgeY = normalizeOffset(layout.nudgeY, 0),
+    },
+  }
+end
+
+function D:UpdateGroupConfig(groupID, model)
+  groupID = normalizeGroupID(groupID)
+  if groupID == "" then
+    return ""
+  end
+
+  self:EnsureGroup(groupID, model and model.groupName)
+  local cfg = ns.db.groups[groupID]
+  if not cfg then
+    return ""
+  end
+
+  local current = self:GetGroupConfig(groupID)
+  cfg.name = normalizeDisplayName((model and model.groupName) or current.name)
+  cfg.layout = cfg.layout or {}
+  cfg.layout.iconSize = current.layout.iconSize
+  cfg.layout.spacing = normalizeSize(model and model.groupSpacing, current.layout.spacing, 0, 64)
+  cfg.layout.direction = normalizeGroupDirection(model and model.groupDirection or current.layout.direction)
+  cfg.layout.sort = normalizeGroupSort(model and model.groupSort or current.layout.sort)
+  cfg.layout.nudgeX = normalizeOffset(model and model.groupOffsetX, current.layout.nudgeX)
+  cfg.layout.nudgeY = normalizeOffset(model and model.groupOffsetY, current.layout.nudgeY)
 
   return groupID
 end
@@ -596,6 +695,7 @@ function D:BuildEditableModel(entry)
     return nil
   end
   local item = entry.item
+  local groupConfig = self:GetGroupConfig(item.groupID or "")
   return {
     key = entry.key,
     unit = entry.unit,
@@ -606,7 +706,12 @@ function D:BuildEditableModel(entry)
     spellName = ns.AuraAPI:GetSpellName(item.spellID) or "",
     instanceUID = normalizeInstanceUID(item.instanceUID),
     groupID = item.groupID or "",
-    layoutGroupEnabled = item.layoutGroupEnabled == true and normalizeGroupID(item.groupID) ~= "",
+    groupName = groupConfig.name or "",
+    groupDirection = groupConfig.layout.direction or "RIGHT",
+    groupSpacing = tonumber(groupConfig.layout.spacing) or 4,
+    groupSort = groupConfig.layout.sort or "list",
+    groupOffsetX = tonumber(groupConfig.layout.nudgeX) or 0,
+    groupOffsetY = tonumber(groupConfig.layout.nudgeY) or 0,
     loadClassToken = normalizeClassToken(item.loadClassToken),
     loadSpecIDs = normalizeSpecIDList(item.loadSpecIDs),
     inCombatOnly = item.inCombatOnly == true,
@@ -650,7 +755,12 @@ function D:BuildDefaultCreateModel()
     estimatedDuration = 8,
     instanceUID = "",
     groupID = "",
-    layoutGroupEnabled = false,
+    groupName = "",
+    groupDirection = "RIGHT",
+    groupSpacing = 4,
+    groupSort = "list",
+    groupOffsetX = 0,
+    groupOffsetY = 0,
     loadClassToken = "",
     loadSpecIDs = {},
     inCombatOnly = false,
@@ -699,8 +809,7 @@ function D:BuildWatchItemFromModel(model)
   if instanceUID == "" then
     instanceUID = buildInstanceUID(spellID)
   end
-  local layoutGroupEnabled = normalizeBool(model.layoutGroupEnabled, false) and groupID ~= ""
-  if layoutGroupEnabled and groupID ~= "" then
+  if groupID ~= "" then
     groupID = self:EnsureGroup(groupID)
   end
   local iconMode = (model.iconMode == "custom") and "custom" or "spell"
@@ -724,7 +833,6 @@ function D:BuildWatchItemFromModel(model)
     trackingMode = normalizeTrackingMode(model.trackingMode, model.unit),
     castSpellIDs = normalizeSpellIDList(model.castSpellIDs),
     estimatedDuration = normalizeDuration(model.estimatedDuration, 8),
-    layoutGroupEnabled = layoutGroupEnabled,
     loadClassToken = normalizeClassToken(model.loadClassToken),
     loadSpecIDs = normalizeSpecIDList(model.loadSpecIDs),
     inCombatOnly = normalizeBool(model.inCombatOnly, false),
@@ -921,6 +1029,53 @@ function D:CleanupOrphanAuraGroups()
   end
 
   return removed
+end
+
+function D:MigrateGroupLayoutState()
+  if not ns.db or type(ns.db.watchlist) ~= "table" then
+    return 0
+  end
+
+  local changed = 0
+  local referenced = {}
+
+  for _, unit in ipairs(trackedUnits) do
+    local list = ns.db.watchlist[unit] or {}
+    for i = 1, #list do
+      local item = list[i]
+      if type(item) == "table" then
+        local groupID = normalizeGroupID(item.groupID)
+        if groupID ~= "" then
+          if item.layoutGroupEnabled ~= nil then
+            item.layoutGroupEnabled = nil
+            changed = changed + 1
+          end
+          item.groupID = groupID
+          referenced[groupID] = true
+          self:EnsureGroup(groupID)
+        else
+          if item.layoutGroupEnabled ~= nil then
+            item.layoutGroupEnabled = nil
+            changed = changed + 1
+          end
+          item.groupID = ""
+        end
+      end
+    end
+  end
+
+  for groupID in pairs(ns.db.groups or {}) do
+    local autoGenerated = type(groupID) == "string" and groupID:find("^aura_", 1) == 1
+    if autoGenerated and not referenced[groupID] then
+      ns.db.groups[groupID] = nil
+      if type(ns.db.positions) == "table" then
+        ns.db.positions[groupID] = nil
+      end
+      changed = changed + 1
+    end
+  end
+
+  return changed
 end
 
 

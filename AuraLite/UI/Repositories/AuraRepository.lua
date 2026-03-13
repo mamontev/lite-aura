@@ -54,7 +54,7 @@ local function mapEntryRow(row)
     spellID = tonumber(item.spellID) or 0,
     name = (item.displayName and item.displayName ~= "") and tostring(item.displayName) or ((ns.AuraAPI and ns.AuraAPI.GetSpellName and ns.AuraAPI:GetSpellName(item.spellID)) or ("Spell " .. tostring(item.spellID or "?"))),
     unit = tostring(row.unit or "player"),
-    group = tostring(item.groupID or "important_procs"),
+    group = tostring(item.groupID or ""),
     trigger = triggerLabel,
     status = (tonumber(item.spellID) or 0) > 0 and "ok" or "warn",
     icon = (ns.AuraAPI and ns.AuraAPI.GetSpellTexture and ns.AuraAPI:GetSpellTexture(item.spellID)) or 134400,
@@ -258,6 +258,11 @@ function R:SaveDraft(draft)
     if not savedKey then
       return false, nil, err or "update failed"
     end
+  end
+
+  local groupID = tostring(model.groupID or "")
+  if groupID ~= "" and ns.SettingsData and ns.SettingsData.UpdateGroupConfig then
+    ns.SettingsData:UpdateGroupConfig(groupID, model)
   end
 
   local savedDraft = cloneShallow(draft)

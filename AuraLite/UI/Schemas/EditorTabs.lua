@@ -58,6 +58,23 @@ local function groupOptions()
   return out
 end
 
+local function groupDirectionOptions()
+  return {
+    { value = "RIGHT", label = "Grow Right" },
+    { value = "LEFT", label = "Grow Left" },
+    { value = "DOWN", label = "Grow Down" },
+    { value = "UP", label = "Grow Up" },
+  }
+end
+
+local function groupSortOptions()
+  return {
+    { value = "list", label = "Aura List Order" },
+    { value = "name", label = "Aura Name" },
+    { value = "spell", label = "SpellID" },
+  }
+end
+
 Schemas.EditorTabs = {
   { key = "Tracking", label = "Tracking", fields = {
     { key = "unit", label = "Watch This Aura On", widget = "dropdown", options = {
@@ -71,6 +88,12 @@ Schemas.EditorTabs = {
   { key = "Appearance", label = "Appearance", fields = {
     { key = "name", label = "Aura Name", widget = "text" },
     { key = "group", label = "Group", widget = "groupselect", optionsProvider = groupOptions },
+    { key = "groupName", label = "Group Name", widget = "text" },
+    { key = "groupDirection", label = "Group Direction", widget = "dropdown", optionsProvider = groupDirectionOptions },
+    { key = "groupSpacing", label = "Group Spacing", widget = "spinner", min = 0, max = 64, step = 1, default = 4, help = "Default: 4" },
+    { key = "groupSort", label = "Group Sort", widget = "dropdown", optionsProvider = groupSortOptions },
+    { key = "groupOffsetX", label = "Group Offset X", widget = "spinner", min = -200, max = 200, step = 1, default = 0, help = "Default: 0" },
+    { key = "groupOffsetY", label = "Group Offset Y", widget = "spinner", min = -200, max = 200, step = 1, default = 0, help = "Default: 0" },
     { key = "displayMode", label = "Display Mode", widget = "dropdown", options = {
       { value = "icon", label = "Icon" },
       { value = "bar", label = "Bar" },
@@ -101,8 +124,9 @@ Schemas.EditorTabs = {
     { key = "duration", label = "Manual Timer Duration (sec)", widget = "number", min = 1, max = 120 },
     { key = "ruleName", label = "Rule Name", widget = "text", required = false },
     { key = "ruleID", label = "Rule ID", widget = "text", required = false },
-    { key = "soundOnShow", label = "Sound On Show", widget = "dropdown", optionsProvider = soundOptions },
-    { key = "soundOnExpire", label = "Sound On Expire", widget = "dropdown", optionsProvider = soundOptions },
+    { key = "soundOnShow", label = "Sound On Show", widget = "soundpicker", optionsProvider = soundOptions, soundState = "gain" },
+    { key = "soundOnLow", label = "Sound On Low Time", widget = "soundpicker", optionsProvider = soundOptions, soundState = "low" },
+    { key = "soundOnExpire", label = "Sound On Expire", widget = "soundpicker", optionsProvider = soundOptions, soundState = "expire" },
     { key = "loadClassToken", label = "Load: Class", widget = "dropdown", optionsProvider = loadClassOptions },
     { key = "loadSpecID", label = "Load: Spec", widget = "dropdown", optionsProvider = loadSpecOptions },
     { key = "debug", label = "Debug for this aura", widget = "checkbox" },

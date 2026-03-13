@@ -32,6 +32,21 @@ local function toggleMovers()
   end
 end
 
+local function disableMovers()
+  if not ns.db then
+    return
+  end
+  if ns.db.locked ~= true then
+    ns.db.locked = true
+    if ns.Dragger and ns.Dragger.SetLocked then
+      ns.Dragger:SetLocked(true)
+    end
+    if ns.EventRouter and ns.EventRouter.RefreshAll then
+      ns.EventRouter:RefreshAll()
+    end
+  end
+end
+
 local function createPanelBackdrop(frame, r, g, b, a)
   frame:SetBackdrop({
     bgFile = "Interface/Tooltips/UI-Tooltip-Background",
@@ -221,6 +236,10 @@ function ConfigFrame:BuildFrame()
   end)
 
   frame:SetScript("OnShow", function()
+    refreshMoverButton(btnMovers)
+  end)
+  frame:SetScript("OnHide", function()
+    disableMovers()
     refreshMoverButton(btnMovers)
   end)
 

@@ -12,11 +12,16 @@ function M:GetLSM()
   end
   self._lsmResolved = true
 
-  if type(LibStub) ~= "function" then
+  if type(LibStub) ~= "table" then
     return nil
   end
 
-  local ok, lib = pcall(LibStub, "LibSharedMedia-3.0", true)
+  local ok, lib = pcall(function()
+    if type(LibStub.GetLibrary) == "function" then
+      return LibStub:GetLibrary("LibSharedMedia-3.0", true)
+    end
+    return nil
+  end)
   if ok and type(lib) == "table" then
     self._lsm = lib
   end

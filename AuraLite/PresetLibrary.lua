@@ -63,7 +63,6 @@ local function buildOptions()
     uiWorkspace = "split",
     uiGuidedMode = true,
     rulesOnlyMode = true,
-    aggregateByGroup = false,
     debugEnabled = false,
     debugVerbose = false,
     showSource = true,

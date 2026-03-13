@@ -386,10 +386,9 @@ function UI:CollectFormModel()
     spellInput = U.Trim(self.editSpell:GetText() or ""),
     displayName = U.Trim(self.editAuraName:GetText() or ""),
     unit = self.ddUnit:GetValue() or "player",
-    groupID = self.ddGroup:GetValue() or "important_procs",
+    groupID = self.ddGroup:GetValue() or "",
     loadClassToken = (self.ddLoadClass and self.ddLoadClass:GetValue()) or "",
     loadSpecIDs = loadSpecValue,
-    layoutGroupEnabled = self.cbMoveWithGroup and self.cbMoveWithGroup:GetChecked() == true,
     instanceUID = (self.modelSnapshot and self.modelSnapshot.instanceUID) or "",
     onlyMine = self.cbOnlyMine:GetChecked() == true,
     alert = self.cbAlert:GetChecked() == true,
@@ -447,7 +446,7 @@ function UI:ApplyModelToForm(model)
 
   self:RefreshGroupDropdown()
   local options = D:GetGroupOptions()
-  local groupID = model.groupID or "important_procs"
+  local groupID = model.groupID or ""
   if hasOption(options, groupID) then
     self.ddGroup:SetValue(groupID)
     self.editGroupCustom:SetText("")
@@ -460,9 +459,6 @@ function UI:ApplyModelToForm(model)
 
   self.cbOnlyMine:SetChecked(model.onlyMine == true)
   self.cbAlert:SetChecked(model.alert ~= false)
-  if self.cbMoveWithGroup then
-    self.cbMoveWithGroup:SetChecked(model.layoutGroupEnabled == true)
-  end
   self.ddIconMode:SetValue(model.iconMode == "custom" and "custom" or "spell")
   self.editTexture:SetText(model.customTexture or "")
   self.ddTimerVisual:SetValue(tostring(model.timerVisual or "icon"))
