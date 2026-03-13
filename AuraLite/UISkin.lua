@@ -241,23 +241,23 @@ local function applyButtonState(button, state)
   local border = palette.border
   local text = palette.text
   local accent = shiftColor(border, 0.10, 0.95)
-  local shadowAlpha = 0.28
+  local shadowAlpha = 0.18
 
   if button._alButtonSelected then
     bg = palette.hover
-    border = shiftColor(palette.border, 0.10, 0.98)
+    border = shiftColor(palette.border, 0.04, 0.90)
     text = { 0.96, 0.98, 1.0 }
-    accent = shiftColor(border, 0.08, 1.0)
-    shadowAlpha = 0.36
+    accent = shiftColor(border, 0.02, 0.72)
+    shadowAlpha = 0.18
   elseif state == "pressed" then
     bg = palette.pressed
-    accent = shiftColor(border, -0.04, 0.82)
-    shadowAlpha = 0.16
+    accent = shiftColor(border, -0.04, 0.48)
+    shadowAlpha = 0.12
   elseif state == "hover" then
     bg = palette.hover
-    border = shiftColor(palette.border, 0.06, 0.92)
-    accent = shiftColor(border, 0.10, 1.0)
-    shadowAlpha = 0.34
+    border = shiftColor(palette.border, 0.02, 0.82)
+    accent = shiftColor(border, 0.00, 0.46)
+    shadowAlpha = 0.16
   end
 
   button._alButtonSkin.bg:SetColorTexture(bg[1], bg[2], bg[3], bg[4])
@@ -276,13 +276,7 @@ local function applyButtonState(button, state)
     button._alButtonSkin.bottomShade:SetColorTexture(0, 0, 0, state == "pressed" and 0.06 or 0.14)
   end
   if button._alButtonSkin.gloss then
-    if state == "pressed" then
-      button._alButtonSkin.gloss:SetAlpha(0.03)
-    elseif state == "hover" or button._alButtonSelected then
-      button._alButtonSkin.gloss:SetAlpha(0.12)
-    else
-      button._alButtonSkin.gloss:SetAlpha(0.08)
-    end
+    button._alButtonSkin.gloss:SetAlpha(state == "pressed" and 0.01 or 0.03)
   end
 
   local fs = getButtonFontString(button)

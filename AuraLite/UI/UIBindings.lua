@@ -123,7 +123,7 @@ function B:DraftFromEditableModel(model)
   local unit = tostring(model.unit or "player")
   local trackingMode = normalizeTrackingMode(model.trackingMode, unit)
   local displayName = tostring(model.displayName or "")
-  local groupID = tostring(model.groupID or "important_procs")
+  local groupID = tostring(model.groupID or "")
   return {
     id = tostring(model.key or ""),
     name = displayName,
@@ -188,7 +188,7 @@ function B:NewDraft(auraId)
     name = "New Aura",
     spellID = "",
     unit = "player",
-    group = "important_procs",
+    group = "",
     triggerType = "cast",
     trackingMode = "confirmed",
     castSpellIDs = "",
@@ -233,11 +233,11 @@ function B:ToSettingsDataModel(draft)
     trackingMode = normalizeTrackingMode(draft.trackingMode, normalizedUnit),
     castSpellIDs = parseCSVNumbers(draft.castSpellIDs),
     estimatedDuration = tonumber(draft.estimatedDuration or draft.duration) or 8,
-    groupID = trim(draft.groupID or draft.group) ~= "" and trim(draft.groupID or draft.group) or "important_procs",
+    groupID = trim(draft.groupID or draft.group),
     loadClassToken = trim(draft.loadClassToken):upper(),
     loadSpecIDs = draft.loadSpecIDs or specIDs,
     inCombatOnly = draft.inCombatOnly == true,
-    layoutGroupEnabled = draft.layoutGroupEnabled ~= false,
+    layoutGroupEnabled = (draft.layoutGroupEnabled == true) and trim(draft.groupID or draft.group) ~= "",
     instanceUID = trim(draft.instanceUID),
     onlyMine = self:IsEstimatedTargetDebuffTracking(draft) or draft.onlyMine == true,
     alert = draft.alert ~= false,

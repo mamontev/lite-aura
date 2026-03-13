@@ -46,6 +46,18 @@ local function soundOptions()
   }
 end
 
+local function groupOptions()
+  local out = {}
+  if ns.SettingsData and ns.SettingsData.GetGroupOptions then
+    local groups = ns.SettingsData:GetGroupOptions()
+    for i = 1, #(groups or {}) do
+      out[#out + 1] = groups[i]
+    end
+  end
+  out[#out + 1] = { value = "__new__", label = "+ Create New Group" }
+  return out
+end
+
 Schemas.EditorTabs = {
   { key = "Tracking", label = "Tracking", fields = {
     { key = "unit", label = "Watch This Aura On", widget = "dropdown", options = {
@@ -58,7 +70,7 @@ Schemas.EditorTabs = {
   } },
   { key = "Appearance", label = "Appearance", fields = {
     { key = "name", label = "Aura Name", widget = "text" },
-    { key = "group", label = "Group ID", widget = "text" },
+    { key = "group", label = "Group", widget = "groupselect", optionsProvider = groupOptions },
     { key = "displayMode", label = "Display Mode", widget = "dropdown", options = {
       { value = "icon", label = "Icon" },
       { value = "bar", label = "Bar" },

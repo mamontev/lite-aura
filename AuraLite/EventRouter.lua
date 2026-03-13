@@ -297,13 +297,10 @@ local function ensureIndependentGroup(groupID, sourceGroupID, item)
 end
 
 local function resolveDisplayGroupID(unit, item)
-  local sourceGroupID = tostring(item and item.groupID or "important_procs")
+  local sourceGroupID = tostring(item and item.groupID or "")
 
-  if item and item.layoutGroupEnabled == true then
+  if item and item.layoutGroupEnabled == true and sanitizeGroupToken(sourceGroupID) ~= "" then
     local linkedGroupID = sanitizeGroupToken(sourceGroupID)
-    if linkedGroupID == "" then
-      linkedGroupID = "important_procs"
-    end
     ensureIndependentGroup(linkedGroupID, sourceGroupID, item)
     return linkedGroupID
   end
@@ -1138,7 +1135,7 @@ function E:BuildRowsForUnit(unit)
       local effectiveGroupID = resolveDisplayGroupID(unit, renderItem)
       if selectedInUnlock or selectedPreview then
         effectiveGroupID = buildIndependentGroupID(unit, renderItem)
-        ensureIndependentGroup(effectiveGroupID, tostring(renderItem and renderItem.groupID or "important_procs"), renderItem)
+    ensureIndependentGroup(effectiveGroupID, tostring(renderItem and renderItem.groupID or ""), renderItem)
       end
       local aura = nil
       if directAuraTracking or trackingMode == "estimated" or not rulesOnlyMode then

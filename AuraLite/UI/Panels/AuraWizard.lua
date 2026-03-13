@@ -199,7 +199,7 @@ function AuraWizard:RenderStep()
     })
 
     self.lblB:SetText("Group")
-    self.editB:SetText(tostring(self.model.group or "important_procs"))
+    self.editB:SetText(tostring(self.model.group or ""))
     self.editB:Show()
 
     self.lblC:SetText("Low-Time Warning (sec)")
@@ -219,7 +219,7 @@ function AuraWizard:RenderStep()
       "Cast SpellIDs: " .. tostring(self.model.castSpellIDs or "-"),
       "Duration: " .. tostring(isEstimatedTarget(self.model) and (self.model.estimatedDuration or 8) or (self.model.duration or 8)),
       "Display: " .. tostring(self.model.displayMode or "iconbar"),
-      "Group: " .. tostring(self.model.group or "important_procs"),
+      "Group: " .. (tostring(self.model.group or "") ~= "" and tostring(self.model.group) or "No group"),
     }
     self.review:SetText(table.concat(lines, "\n"))
   end
@@ -243,7 +243,7 @@ function AuraWizard:SyncFromFields()
       self.model.duration = tonumber(self.editC:GetText()) or 8
     end
   elseif stepName == "Display" then
-    self.model.group = tostring(self.editB:GetText() or "important_procs")
+    self.model.group = tostring(self.editB:GetText() or "")
     self.model.lowTime = tonumber(self.editC:GetText()) or 3
   end
 end
@@ -252,7 +252,7 @@ function AuraWizard:Open(anchor)
   self.model = UI.Bindings and UI.Bindings:NewDraft("") or {}
   self.model.name = "New Aura"
   self.model.displayMode = "iconbar"
-  self.model.group = "important_procs"
+  self.model.group = ""
   self.model.soundOnShow = self.model.soundOnShow or "default"
   self.model.soundOnExpire = self.model.soundOnExpire or "none"
   self.model.duration = self.model.duration or 8

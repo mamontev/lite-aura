@@ -84,8 +84,8 @@ function Preview:Create(parent)
   o.status:SetText("Selected aura live draft preview")
 
   o.divider = o.frame:CreateTexture(nil, "ARTWORK")
-  o.divider:SetPoint("TOPLEFT", 10, -42)
-  o.divider:SetPoint("TOPRIGHT", -10, -42)
+  o.divider:SetPoint("TOPLEFT", 10, -54)
+  o.divider:SetPoint("TOPRIGHT", -10, -54)
   o.divider:SetHeight(1)
   o.divider:SetColorTexture(0.34, 0.56, 0.74, 0.55)
 
@@ -95,7 +95,7 @@ function Preview:Create(parent)
   if Skin and Skin.ApplySection then
     Skin:ApplySection(o.iconFrame)
   end
-  o.iconFrame:SetPoint("TOPLEFT", 10, -56)
+  o.iconFrame:SetPoint("TOPLEFT", 10, -70)
 
   o.icon = o.iconFrame:CreateTexture(nil, "ARTWORK")
   o.icon:SetAllPoints()
@@ -123,7 +123,7 @@ function Preview:Create(parent)
   o.timer:SetText("0.0")
 
   o.hint = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  o.hint:SetPoint("TOPLEFT", 10, -118)
+  o.hint:SetPoint("TOPLEFT", 10, -132)
   o.hint:SetPoint("RIGHT", -10, 0)
   o.hint:SetJustifyH("LEFT")
   o.hint:SetText("You are looking at a live draft preview of the selected aura. Appearance changes update here before you save. If Tracking is Estimated, the preview represents a local timer started from your cast, not a confirmed target aura.")

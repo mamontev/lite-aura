@@ -29,6 +29,23 @@ local function createBackdrop(frame)
   frame:SetBackdropBorderColor(0.12, 0.50, 0.82, 0.90)
 end
 
+local function createCardBackdrop(frame)
+  if Skin and Skin.ApplySection then
+    Skin:ApplySection(frame)
+    return
+  end
+  frame:SetBackdrop({
+    bgFile = "Interface\\Buttons\\WHITE8x8",
+    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    tile = true,
+    tileSize = 8,
+    edgeSize = 1,
+    insets = { left = 1, right = 1, top = 1, bottom = 1 },
+  })
+  frame:SetBackdropColor(0.04, 0.08, 0.16, 0.72)
+  frame:SetBackdropBorderColor(0.22, 0.34, 0.48, 0.74)
+end
+
 local function isDirectAuraTracking(draft)
   if UI and UI.Bindings and UI.Bindings.IsDirectAuraTracking then
     return UI.Bindings:IsDirectAuraTracking(draft)
@@ -67,7 +84,7 @@ end
 
 local function addInfoBox(parent, y, title, body, height)
   local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-  createBackdrop(frame)
+  createCardBackdrop(frame)
   frame:SetHeight(height or 86)
   frame:SetPoint("TOPLEFT", 12, y)
   frame:SetPoint("RIGHT", -14, 0)
@@ -87,7 +104,7 @@ end
 
 local function createCard(parent, y, title, body, height)
   local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-  createBackdrop(frame)
+  createCardBackdrop(frame)
   frame:SetHeight(height or 96)
   frame:SetPoint("TOPLEFT", 12, y)
   frame:SetPoint("RIGHT", -14, 0)
@@ -243,7 +260,7 @@ function AuraEditorPanel:UpdateHeader()
     return
   end
   self.titleText:SetText("")
-  self.subtitle:SetText(string.format("SpellID: %s | Unit: %s | Tracking: %s | Group: %s", tostring(self.draft.spellID or "?"), tostring(self.draft.unit or "player"), getTrackingSummary(self.draft), tostring(self.draft.group or "-")))
+  self.subtitle:SetText(string.format("Unit: %s | Tracking: %s", tostring(self.draft.unit or "player"), getTrackingSummary(self.draft)))
   if self.previewBannerText then
     local dirty = S and S.Get and S:Get().dirty == true
     local auraName = tostring(self.draft.name or self.draft.displayName or "Selected Aura")
@@ -328,6 +345,11 @@ function AuraEditorPanel:OnFieldChanged(key, value)
   end
 
   self.draft[key] = value
+  if key == "group" then
+    self.draft.groupID = value
+  elseif key == "groupID" then
+    self.draft.group = value
+  end
 
   if key == "unit" then
     self.draft.triggerType = (tostring(value or "player") == "target") and "aura" or "cast"

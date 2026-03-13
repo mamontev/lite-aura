@@ -41,7 +41,7 @@ function GlobalPanel:Create(parent)
   local o = setmetatable({}, self)
 
   o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-  o.frame:SetSize(240, 206)
+  o.frame:SetSize(240, 150)
   o.frame:SetFrameStrata("DIALOG")
   o.frame:SetToplevel(true)
   createBackdrop(o.frame)
@@ -62,11 +62,10 @@ function GlobalPanel:Create(parent)
   o.btnSettings:SetPoint("TOPLEFT", 14, -30)
 
   o.btnLocalization = makeButton(o.frame, "Localization", 210, function()
-    if ns.UIV2 and ns.UIV2.ConfigFrame and ns.UIV2.ConfigFrame.Open then
+    if ns.SettingsUI and ns.SettingsUI.OpenLocalizationPanel then
+      ns.SettingsUI:OpenLocalizationPanel()
+    elseif ns.UIV2 and ns.UIV2.ConfigFrame and ns.UIV2.ConfigFrame.Open then
       ns.UIV2.ConfigFrame:Open()
-    end
-    if ns.ConfigUI and ns.ConfigUI.Message then
-      ns.ConfigUI:Message("Localization panel is not available in the new UI yet. Use the main AuraLite editor for now.")
     end
     o.frame:Hide()
   end)
@@ -79,31 +78,10 @@ function GlobalPanel:Create(parent)
   end)
   o.btnDebug:SetPoint("TOPLEFT", 14, -86)
 
-  o.btnRefresh = makeButton(o.frame, "Refresh Tracker", 210, function()
-    if ns.EventRouter and ns.EventRouter.RefreshAll then
-      ns.EventRouter:RefreshAll()
-    end
-  end)
-  o.btnRefresh:SetPoint("TOPLEFT", 14, -114)
-
-  o.btnLock = makeButton(o.frame, "Toggle Lock / Unlock", 210, function()
-    if ns.db then
-      ns.db.locked = not (ns.db.locked == true)
-      if ns.Dragger and ns.Dragger.SetLocked then
-        ns.Dragger:SetLocked(ns.db.locked == true)
-      end
-      if ns.EventRouter and ns.EventRouter.RefreshAll then
-        ns.EventRouter:RefreshAll()
-      end
-    end
-  end)
-  o.btnLock:SetText((ns.db and ns.db.locked == false) and "Turn Movers Off" or "Turn Movers On")
-  o.btnLock:SetPoint("TOPLEFT", 14, -142)
-
   o.btnClose = makeButton(o.frame, "Close", 210, function()
     o.frame:Hide()
   end)
-  o.btnClose:SetPoint("TOPLEFT", 14, -170)
+  o.btnClose:SetPoint("TOPLEFT", 14, -114)
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(o.btnClose, "ghost")
   end
@@ -115,7 +93,6 @@ function GlobalPanel:Create(parent)
         o.frame:ClearAllPoints()
         o.frame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6)
       end
-      o.btnLock:SetText((ns.db and ns.db.locked == false) and "Turn Movers Off" or "Turn Movers On")
       o.frame:SetShown(not o.frame:IsShown())
     end)
   end

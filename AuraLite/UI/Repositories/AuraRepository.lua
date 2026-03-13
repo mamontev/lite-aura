@@ -205,6 +205,12 @@ function R:DeleteAura(auraId)
     if ns.SettingsData.DeleteEntriesByInstanceUID and instanceUID ~= "" then
       removed = (tonumber(removed) or 0) + (tonumber(ns.SettingsData:DeleteEntriesByInstanceUID(instanceUID, auraSpellID)) or 0)
     end
+    if ns.SettingsData.DeleteMatchingEntries and draft then
+      removed = (tonumber(removed) or 0) + (tonumber(ns.SettingsData:DeleteMatchingEntries(tostring(draft.unit or "player"), draft)) or 0)
+    end
+    if ns.SettingsData.CleanupOrphanAuraGroups then
+      ns.SettingsData:CleanupOrphanAuraGroups()
+    end
 
     if auraSpellID and auraSpellID > 0 and ns.state and type(ns.state.procRuleStates) == "table" then
       ns.state.procRuleStates[auraSpellID] = nil

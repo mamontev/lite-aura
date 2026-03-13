@@ -102,7 +102,7 @@ function AuraListPanel:AcquireRow(index, rowType)
       Skin:ApplyClickableRow(btn, "header")
     end
   else
-    btn:SetHeight(34)
+    btn:SetHeight(30)
     btn.bg = btn:CreateTexture(nil, "BACKGROUND")
     btn.bg:SetAllPoints()
     btn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
@@ -112,14 +112,9 @@ function AuraListPanel:AcquireRow(index, rowType)
     btn.icon:SetSize(22, 22)
 
     btn.nameText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    btn.nameText:SetPoint("TOPLEFT", btn.icon, "TOPRIGHT", 8, 1)
+    btn.nameText:SetPoint("LEFT", btn.icon, "RIGHT", 8, 0)
     btn.nameText:SetPoint("RIGHT", -84, 0)
     btn.nameText:SetJustifyH("LEFT")
-
-    btn.metaText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    btn.metaText:SetPoint("BOTTOMLEFT", btn.icon, "BOTTOMRIGHT", 8, -1)
-    btn.metaText:SetPoint("RIGHT", -84, 0)
-    btn.metaText:SetJustifyH("LEFT")
 
     btn.statusText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.statusText:SetPoint("RIGHT", -8, 0)
@@ -163,7 +158,7 @@ end
 
 function AuraListPanel:Render()
   local rows = self:BuildRows()
-  local width = math.max(100, self.scrollChild:GetWidth() - 8)
+  local width = math.max(100, (self.scroll:GetWidth() or self.scrollChild:GetWidth() or 0) - 28)
   local y = -2
 
   local used = {}
@@ -189,7 +184,6 @@ function AuraListPanel:Render()
         auraName = "Aura " .. tostring(row.spellID or "?")
       end
       btn.nameText:SetText(auraName)
-      btn.metaText:SetText(string.format("%s | %s | SpellID %s", tostring(row.unit or "player"), tostring(row.trigger or "Rule"), tostring(row.spellID or "?")))
 
       local status = tostring(row.status or "ok")
       local color = STATUS_COLORS[status] or STATUS_COLORS.ok
@@ -207,7 +201,7 @@ function AuraListPanel:Render()
         btn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
       end
 
-      y = y - 36
+      y = y - 32
     end
   end
 
@@ -239,13 +233,18 @@ function AuraListPanel:Create(parent)
   createBackdrop(o.frame)
 
   o.scroll = CreateFrame("ScrollFrame", nil, o.frame, "UIPanelScrollFrameTemplate")
-  o.scroll:SetPoint("TOPLEFT", 6, -12)
-  o.scroll:SetPoint("BOTTOMRIGHT", -28, 8)
+  o.scroll:SetPoint("TOPLEFT", 6, -6)
+  o.scroll:SetPoint("BOTTOMRIGHT", -28, 6)
 
   o.scrollChild = CreateFrame("Frame", nil, o.scroll)
   o.scrollChild:SetPoint("TOPLEFT")
-  o.scrollChild:SetSize(1, 1)
+  o.scrollChild:SetSize(math.max(1, (o.scroll:GetWidth() or 0) - 4), 1)
   o.scroll:SetScrollChild(o.scrollChild)
+
+  o.scroll:SetScript("OnSizeChanged", function(scrollFrame, width)
+    o.scrollChild:SetWidth(math.max(1, (width or 0) - 4))
+    o:Render()
+  end)
 
   if E then
     E:On(E.Names.AURA_SELECTED, function(payload)

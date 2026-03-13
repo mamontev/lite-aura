@@ -21,9 +21,10 @@ end
 
 local function normalizeGroupID(groupID)
   groupID = safeLower(tostring(groupID or ""))
-  if groupID == "" then
-    return "important_procs"
-  end
+  groupID = groupID:gsub("[^%w_]+", "_")
+  groupID = groupID:gsub("_+", "_")
+  groupID = groupID:gsub("^_+", "")
+  groupID = groupID:gsub("_+$", "")
   return groupID
 end
 
@@ -200,6 +201,20 @@ local function normalizeSpellIDList(value)
     end
   end
   return out
+end
+
+local function spellIDListsEqual(a, b)
+  local left = normalizeSpellIDList(a)
+  local right = normalizeSpellIDList(b)
+  if #left ~= #right then
+    return false
+  end
+  for i = 1, #left do
+    if left[i] ~= right[i] then
+      return false
+    end
+  end
+  return true
 end
 
 local function normalizeTrackingMode(value, unit)
@@ -399,6 +414,9 @@ end
 
 function D:EnsureGroup(groupID, displayName)
   groupID = normalizeGroupID(groupID)
+  if groupID == "" then
+    return ""
+  end
 
   if not ns.db.groups[groupID] then
     local maxOrder = 0
@@ -428,7 +446,9 @@ end
 
 function D:GetGroupOptions()
   local keys = U.KeysSortedByNumberField(ns.db.groups or {}, "order")
-  local out = {}
+  local out = {
+    { value = "", label = "No Group" },
+  }
   for i = 1, #keys do
     local key = keys[i]
     local cfg = ns.db.groups[key] or {}
@@ -450,6 +470,21 @@ function D:GetLoadClassOptions()
     out[#out + 1] = { value = cls.token, label = cls.label }
   end
   return out
+end
+
+function D:SuggestGroupID(displayName)
+  local base = normalizeGroupID(displayName)
+  if base == "" then
+    base = "new_group"
+  end
+  if not ns.db.groups[base] then
+    return base
+  end
+  local suffix = 2
+  while ns.db.groups[base .. "_" .. suffix] do
+    suffix = suffix + 1
+  end
+  return base .. "_" .. suffix
 end
 
 function D:GetLoadSpecMenuOptions(classToken)
@@ -511,11 +546,17 @@ function D:BuildEntryLabel(unit, item, index)
   local auraName = normalizeDisplayName(item.displayName)
   local spellName = ns.AuraAPI:GetSpellName(item.spellID) or ("Spell " .. tostring(item.spellID))
   local group = ns.db.groups[item.groupID]
-  local groupName = (group and group.name) or item.groupID or "Group"
+  local groupName = (group and group.name) or item.groupID or ""
   if auraName ~= "" then
-    return ("%s | %s [%s] (%d) | %s"):format(unit:gsub("^%l", string.upper), auraName, spellName, item.spellID or 0, groupName)
+    if groupName ~= "" then
+      return ("%s | %s [%s] (%d) | %s"):format(unit:gsub("^%l", string.upper), auraName, spellName, item.spellID or 0, groupName)
+    end
+    return ("%s | %s [%s] (%d)"):format(unit:gsub("^%l", string.upper), auraName, spellName, item.spellID or 0)
   end
-  return ("%s | %s (%d) | %s"):format(unit:gsub("^%l", string.upper), spellName, item.spellID or 0, groupName)
+  if groupName ~= "" then
+    return ("%s | %s (%d) | %s"):format(unit:gsub("^%l", string.upper), spellName, item.spellID or 0, groupName)
+  end
+  return ("%s | %s (%d)"):format(unit:gsub("^%l", string.upper), spellName, item.spellID or 0)
 end
 
 function D:ListEntries(filterText)
@@ -564,8 +605,8 @@ function D:BuildEditableModel(entry)
     spellID = tonumber(item.spellID) or 0,
     spellName = ns.AuraAPI:GetSpellName(item.spellID) or "",
     instanceUID = normalizeInstanceUID(item.instanceUID),
-    groupID = item.groupID or "important_procs",
-    layoutGroupEnabled = item.layoutGroupEnabled == true,
+    groupID = item.groupID or "",
+    layoutGroupEnabled = item.layoutGroupEnabled == true and normalizeGroupID(item.groupID) ~= "",
     loadClassToken = normalizeClassToken(item.loadClassToken),
     loadSpecIDs = normalizeSpecIDList(item.loadSpecIDs),
     inCombatOnly = item.inCombatOnly == true,
@@ -608,8 +649,8 @@ function D:BuildDefaultCreateModel()
     castSpellIDs = {},
     estimatedDuration = 8,
     instanceUID = "",
-    groupID = "important_procs",
-    layoutGroupEnabled = true,
+    groupID = "",
+    layoutGroupEnabled = false,
     loadClassToken = "",
     loadSpecIDs = {},
     inCombatOnly = false,
@@ -653,10 +694,14 @@ function D:BuildWatchItemFromModel(model)
     return nil, "Spell non trovato. Usa SpellID o nome corretto."
   end
 
-  local groupID = self:EnsureGroup(model.groupID)
+  local groupID = normalizeGroupID(model.groupID)
   local instanceUID = normalizeInstanceUID(model.instanceUID)
   if instanceUID == "" then
     instanceUID = buildInstanceUID(spellID)
+  end
+  local layoutGroupEnabled = normalizeBool(model.layoutGroupEnabled, false) and groupID ~= ""
+  if layoutGroupEnabled and groupID ~= "" then
+    groupID = self:EnsureGroup(groupID)
   end
   local iconMode = (model.iconMode == "custom") and "custom" or "spell"
   local customTexture = ""
@@ -679,7 +724,7 @@ function D:BuildWatchItemFromModel(model)
     trackingMode = normalizeTrackingMode(model.trackingMode, model.unit),
     castSpellIDs = normalizeSpellIDList(model.castSpellIDs),
     estimatedDuration = normalizeDuration(model.estimatedDuration, 8),
-    layoutGroupEnabled = normalizeBool(model.layoutGroupEnabled, true),
+    layoutGroupEnabled = layoutGroupEnabled,
     loadClassToken = normalizeClassToken(model.loadClassToken),
     loadSpecIDs = normalizeSpecIDList(model.loadSpecIDs),
     inCombatOnly = normalizeBool(model.inCombatOnly, false),
@@ -804,6 +849,75 @@ function D:DeleteEntriesByInstanceUID(instanceUID, spellID)
     ns:RebuildWatchIndex()
     ns.EventRouter:RefreshAll()
     ns.Debug:Logf("UI DeleteEntriesByInstanceUID instanceUID=%s spellID=%s removed=%d", tostring(instanceUID), tostring(spellID or "nil"), removed)
+  end
+
+  return removed
+end
+
+function D:DeleteMatchingEntries(unit, model)
+  unit = self:NormalizeUnit(unit)
+  model = model or {}
+  local list = ns.db.watchlist[unit] or {}
+  local targetSpellID = tonumber(model.spellID or model.spellInput)
+  if not targetSpellID or targetSpellID <= 0 then
+    return 0
+  end
+
+  local targetDisplayName = normalizeDisplayName(model.displayName or model.name)
+  local targetGroupID = normalizeGroupID(model.groupID or model.group)
+  local targetTrackingMode = normalizeTrackingMode(model.trackingMode, unit)
+  local targetCastSpellIDs = normalizeSpellIDList(model.castSpellIDs)
+
+  local removed = 0
+  for i = #list, 1, -1 do
+    local item = list[i]
+    local sameSpell = tonumber(item and item.spellID) == targetSpellID
+    local sameName = normalizeDisplayName(item and item.displayName) == targetDisplayName
+    local sameGroup = normalizeGroupID(item and item.groupID) == targetGroupID
+    local sameTracking = normalizeTrackingMode(item and item.trackingMode, unit) == targetTrackingMode
+    local sameCastList = spellIDListsEqual(item and item.castSpellIDs, targetCastSpellIDs)
+
+    if sameSpell and sameGroup and sameTracking and (sameName or targetDisplayName == "") and sameCastList then
+      table.remove(list, i)
+      removed = removed + 1
+    end
+  end
+
+  if removed > 0 then
+    ns:RebuildWatchIndex()
+    ns.EventRouter:RefreshAll()
+    ns.Debug:Logf("UI DeleteMatchingEntries unit=%s spellID=%s removed=%d", tostring(unit), tostring(targetSpellID), removed)
+  end
+
+  return removed
+end
+
+function D:CleanupOrphanAuraGroups()
+  local referenced = {}
+  for _, unit in ipairs(trackedUnits) do
+    local list = ns.db.watchlist[unit] or {}
+    for i = 1, #list do
+      local groupID = normalizeGroupID(list[i] and list[i].groupID)
+      if groupID ~= "" then
+        referenced[groupID] = true
+      end
+    end
+  end
+
+  local removed = 0
+  for groupID, group in pairs(ns.db.groups or {}) do
+    local autoGenerated = type(groupID) == "string" and groupID:find("^aura_", 1) == 1
+    if autoGenerated and not referenced[groupID] then
+      ns.db.groups[groupID] = nil
+      if type(ns.db.positions) == "table" then
+        ns.db.positions[groupID] = nil
+      end
+      removed = removed + 1
+    end
+  end
+
+  if removed > 0 and ns.Debug and ns.Debug.Logf then
+    ns.Debug:Logf("UI CleanupOrphanAuraGroups removed=%d", removed)
   end
 
   return removed

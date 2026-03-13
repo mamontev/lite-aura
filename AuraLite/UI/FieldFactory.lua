@@ -347,6 +347,111 @@ local function createStatusbarPicker(holder, field, model, onChange)
   return control
 end
 
+local function createGroupSelect(holder, field, model, onChange)
+  holder:SetHeight(114)
+
+  local function buildOptions()
+    local options = {}
+    if type(field.optionsProvider) == "function" then
+      options = field.optionsProvider(model) or {}
+    elseif type(field.options) == "table" then
+      options = field.options
+    end
+    return options
+  end
+
+  local control = createDropdown(holder, field.width or 300)
+  control:SetPoint("TOPLEFT", -16, -16)
+
+  local helper = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  helper:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 16, -2)
+  helper:SetPoint("RIGHT", -4, 0)
+  helper:SetJustifyH("LEFT")
+  helper:SetText("A group keeps related auras together so one mover can position them all.")
+
+  local newLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  newLabel:SetPoint("TOPLEFT", helper, "BOTTOMLEFT", 0, -8)
+  newLabel:SetText("New Group Name")
+
+  local newBox = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+  newBox:SetAutoFocus(false)
+  newBox:SetPoint("TOPLEFT", newLabel, "BOTTOMLEFT", 0, -4)
+  newBox:SetSize(224, 24)
+  newBox:SetTextInsets(6, 6, 0, 0)
+
+  local newBg = CreateFrame("Frame", nil, holder)
+  newBg:SetPoint("TOPLEFT", newBox, -3, 3)
+  newBg:SetPoint("BOTTOMRIGHT", newBox, 3, -3)
+  newBg:SetFrameLevel(holder:GetFrameLevel())
+  createInputBackground(newBg)
+  newBox:SetFrameLevel(newBg:GetFrameLevel() + 1)
+
+  local createBtn = CreateFrame("Button", nil, holder, "UIPanelButtonTemplate")
+  createBtn:SetSize(86, 22)
+  createBtn:SetPoint("LEFT", newBox, "RIGHT", 8, 0)
+  createBtn:SetText("Create")
+  if Skin and Skin.SetButtonVariant then
+    Skin:SetButtonVariant(createBtn, "ghost")
+  end
+
+  local function refreshOptions(selectedValue)
+    control:SetOptions(buildOptions())
+    control:SetValue(selectedValue or model[field.key] or model.groupID or "")
+  end
+
+    local function commitGroup(groupID)
+    groupID = tostring(groupID or "")
+    model[field.key] = groupID
+    model.groupID = groupID
+    model.layoutGroupEnabled = groupID ~= ""
+    refreshOptions(groupID)
+    onChange(field.key, groupID)
+  end
+
+  local function createGroupFromInput()
+    local displayName = tostring(newBox:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if displayName == "" or not ns.SettingsData then
+      return
+    end
+    local groupID = ns.SettingsData.SuggestGroupID and ns.SettingsData:SuggestGroupID(displayName) or displayName:lower():gsub("%s+", "_")
+    if ns.SettingsData.EnsureGroup then
+      ns.SettingsData:EnsureGroup(groupID, displayName)
+    end
+    newBox:SetText("")
+    commitGroup(groupID)
+  end
+
+  control:SetOnValueChanged(function(value)
+    value = tostring(value or "")
+      if value == "__new__" then
+        newLabel:Show()
+        newBox:Show()
+        createBtn:Show()
+        newBox:SetFocus()
+        return
+    end
+    newLabel:Hide()
+    newBox:Hide()
+    createBtn:Hide()
+    commitGroup(value)
+  end)
+
+  createBtn:SetScript("OnClick", createGroupFromInput)
+  newBox:SetScript("OnEnterPressed", function(edit)
+    createGroupFromInput()
+    edit:ClearFocus()
+  end)
+  newBox:SetScript("OnEscapePressed", function(edit)
+    edit:ClearFocus()
+  end)
+
+  newLabel:Hide()
+  newBox:Hide()
+  createBtn:Hide()
+  refreshOptions(model[field.key] or model.groupID or "")
+  return control
+end
+
 local function attachSpellResolver(holder, control, field, onChange)
   if not SpellInput then
     return
@@ -585,6 +690,8 @@ function F:CreateField(parent, field, model, onChange)
     control:SetOnValueChanged(function(value)
       onChange(field.key, value)
     end)
+  elseif field.widget == "groupselect" then
+    control = createGroupSelect(holder, field, model, onChange)
   elseif field.widget == "checkbox" then
     control = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
     control:SetPoint("TOPLEFT", 0, -18)
