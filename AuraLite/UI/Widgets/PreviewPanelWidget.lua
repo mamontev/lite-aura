@@ -6,6 +6,7 @@ ns.UIV2.Widgets = ns.UIV2.Widgets or {}
 local UI = ns.UIV2
 local W = UI.Widgets
 local E = UI.Events
+local Skin = ns.UISkin
 
 local Preview = {}
 Preview.__index = Preview
@@ -41,6 +42,10 @@ function Preview:SetDraft(draft)
     trackingLabel = "Estimated"
   end
   self.mode:SetText(string.format("Mode: %s | Tracking: %s", tostring(self.draft.displayMode or "iconbar"), trackingLabel))
+  if self.status then
+    local dirty = UI and UI.State and UI.State.Get and UI.State:Get().dirty == true
+    self.status:SetText(dirty and "Live draft preview | Unsaved changes" or "Live draft preview | Saved")
+  end
 end
 
 function Preview:Play(duration)
@@ -64,19 +69,33 @@ function Preview:Create(parent)
   o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
   o.frame:SetAllPoints()
   createBackdrop(o.frame)
-
-  o.title = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  o.title:SetPoint("TOPLEFT", 10, -8)
-  o.title:SetText("Preview")
+  if Skin and Skin.ApplySection then
+    Skin:ApplySection(o.frame)
+  end
 
   o.mode = o.frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  o.mode:SetPoint("TOPLEFT", 10, -26)
+  o.mode:SetPoint("TOPLEFT", 10, -12)
   o.mode:SetText("Mode: iconbar")
+
+  o.status = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  o.status:SetPoint("TOPLEFT", 10, -28)
+  o.status:SetPoint("RIGHT", -10, 0)
+  o.status:SetJustifyH("LEFT")
+  o.status:SetText("Selected aura live draft preview")
+
+  o.divider = o.frame:CreateTexture(nil, "ARTWORK")
+  o.divider:SetPoint("TOPLEFT", 10, -42)
+  o.divider:SetPoint("TOPRIGHT", -10, -42)
+  o.divider:SetHeight(1)
+  o.divider:SetColorTexture(0.34, 0.56, 0.74, 0.55)
 
   o.iconFrame = CreateFrame("Frame", nil, o.frame, "BackdropTemplate")
   createBackdrop(o.iconFrame)
   o.iconFrame:SetSize(44, 44)
-  o.iconFrame:SetPoint("TOPLEFT", 10, -48)
+  if Skin and Skin.ApplySection then
+    Skin:ApplySection(o.iconFrame)
+  end
+  o.iconFrame:SetPoint("TOPLEFT", 10, -56)
 
   o.icon = o.iconFrame:CreateTexture(nil, "ARTWORK")
   o.icon:SetAllPoints()
@@ -104,10 +123,10 @@ function Preview:Create(parent)
   o.timer:SetText("0.0")
 
   o.hint = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  o.hint:SetPoint("TOPLEFT", 10, -108)
+  o.hint:SetPoint("TOPLEFT", 10, -118)
   o.hint:SetPoint("RIGHT", -10, 0)
   o.hint:SetJustifyH("LEFT")
-  o.hint:SetText("Use preview actions to test layout and timing. If Tracking is Estimated, the preview represents a local timer started from your cast, not a confirmed target aura.")
+  o.hint:SetText("You are looking at a live draft preview of the selected aura. Appearance changes update here before you save. If Tracking is Estimated, the preview represents a local timer started from your cast, not a confirmed target aura.")
 
   o.frame:SetScript("OnUpdate", function()
     if not o.active then
@@ -144,6 +163,12 @@ function Preview:Create(parent)
       local draft = UI.AuraRepository:GetAuraDraft(auraId)
       if draft then
         o:SetDraft(draft)
+      end
+    end)
+
+    E:On(E.Names.STATE_CHANGED, function()
+      if o.draft then
+        o:SetDraft(o.draft)
       end
     end)
   end

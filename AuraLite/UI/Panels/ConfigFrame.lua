@@ -63,9 +63,12 @@ function ConfigFrame:BuildFrame()
   local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   title:SetPoint("TOPLEFT", 14, -10)
   title:SetText("AuraLite - Editor")
+  title:SetTextColor(0.98, 0.86, 0.22)
 
   local sub = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   sub:SetPoint("TOPLEFT", 16, -30)
+  sub:SetPoint("RIGHT", -220, 0)
+  sub:SetJustifyH("LEFT")
   sub:SetText("Pick an aura on the left, use the simple guided setup in the center, and open more options only when you really need them.")
 
   local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
@@ -108,46 +111,85 @@ function ConfigFrame:BuildFrame()
   search:SetPoint("TOPLEFT", 16, -60)
   search:SetTextInsets(6, 6, 0, 0)
   search:SetText("")
+  if Skin and Skin.ApplyEditBox then
+    Skin:ApplyEditBox(search)
+  end
 
   local searchLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   searchLabel:SetPoint("BOTTOMLEFT", search, "TOPLEFT", 2, 3)
   searchLabel:SetText("Search Auras")
+  searchLabel:SetTextColor(0.92, 0.96, 1.0)
 
   local left = CreateFrame("Frame", nil, frame, "BackdropTemplate")
   left:SetPoint("TOPLEFT", 12, -92)
   left:SetPoint("BOTTOMLEFT", 12, 12)
   left:SetWidth(350)
   createPanelBackdrop(left, 0.03, 0.10, 0.20, 0.75)
+  if Skin and Skin.ApplySection then
+    Skin:ApplySection(left)
+  end
 
   local center = CreateFrame("Frame", nil, frame, "BackdropTemplate")
   center:SetPoint("TOPLEFT", left, "TOPRIGHT", 10, 0)
   center:SetPoint("BOTTOMLEFT", left, "BOTTOMRIGHT", 10, 0)
   center:SetWidth(700)
   createPanelBackdrop(center, 0.03, 0.11, 0.22, 0.75)
+  if Skin and Skin.ApplySection then
+    Skin:ApplySection(center)
+  end
 
   local right = CreateFrame("Frame", nil, frame, "BackdropTemplate")
   right:SetPoint("TOPLEFT", center, "TOPRIGHT", 10, 0)
   right:SetPoint("BOTTOMRIGHT", -12, 12)
   createPanelBackdrop(right, 0.02, 0.09, 0.18, 0.75)
+  if Skin and Skin.ApplySection then
+    Skin:ApplySection(right)
+  end
+
+  local leftTitle = left:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  leftTitle:SetPoint("TOPLEFT", 10, -8)
+  leftTitle:SetText("Aura Library")
+  leftTitle:SetTextColor(0.94, 0.95, 1.0)
+
+  local centerTitle = center:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  centerTitle:SetPoint("TOPLEFT", 10, -8)
+  centerTitle:SetText("Configuration")
+  centerTitle:SetTextColor(0.94, 0.95, 1.0)
 
   local rightTitle = right:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   rightTitle:SetPoint("TOPLEFT", 10, -8)
-  rightTitle:SetText("Preview / Test")
+  rightTitle:SetText("Live Preview")
+  rightTitle:SetTextColor(0.94, 0.95, 1.0)
 
   local listPanel = nil
   if Panels.AuraListPanel and Panels.AuraListPanel.Create then
     listPanel = Panels.AuraListPanel:Create(left)
+    if listPanel and listPanel.frame then
+      listPanel.frame:ClearAllPoints()
+      listPanel.frame:SetPoint("TOPLEFT", left, "TOPLEFT", 6, -28)
+      listPanel.frame:SetPoint("BOTTOMRIGHT", left, "BOTTOMRIGHT", -6, 6)
+    end
     listPanel:BindSearchBox(search)
   end
 
   local editorPanel = nil
   if Panels.AuraEditorPanel and Panels.AuraEditorPanel.Create then
     editorPanel = Panels.AuraEditorPanel:Create(center)
+    if editorPanel and editorPanel.frame then
+      editorPanel.frame:ClearAllPoints()
+      editorPanel.frame:SetPoint("TOPLEFT", center, "TOPLEFT", 6, -28)
+      editorPanel.frame:SetPoint("BOTTOMRIGHT", center, "BOTTOMRIGHT", -6, 6)
+    end
   end
 
   local previewPanel = nil
   if UI.Widgets and UI.Widgets.PreviewPanelWidget and UI.Widgets.PreviewPanelWidget.Create then
     previewPanel = UI.Widgets.PreviewPanelWidget:Create(right)
+    if previewPanel and previewPanel.frame then
+      previewPanel.frame:ClearAllPoints()
+      previewPanel.frame:SetPoint("TOPLEFT", right, "TOPLEFT", 6, -28)
+      previewPanel.frame:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", -6, 6)
+    end
   end
 
   local wizardPanel = nil

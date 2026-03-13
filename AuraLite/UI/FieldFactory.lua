@@ -108,6 +108,245 @@ local function formatColorCSV(r, g, b)
   return string.format("%.2f,%.2f,%.2f", tonumber(r) or 1, tonumber(g) or 1, tonumber(b) or 1)
 end
 
+local function findStatusbarEntry(entries, value)
+  value = tostring(value or "")
+  for i = 1, #(entries or {}) do
+    local row = entries[i]
+    if tostring(row.value or "") == value then
+      return row
+    end
+  end
+  return nil
+end
+
+local function createStatusbarPicker(holder, field, model, onChange)
+  holder:SetHeight(132)
+
+  local entries = {}
+  if ns.Media and ns.Media.GetStatusbarEntries then
+    entries = ns.Media:GetStatusbarEntries()
+  end
+
+  local selectedValue = tostring(model[field.key] or "")
+  local control = CreateFrame("Frame", nil, holder, "BackdropTemplate")
+  control:SetPoint("TOPLEFT", 0, -18)
+  control:SetSize(field.width or 320, 28)
+  control:SetBackdrop({
+    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+    edgeSize = 10,
+    insets = { left = 2, right = 2, top = 2, bottom = 2 },
+  })
+  control:SetBackdropColor(0.04, 0.08, 0.14, 0.88)
+  control:SetBackdropBorderColor(0.14, 0.42, 0.70, 0.88)
+
+  local preview = CreateFrame("StatusBar", nil, control)
+  preview:SetPoint("LEFT", 6, 0)
+  preview:SetSize(86, 14)
+  preview:SetMinMaxValues(0, 1)
+  preview:SetValue(1)
+  preview:SetStatusBarColor(0.18, 0.72, 1.0, 0.95)
+  preview.bg = preview:CreateTexture(nil, "BACKGROUND")
+  preview.bg:SetAllPoints()
+  preview.bg:SetColorTexture(0.06, 0.10, 0.16, 0.85)
+
+  local valueText = control:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  valueText:SetPoint("LEFT", preview, "RIGHT", 10, 0)
+  valueText:SetPoint("RIGHT", -34, 0)
+  valueText:SetJustifyH("LEFT")
+
+  local trigger = CreateFrame("Button", nil, control, "UIPanelButtonTemplate")
+  trigger:SetSize(24, 22)
+  trigger:SetPoint("RIGHT", -3, 0)
+  trigger:SetText("v")
+  if Skin and Skin.SetButtonVariant then
+    Skin:SetButtonVariant(trigger, "ghost")
+  end
+
+  local help = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  help:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 0, -4)
+  help:SetPoint("RIGHT", -4, 0)
+  help:SetJustifyH("LEFT")
+  help:SetText("SharedMedia packs add more textures here automatically.")
+
+  local customLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  customLabel:SetPoint("TOPLEFT", help, "BOTTOMLEFT", 0, -8)
+  customLabel:SetText("Custom Path")
+
+  local customBox = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+  customBox:SetAutoFocus(false)
+  customBox:SetPoint("TOPLEFT", customLabel, "BOTTOMLEFT", 0, -4)
+  customBox:SetSize(field.width or 320, 24)
+  customBox:SetTextInsets(6, 6, 0, 0)
+
+  local customBg = CreateFrame("Frame", nil, holder)
+  customBg:SetPoint("TOPLEFT", customBox, -3, 3)
+  customBg:SetPoint("BOTTOMRIGHT", customBox, 3, -3)
+  customBg:SetFrameLevel(holder:GetFrameLevel())
+  createInputBackground(customBg)
+  customBox:SetFrameLevel(customBg:GetFrameLevel() + 1)
+
+  local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+  popup:SetFrameStrata("TOOLTIP")
+  popup:SetClampedToScreen(true)
+  popup:SetBackdrop({
+    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+    edgeSize = 10,
+    insets = { left = 2, right = 2, top = 2, bottom = 2 },
+  })
+  popup:SetBackdropColor(0.02, 0.05, 0.11, 0.97)
+  popup:SetBackdropBorderColor(0.14, 0.42, 0.70, 0.92)
+  popup:SetSize((field.width or 320) + 24, 228)
+  popup:Hide()
+
+  local popupHeader = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  popupHeader:SetPoint("TOPLEFT", 10, -10)
+  popupHeader:SetText("Statusbar Textures")
+
+  local scroll = CreateFrame("ScrollFrame", nil, popup, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 8, -28)
+  scroll:SetPoint("BOTTOMRIGHT", -28, 8)
+
+  local content = CreateFrame("Frame", nil, scroll)
+  content:SetSize((field.width or 320), 1)
+  scroll:SetScrollChild(content)
+  popup.rows = popup.rows or {}
+
+  local customOption = {
+    value = "__custom__",
+    label = "Custom Path",
+    texture = "Interface\\TargetingFrame\\UI-StatusBar",
+  }
+
+  local function updateControl()
+    local currentValue = tostring(model[field.key] or "")
+    local custom = currentValue ~= "" and not currentValue:lower():find("^lsm:", 1, true)
+    local selected = findStatusbarEntry(entries, currentValue)
+    if custom then
+      valueText:SetText("Custom Path")
+      customBox:SetText(currentValue)
+      customLabel:Show()
+      customBox:Show()
+      if ns.AuraAPI and ns.AuraAPI.ResolveBarTexturePath then
+        preview:SetStatusBarTexture(ns.AuraAPI:ResolveBarTexturePath(currentValue))
+      else
+        preview:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+      end
+    else
+      if not selected then
+        selected = entries[1]
+      end
+      valueText:SetText(selected and selected.label or "Default (Blizzard)")
+      customBox:SetText("")
+      customLabel:Hide()
+      customBox:Hide()
+      preview:SetStatusBarTexture((selected and selected.texture) or "Interface\\TargetingFrame\\UI-StatusBar")
+    end
+  end
+
+  local function closePopup()
+    popup:Hide()
+  end
+
+  local function selectValue(value)
+    model[field.key] = tostring(value or "")
+    updateControl()
+    onChange(field.key, model[field.key])
+    closePopup()
+  end
+
+  local displayEntries = { customOption }
+  for i = 1, #entries do
+    displayEntries[#displayEntries + 1] = entries[i]
+  end
+
+  local rowHeight = 26
+  for i = 1, #displayEntries do
+    local row = CreateFrame("Button", nil, content)
+    row:SetPoint("TOPLEFT", 0, -((i - 1) * rowHeight))
+    row:SetSize((field.width or 320) - 8, rowHeight)
+    if Skin and Skin.ApplyClickableRow then
+      Skin:ApplyClickableRow(row, "row")
+    end
+    if Skin and Skin.SetClickableRowState then
+      row:SetScript("OnEnter", function(selfRow)
+        Skin:SetClickableRowState(selfRow, "hover")
+      end)
+      row:SetScript("OnLeave", function(selfRow)
+        Skin:SetClickableRowState(selfRow, "normal")
+      end)
+    end
+
+    row.bar = CreateFrame("StatusBar", nil, row)
+    row.bar:SetPoint("LEFT", 8, 0)
+    row.bar:SetSize(92, 12)
+    row.bar:SetMinMaxValues(0, 1)
+    row.bar:SetValue(1)
+    row.bar:SetStatusBarColor(0.18, 0.72, 1.0, 0.95)
+    row.bar.bg = row.bar:CreateTexture(nil, "BACKGROUND")
+    row.bar.bg:SetAllPoints()
+    row.bar.bg:SetColorTexture(0.06, 0.10, 0.16, 0.85)
+
+    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.text:SetPoint("LEFT", row.bar, "RIGHT", 10, 0)
+    row.text:SetPoint("RIGHT", -10, 0)
+    row.text:SetJustifyH("LEFT")
+
+    row.entry = displayEntries[i]
+    if row.entry.value == "__custom__" then
+      row.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+      row.bar:SetStatusBarColor(0.36, 0.40, 0.48, 0.95)
+    else
+      row.bar:SetStatusBarTexture(row.entry.texture or "Interface\\TargetingFrame\\UI-StatusBar")
+      row.bar:SetStatusBarColor(0.18, 0.72, 1.0, 0.95)
+    end
+    row.text:SetText(row.entry.label)
+    row:SetScript("OnClick", function(selfRow)
+      if selfRow.entry.value == "__custom__" then
+        model[field.key] = customBox:GetText() or ""
+        updateControl()
+        closePopup()
+        customBox:SetFocus()
+        return
+      end
+      selectValue(selfRow.entry.value)
+    end)
+    popup.rows[i] = row
+  end
+  content:SetHeight(#displayEntries * rowHeight)
+
+  customBox:SetScript("OnTextChanged", function(edit)
+    local value = tostring(edit:GetText() or "")
+    model[field.key] = value
+    updateControl()
+    onChange(field.key, value)
+  end)
+  customBox:SetScript("OnEscapePressed", function(edit)
+    edit:ClearFocus()
+  end)
+  customBox:SetScript("OnEnterPressed", function(edit)
+    edit:ClearFocus()
+  end)
+
+  trigger:SetScript("OnClick", function()
+    if popup:IsShown() then
+      closePopup()
+      return
+    end
+    popup:ClearAllPoints()
+    popup:SetPoint("TOPLEFT", control, "BOTTOMLEFT", -2, -4)
+    popup:Show()
+  end)
+
+  control:SetScript("OnHide", closePopup)
+  updateControl()
+
+  holder.control = control
+  holder.popup = popup
+  return control
+end
+
 local function attachSpellResolver(holder, control, field, onChange)
   if not SpellInput then
     return
@@ -519,6 +758,8 @@ function F:CreateField(parent, field, model, onChange)
         ColorPickerFrame:Show()
       end
     end)
+  elseif field.widget == "bartexture" then
+    control = createStatusbarPicker(holder, field, model, onChange)
   else
     local box
     if multiline then

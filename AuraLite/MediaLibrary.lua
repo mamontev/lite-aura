@@ -72,6 +72,45 @@ function M:GetStatusbarOptions()
   return buildOptionsFromList("lsm:", self:List("statusbar"))
 end
 
+function M:GetStatusbarEntries()
+  local list = self:List("statusbar")
+  local entries = {
+    {
+      value = "",
+      label = "Default (Blizzard)",
+      texture = "Interface\\TargetingFrame\\UI-StatusBar",
+      builtin = true,
+    },
+  }
+
+  for i = 1, #list do
+    local name = tostring(list[i] or "")
+    if name ~= "" then
+      entries[#entries + 1] = {
+        value = "lsm:" .. name,
+        label = name,
+        texture = self:Fetch("statusbar", name) or "Interface\\TargetingFrame\\UI-StatusBar",
+        builtin = (name == "Blizzard" or name == "Blizzard Character Skills Bar" or name == "Blizzard Raid Bar" or name == "Solid"),
+      }
+    end
+  end
+
+  table.sort(entries, function(a, b)
+    if a.value == "" then
+      return true
+    end
+    if b.value == "" then
+      return false
+    end
+    if a.builtin ~= b.builtin then
+      return a.builtin == true
+    end
+    return tostring(a.label) < tostring(b.label)
+  end)
+
+  return entries
+end
+
 function M:GetSoundOptions()
   return buildOptionsFromList("lsm:", self:List("sound"))
 end

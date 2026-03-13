@@ -199,6 +199,22 @@ local function getButtonVariantPalette(base, variant)
       border = { base.sectionBorder[1], base.sectionBorder[2], base.sectionBorder[3], 0.55 },
       text = { 0.90, 0.96, 1.0 },
     }
+  elseif variant == "tab" then
+    return {
+      bg = { base.sectionBG[1], base.sectionBG[2], base.sectionBG[3], 0.28 },
+      hover = { base.sectionBG[1] + 0.04, base.sectionBG[2] + 0.04, base.sectionBG[3] + 0.04, 0.52 },
+      pressed = { base.sectionBG[1] + 0.02, base.sectionBG[2] + 0.02, base.sectionBG[3] + 0.02, 0.70 },
+      border = { base.sectionBorder[1], base.sectionBorder[2], base.sectionBorder[3], 0.40 },
+      text = { 0.84, 0.90, 0.97 },
+    }
+  elseif variant == "segment" then
+    return {
+      bg = { base.buttonBG[1], base.buttonBG[2], base.buttonBG[3], 0.62 },
+      hover = { base.buttonHover[1], base.buttonHover[2], base.buttonHover[3], 0.80 },
+      pressed = { base.sectionBG[1], base.sectionBG[2], base.sectionBG[3], 0.92 },
+      border = { base.buttonBorder[1], base.buttonBorder[2], base.buttonBorder[3], 0.60 },
+      text = { 0.92, 0.96, 1.0 },
+    }
   end
 
   return {

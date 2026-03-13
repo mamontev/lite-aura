@@ -47,28 +47,16 @@ local function soundOptions()
 end
 
 Schemas.EditorTabs = {
-  { key = "Trigger", label = "Trigger", fields = {
-    { key = "unit", label = "Where To Track", widget = "dropdown", options = {
+  { key = "Tracking", label = "Tracking", fields = {
+    { key = "unit", label = "Watch This Aura On", widget = "dropdown", options = {
       { value = "player", label = "Player" },
       { value = "target", label = "Target" },
     } },
-    { key = "castSpellIDs", label = "SpellIDs I Cast (CSV)", widget = "spellcsv", required = true },
+    { key = "castSpellIDs", label = "SpellIDs I Cast", widget = "spellcsv", required = true },
     { key = "spellID", label = "Aura SpellID To Show", widget = "spellid", required = true },
-    { key = "estimatedDuration", label = "Expected Duration (sec)", widget = "number", min = 1, max = 600 },
+    { key = "estimatedDuration", label = "Expected Timer Length (sec)", widget = "number", min = 1, max = 600 },
   } },
-  { key = "Conditions", label = "Conditions", fields = {
-    { key = "conditionLogic", label = "Condition Logic", widget = "dropdown", options = {
-      { value = "all", label = "AND (all)" },
-      { value = "any", label = "OR (any)" },
-    } },
-    { key = "talentSpellIDs", label = "Talent SpellIDs (CSV)", widget = "spellcsv" },
-    { key = "requiredAuraSpellIDs", label = "Required Aura SpellIDs (CSV)", widget = "spellcsv" },
-    { key = "inCombatOnly", label = "In Combat Only", widget = "checkbox" },
-  } },
-  { key = "Actions", label = "Actions", fields = {
-    { key = "duration", label = "Timer Duration (sec)", widget = "number", min = 1, max = 120 },
-  } },
-  { key = "Display", label = "Display", fields = {
+  { key = "Appearance", label = "Appearance", fields = {
     { key = "name", label = "Aura Name", widget = "text" },
     { key = "group", label = "Group ID", widget = "text" },
     { key = "displayMode", label = "Display Mode", widget = "dropdown", options = {
@@ -80,15 +68,25 @@ Schemas.EditorTabs = {
     { key = "iconHeight", label = "Icon Height", widget = "spinner", min = 12, max = 256, step = 2, default = 36, help = "Default: 36" },
     { key = "barWidth", label = "Bar Width", widget = "spinner", min = 60, max = 512, step = 4, default = 94, help = "Default: 94" },
     { key = "barHeight", label = "Bar Height", widget = "spinner", min = 6, max = 128, step = 2, default = 16, help = "Default: 16" },
-    { key = "barSide", label = "Icon Position", widget = "dropdown", options = {
-      { value = "right", label = "Icon Left / Bar Right" },
-      { value = "left", label = "Icon Right / Bar Left" },
+    { key = "barSide", label = "Bar Position", widget = "dropdown", options = {
+      { value = "right", label = "Bar Right" },
+      { value = "left", label = "Bar Left" },
     } },
     { key = "showTimerText", label = "Show Timer Text", widget = "checkbox" },
     { key = "barColor", label = "Bar Color", widget = "color" },
+    { key = "barTexture", label = "Bar Texture", widget = "bartexture" },
+    { key = "customText", label = "Custom Text", widget = "text" },
     { key = "lowTime", label = "Low-Time Threshold", widget = "number", min = 0, max = 60 },
   } },
   { key = "Advanced", label = "Advanced", fields = {
+    { key = "conditionLogic", label = "Condition Logic", widget = "dropdown", options = {
+      { value = "all", label = "AND (all)" },
+      { value = "any", label = "OR (any)" },
+    } },
+    { key = "talentSpellIDs", label = "Talent SpellIDs", widget = "spellcsv" },
+    { key = "requiredAuraSpellIDs", label = "Required Aura SpellIDs", widget = "spellcsv" },
+    { key = "inCombatOnly", label = "In Combat Only", widget = "checkbox" },
+    { key = "duration", label = "Manual Timer Duration (sec)", widget = "number", min = 1, max = 120 },
     { key = "ruleName", label = "Rule Name", widget = "text", required = false },
     { key = "ruleID", label = "Rule ID", widget = "text", required = false },
     { key = "soundOnShow", label = "Sound On Show", widget = "dropdown", optionsProvider = soundOptions },
@@ -108,4 +106,3 @@ function Schemas:GetTab(tabKey)
   end
   return self.EditorTabs[1]
 end
-

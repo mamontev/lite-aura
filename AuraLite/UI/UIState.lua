@@ -9,7 +9,7 @@ local S = UI.State
 
 S._data = S._data or {
   selectedAuraId = nil,
-  activeTab = "Trigger",
+  activeTab = "Tracking",
   dirty = false,
   filters = {
     search = "",
@@ -50,7 +50,7 @@ function S:SetSelectedAura(auraId, source)
 end
 
 function S:SetActiveTab(tabKey)
-  tabKey = tostring(tabKey or "Trigger")
+  tabKey = tostring(tabKey or "Tracking")
   if self._data.activeTab == tabKey then
     return
   end

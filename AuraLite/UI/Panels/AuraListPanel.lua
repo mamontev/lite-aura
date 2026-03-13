@@ -124,6 +124,10 @@ function AuraListPanel:AcquireRow(index, rowType)
     btn.statusText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.statusText:SetPoint("RIGHT", -8, 0)
 
+    btn.previewText = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    btn.previewText:SetPoint("RIGHT", btn.statusText, "LEFT", -8, 0)
+    btn.previewText:SetText("")
+
     btn:SetScript("OnClick", function(selfBtn)
       if S and S.SetSelectedAura then
         S:SetSelectedAura(selfBtn.auraId, "list")
@@ -184,17 +188,20 @@ function AuraListPanel:Render()
       if auraName == "" then
         auraName = "Aura " .. tostring(row.spellID or "?")
       end
-      btn.nameText:SetText(string.format("%s (%s)", auraName, tostring(row.spellID or "?")))
-      btn.metaText:SetText(string.format("%s | %s", tostring(row.unit or "player"), tostring(row.trigger or "Rule")))
+      btn.nameText:SetText(auraName)
+      btn.metaText:SetText(string.format("%s | %s | SpellID %s", tostring(row.unit or "player"), tostring(row.trigger or "Rule"), tostring(row.spellID or "?")))
 
       local status = tostring(row.status or "ok")
       local color = STATUS_COLORS[status] or STATUS_COLORS.ok
       btn.statusText:SetText(status:upper())
       btn.statusText:SetTextColor(color[1], color[2], color[3])
+      local isSelected = row.id and row.id == self.selectedAuraId
+      btn.previewText:SetText(isSelected and "PREVIEW" or "")
+      btn.previewText:SetTextColor(0.65, 0.88, 1.0)
 
       if Skin and Skin.SetClickableRowState then
-        Skin:SetClickableRowState(btn, (row.id and row.id == self.selectedAuraId) and "selected" or "normal")
-      elseif row.id and row.id == self.selectedAuraId then
+        Skin:SetClickableRowState(btn, isSelected and "selected" or "normal")
+      elseif isSelected then
         btn.bg:SetColorTexture(0.18, 0.36, 0.56, 0.88)
       else
         btn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
@@ -231,12 +238,8 @@ function AuraListPanel:Create(parent)
   o.frame:SetAllPoints()
   createBackdrop(o.frame)
 
-  o.title = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  o.title:SetPoint("TOPLEFT", 8, -8)
-  o.title:SetText("Auras")
-
   o.scroll = CreateFrame("ScrollFrame", nil, o.frame, "UIPanelScrollFrameTemplate")
-  o.scroll:SetPoint("TOPLEFT", 6, -28)
+  o.scroll:SetPoint("TOPLEFT", 6, -12)
   o.scroll:SetPoint("BOTTOMRIGHT", -28, 8)
 
   o.scrollChild = CreateFrame("Frame", nil, o.scroll)

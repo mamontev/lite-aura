@@ -59,14 +59,8 @@ local function isTabAvailable(draft, tabKey, showAdvanced)
   if not draft then
     return false
   end
-  if showAdvanced ~= true and (tabKey == "Advanced" or tabKey == "Conditions") then
+  if showAdvanced ~= true and tabKey == "Advanced" then
     return false
-  end
-  if isEstimatedTargetTracking(draft) then
-    return tabKey ~= "Conditions" and tabKey ~= "Actions" and tabKey ~= "Advanced"
-  end
-  if isDirectAuraTracking(draft) then
-    return tabKey ~= "Conditions" and tabKey ~= "Actions"
   end
   return true
 end
@@ -91,6 +85,31 @@ local function addInfoBox(parent, y, title, body, height)
   return frame
 end
 
+local function createCard(parent, y, title, body, height)
+  local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+  createBackdrop(frame)
+  frame:SetHeight(height or 96)
+  frame:SetPoint("TOPLEFT", 12, y)
+  frame:SetPoint("RIGHT", -14, 0)
+
+  frame.heading = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  frame.heading:SetPoint("TOPLEFT", 12, -10)
+  frame.heading:SetText(title or "")
+
+  frame.desc = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  frame.desc:SetPoint("TOPLEFT", 12, -28)
+  frame.desc:SetPoint("RIGHT", -12, 0)
+  frame.desc:SetJustifyH("LEFT")
+  frame.desc:SetText(body or "")
+
+  frame.content = CreateFrame("Frame", nil, frame)
+  frame.content:SetPoint("TOPLEFT", 10, -46)
+  frame.content:SetPoint("TOPRIGHT", -10, -46)
+  frame.content:SetHeight(math.max(24, (height or 96) - 56))
+
+  return frame
+end
+
 local function setTabVisual(btn, active)
   if not btn then
     return
@@ -98,7 +117,7 @@ local function setTabVisual(btn, active)
 
   if Skin and Skin.SetButtonSelected then
     Skin:SetButtonSelected(btn, active)
-    Skin:SetButtonVariant(btn, active and "primary" or "ghost")
+    Skin:SetButtonVariant(btn, "tab")
     return
   end
 
@@ -213,12 +232,26 @@ end
 
 function AuraEditorPanel:UpdateHeader()
   if not self.draft then
-    self.titleText:SetText("Aura Editor")
+    self.titleText:SetText("")
     self.subtitle:SetText("Select an aura from the list or create a new one.")
+    if self.previewBannerText then
+      self.previewBannerText:SetText("No aura selected")
+    end
+    if self.previewBannerHint then
+      self.previewBannerHint:SetText("Pick an aura from the list to see a live draft preview here.")
+    end
     return
   end
-  self.titleText:SetText(string.format("Aura Editor - %s", tostring(self.draft.name or "New Aura")))
+  self.titleText:SetText("")
   self.subtitle:SetText(string.format("SpellID: %s | Unit: %s | Tracking: %s | Group: %s", tostring(self.draft.spellID or "?"), tostring(self.draft.unit or "player"), getTrackingSummary(self.draft), tostring(self.draft.group or "-")))
+  if self.previewBannerText then
+    local dirty = S and S.Get and S:Get().dirty == true
+    local auraName = tostring(self.draft.name or self.draft.displayName or "Selected Aura")
+    self.previewBannerText:SetText(string.format("%s | %s", auraName, dirty and "Unsaved changes" or "Saved"))
+  end
+  if self.previewBannerHint then
+    self.previewBannerHint:SetText("The selected aura is rendered as a preview placeholder while you edit. Display changes update live before you save.")
+  end
 end
 
 function AuraEditorPanel:RefreshTabButtons()
@@ -277,9 +310,9 @@ function AuraEditorPanel:LoadAura(auraId)
 
   self:UpdateHeader()
   self:RefreshTabButtons()
-  local tab = (S and S.Get and S:Get().activeTab) or "Trigger"
+  local tab = (S and S.Get and S:Get().activeTab) or "Tracking"
   if not isTabAvailable(self.draft, tab, self.showAdvanced) then
-    tab = "Trigger"
+    tab = "Tracking"
     if S and S.SetActiveTab then
       S:SetActiveTab(tab)
     end
@@ -312,7 +345,7 @@ function AuraEditorPanel:OnFieldChanged(key, value)
     self:UpdateHeader()
     self:ValidateDraft()
     self:RefreshTabButtons()
-    self:RenderTab(self.currentTab or "Trigger")
+    self:RenderTab(self.currentTab or "Tracking")
     self:RefreshLivePreview(true)
     return
   end
@@ -334,12 +367,12 @@ function AuraEditorPanel:OnFieldChanged(key, value)
     self:UpdateHeader()
     self:ValidateDraft()
     self:RefreshTabButtons()
-    self:RenderTab(self.currentTab or "Trigger")
+    self:RenderTab(self.currentTab or "Tracking")
     self:RefreshLivePreview(true)
     return
   end
 
-  if key == "loadClassToken" and (self.currentTab == "Advanced" or self.currentTab == "Conditions") then
+  if key == "loadClassToken" and self.currentTab == "Advanced" then
     self:RenderTab(self.currentTab)
   end
 
@@ -389,21 +422,37 @@ function AuraEditorPanel:ClearTabContent()
   self.conditionTree = nil
 end
 
-function AuraEditorPanel:RenderGenericFields(tab, yStart)
+function AuraEditorPanel:RenderGenericFields(tab, yStart, parent, leftInset, rightInset)
   local fields = tab.fields or tab or {}
   local y = yStart
+  parent = parent or self.content
+  leftInset = tonumber(leftInset) or 16
+  rightInset = tonumber(rightInset) or -24
   for i = 1, #fields do
     local field = fields[i]
-    local widget = FieldFactory:CreateField(self.content, field, self.draft, function(fKey, fValue)
+    local widget = FieldFactory:CreateField(parent, field, self.draft, function(fKey, fValue)
       self:OnFieldChanged(fKey, fValue)
     end)
-    widget:SetPoint("TOPLEFT", 16, y)
-    widget:SetPoint("RIGHT", -24, 0)
+    widget:SetPoint("TOPLEFT", leftInset, y)
+    widget:SetPoint("RIGHT", rightInset, 0)
     widget:Show()
     y = y - widget:GetHeight() - 8
     self.fieldWidgets[#self.fieldWidgets + 1] = widget
   end
   return y
+end
+
+function AuraEditorPanel:RenderAppearanceCard(y, title, body, fields)
+  local cardHeight = 72
+  for i = 1, #(fields or {}) do
+    local field = fields[i]
+    cardHeight = cardHeight + ((field.widget == "multiline") and 100 or 60)
+  end
+  local card = createCard(self.content, y, title, body, cardHeight)
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+  local nextY = self:RenderGenericFields(fields or {}, -2, card.content, 2, -2)
+  card.content:SetHeight(math.max(24, -nextY + 8))
+  return y - cardHeight - 10
 end
 
 function AuraEditorPanel:RenderTab(tabKey)
@@ -426,7 +475,7 @@ function AuraEditorPanel:RenderTab(tabKey)
 
   local y = -12
 
-  if tabKey == "Trigger" then
+  if tabKey == "Tracking" then
     if tostring(self.draft.unit or "player") == "target" then
       local modeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
       createBackdrop(modeFrame)
@@ -441,17 +490,17 @@ function AuraEditorPanel:RenderTab(tabKey)
       local btnConfirmed = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
       btnConfirmed:SetSize(172, 24)
       btnConfirmed:SetPoint("BOTTOMLEFT", 10, 8)
-      btnConfirmed:SetText("Confirmed Aura Read")
+      btnConfirmed:SetText("Read Live Aura")
       if Skin and Skin.ApplyButton then
-        Skin:SetButtonVariant(btnConfirmed, "ghost")
+        Skin:SetButtonVariant(btnConfirmed, "segment")
       end
 
       local btnEstimated = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
       btnEstimated:SetSize(200, 24)
       btnEstimated:SetPoint("LEFT", btnConfirmed, "RIGHT", 8, 0)
-      btnEstimated:SetText("Estimated Debuff From My Cast")
+      btnEstimated:SetText("Estimate From My Cast")
       if Skin and Skin.ApplyButton then
-        Skin:SetButtonVariant(btnEstimated, "ghost")
+        Skin:SetButtonVariant(btnEstimated, "segment")
       end
 
       local function refreshTrackingButtons()
@@ -482,32 +531,12 @@ function AuraEditorPanel:RenderTab(tabKey)
       )
       self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
       y = y - 102
-
-      local stepsFrame = addInfoBox(
-        self.content,
-        y,
-        "Setup checklist",
-        "1. Choose the aura SpellID to show.\n2. Add the spell(s) you cast to apply or refresh it.\n3. Enter the expected duration.\n4. Save and test on a dummy or boss target.\n5. This is a local estimate, not a confirmed aura read.",
-        118
-      )
-      self.fieldWidgets[#self.fieldWidgets + 1] = stepsFrame
-      y = y - 128
-
-      local fieldsFrame = addInfoBox(
-        self.content,
-        y,
-        "Quick setup fields",
-        "Aura SpellID To Show = the icon and timer you want on screen.\nSpellIDs I Cast = the casts AuraLite listens for.\nExpected Duration = how long the timer should run after your cast succeeds.",
-        112
-      )
-      self.fieldWidgets[#self.fieldWidgets + 1] = fieldsFrame
-      y = y - 122
     elseif isDirectAuraTracking(self.draft) then
       local infoFrame = addInfoBox(
         self.content,
         y,
-        "Confirmed aura read",
-        "AuraLite tries to read the aura directly from the selected target. Blizzard can restrict target aura data in combat, so this mode is literal but not always complete.",
+        "Live aura read",
+        "AuraLite reads the selected target directly when Blizzard allows it. This is the most literal mode, but target aura data can still be restricted in combat.",
         92
       )
       self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
@@ -521,14 +550,14 @@ function AuraEditorPanel:RenderTab(tabKey)
 
       local modeLabel = modeFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
       modeLabel:SetPoint("LEFT", 10, 0)
-      modeLabel:SetText("Editing Rule:")
+      modeLabel:SetText("Rule behavior:")
 
       local btnShow = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
       btnShow:SetSize(128, 22)
       btnShow:SetPoint("LEFT", modeLabel, "RIGHT", 8, 0)
       btnShow:SetText("Show / Produce")
       if Skin and Skin.ApplyButton then
-        Skin:SetButtonVariant(btnShow, "ghost")
+        Skin:SetButtonVariant(btnShow, "segment")
       end
 
       local btnConsume = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
@@ -536,7 +565,7 @@ function AuraEditorPanel:RenderTab(tabKey)
       btnConsume:SetPoint("LEFT", btnShow, "RIGHT", 6, 0)
       btnConsume:SetText("Consume / Hide")
       if Skin and Skin.ApplyButton then
-        Skin:SetButtonVariant(btnConsume, "ghost")
+        Skin:SetButtonVariant(btnConsume, "segment")
       end
 
       local activeMode = (tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "consume") and "consume" or "produce"
@@ -555,14 +584,14 @@ function AuraEditorPanel:RenderTab(tabKey)
         if S and S.SetDirty then
           S:SetDirty(true)
         end
-        self:RenderTab("Trigger")
+        self:RenderTab("Tracking")
       end)
       btnConsume:SetScript("OnClick", function()
         self:ApplyRuleMode("consume")
         if S and S.SetDirty then
           S:SetDirty(true)
         end
-        self:RenderTab("Trigger")
+        self:RenderTab("Tracking")
       end)
       refreshModeButtons()
 
@@ -574,123 +603,115 @@ function AuraEditorPanel:RenderTab(tabKey)
           S:SetDirty(true)
         end
         self:ValidateDraft()
-        self:RenderTab("Trigger")
+        self:RenderTab("Tracking")
       end)
       self.ruleBuilder.frame:SetPoint("TOPLEFT", 12, y)
       self.ruleBuilder.frame:SetPoint("RIGHT", -14, 0)
       self.ruleBuilder.frame:Show()
       self.ruleBuilder:SetDraft(self.draft)
       y = y - self.ruleBuilder.frame:GetHeight() - 10
-
-      local descFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
-      createBackdrop(descFrame)
-      descFrame:SetHeight(98)
-      descFrame:SetPoint("TOPLEFT", 12, y)
-      descFrame:SetPoint("RIGHT", -14, 0)
-
-      local lbl = descFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-      lbl:SetPoint("TOPLEFT", 10, -8)
-      lbl:SetText("Persisted rules for this aura")
-
-      local text = descFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-      text:SetPoint("TOPLEFT", 10, -24)
-      text:SetPoint("RIGHT", -10, 0)
-      text:SetJustifyH("LEFT")
-
-      local desc = ""
-      local sid = tonumber(self.draft.spellID)
-      if sid and sid > 0 and RuleRepo and RuleRepo.DescribeRuleForAura then
-        desc = RuleRepo:DescribeRuleForAura(sid)
-      end
-      if desc == "" then
-        desc = "No persisted rules yet. Create one Show rule and one Consume rule from the selector above, then Save Aura."
-      end
-      text:SetText(desc)
-
-      self.fieldWidgets[#self.fieldWidgets + 1] = descFrame
-      y = y - 106
     end
-  elseif tabKey == "Conditions" and Widgets.ConditionTreeWidget and Widgets.ConditionTreeWidget.Create then
-    self.conditionTree = Widgets.ConditionTreeWidget:Create(self.content, function()
-      if S and S.SetDirty then
-        S:SetDirty(true)
-      end
-      self:ValidateDraft()
-      self:UpdateHeader()
-    end)
-    self.conditionTree.frame:SetPoint("TOPLEFT", 12, y)
-    self.conditionTree.frame:SetPoint("RIGHT", -14, 0)
-    self.conditionTree.frame:Show()
-    self.conditionTree:SetDraft(self.draft)
-    y = y - self.conditionTree.frame:GetHeight() - 10
-  end
 
-  if tabKey ~= "Conditions" then
     local fields = tab.fields or {}
-    if isDirectAuraTracking(self.draft) and tabKey == "Trigger" then
-      local filtered = {}
-      for i = 1, #fields do
-        local key = fields[i].key
+    local filtered = {}
+    for i = 1, #fields do
+      local key = fields[i].key
+      if isDirectAuraTracking(self.draft) then
         if key == "unit" or key == "spellID" then
           filtered[#filtered + 1] = fields[i]
         end
-      end
-      fields = filtered
-    elseif isEstimatedTargetTracking(self.draft) and tabKey == "Trigger" then
-      local filtered = {}
-      for i = 1, #fields do
-        local key = fields[i].key
+      elseif isEstimatedTargetTracking(self.draft) then
         if key == "unit" or key == "spellID" or key == "castSpellIDs" or key == "estimatedDuration" then
           filtered[#filtered + 1] = fields[i]
         end
-      end
-      fields = filtered
-    elseif not self.showAdvanced and not isDirectAuraTracking(self.draft) and tabKey == "Trigger" then
-      local filtered = {}
-      for i = 1, #fields do
-        local key = fields[i].key
+      elseif not self.showAdvanced then
         if key == "unit" or key == "spellID" or key == "castSpellIDs" then
           filtered[#filtered + 1] = fields[i]
         end
+      else
+        filtered[#filtered + 1] = fields[i]
       end
-      fields = filtered
-    elseif isDirectAuraTracking(self.draft) and tabKey == "Actions" then
-      local filtered = {}
-      for i = 1, #fields do
-        if fields[i].key ~= "actionMode" then
-          filtered[#filtered + 1] = fields[i]
-        end
-      end
-      fields = filtered
-    elseif isEstimatedTargetTracking(self.draft) and tabKey == "Actions" then
-      fields = {}
-      local infoFrame = addInfoBox(
-        self.content,
-        y,
-        "Automatic timer ending",
-        "Estimated debuffs do not use Produce or Consume actions. AuraLite starts the timer from your cast list and removes it automatically when the estimated duration expires or the target dies.",
-        86
-      )
-      self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
-      y = y - 96
-    elseif tabKey == "Display" then
-      local mode = tostring(self.draft.displayMode or self.draft.timerVisual or "icon")
-      local filtered = {}
-      for i = 1, #fields do
-        local key = fields[i].key
-        local include = true
-        if mode == "icon" and (key == "barWidth" or key == "barHeight" or key == "barColor" or key == "barSide") then
-          include = false
-        elseif mode == "bar" and (key == "iconWidth" or key == "iconHeight" or key == "barSide") then
-          include = false
-        end
-        if include then
-          filtered[#filtered + 1] = fields[i]
-        end
-      end
-      fields = filtered
     end
-    y = self:RenderGenericFields(fields, y)
+    y = self:RenderGenericFields(filtered, y)
+  elseif tabKey == "Appearance" then
+    local allFields = tab.fields or {}
+    local byKey = {}
+    for i = 1, #allFields do
+      if allFields[i] then
+        byKey[allFields[i].key] = allFields[i]
+      end
+    end
+    local mode = tostring(self.draft.displayMode or self.draft.timerVisual or "icon")
+
+    y = self:RenderAppearanceCard(y, "Layout", "Define the overall shape and placement of this aura.", {
+      byKey.name,
+      byKey.group,
+      byKey.displayMode,
+      (mode ~= "icon") and byKey.barSide or nil,
+    })
+
+    if mode == "icon" or mode == "iconbar" then
+      y = self:RenderAppearanceCard(y, "Icon", "Adjust icon size for quick recognition.", {
+        byKey.iconWidth,
+        byKey.iconHeight,
+      })
+    end
+
+    if mode == "bar" or mode == "iconbar" then
+      y = self:RenderAppearanceCard(y, "Bar", "Tune bar size, readability and timing feedback. Changes update live.", {
+        byKey.barWidth,
+        byKey.barHeight,
+        byKey.showTimerText,
+        byKey.barColor,
+        byKey.barTexture,
+        byKey.lowTime,
+      })
+    end
+
+    y = self:RenderAppearanceCard(y, "Text", "Optional helper text layered onto the aura.", {
+      byKey.customText,
+    })
+  elseif tabKey == "Advanced" then
+    local intro = addInfoBox(
+      self.content,
+      y,
+      "Advanced settings",
+      "Use this section for technical tuning, conditions, load restrictions and notes. Most auras do not need anything here.",
+      84
+    )
+    self.fieldWidgets[#self.fieldWidgets + 1] = intro
+    y = y - 94
+
+    if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) and Widgets.ConditionTreeWidget and Widgets.ConditionTreeWidget.Create then
+      self.conditionTree = Widgets.ConditionTreeWidget:Create(self.content, function()
+        if S and S.SetDirty then
+          S:SetDirty(true)
+        end
+        self:ValidateDraft()
+        self:UpdateHeader()
+      end)
+      self.conditionTree.frame:SetPoint("TOPLEFT", 12, y)
+      self.conditionTree.frame:SetPoint("RIGHT", -14, 0)
+      self.conditionTree.frame:Show()
+      self.conditionTree:SetDraft(self.draft)
+      y = y - self.conditionTree.frame:GetHeight() - 10
+    end
+
+    local fields = tab.fields or {}
+    local filtered = {}
+    for i = 1, #fields do
+      local key = fields[i].key
+      local include = true
+      if isDirectAuraTracking(self.draft) or isEstimatedTargetTracking(self.draft) then
+        if key == "conditionLogic" or key == "talentSpellIDs" or key == "requiredAuraSpellIDs" or key == "duration" or key == "ruleName" or key == "ruleID" then
+          include = false
+        end
+      end
+      if include then
+        filtered[#filtered + 1] = fields[i]
+      end
+    end
+    y = self:RenderGenericFields(filtered, y)
   end
 
   self.content:SetHeight(math.max(360, -y + 20))
@@ -783,7 +804,7 @@ end
 function AuraEditorPanel:Create(parent)
   local o = setmetatable({}, self)
   o.fieldWidgets = {}
-  o.currentTab = "Trigger"
+  o.currentTab = "Tracking"
   o.triggerEditMode = "produce"
   o.showAdvanced = false
 
@@ -801,14 +822,30 @@ function AuraEditorPanel:Create(parent)
   o.subtitle:SetJustifyH("LEFT")
   o.subtitle:SetText("Select an aura from the list or create a new one.")
 
+  o.previewBanner = CreateFrame("Frame", nil, o.frame, "BackdropTemplate")
+  createBackdrop(o.previewBanner)
+  o.previewBanner:SetPoint("TOPLEFT", 10, -48)
+  o.previewBanner:SetPoint("TOPRIGHT", -12, -48)
+  o.previewBanner:SetHeight(46)
+
+  o.previewBannerText = o.previewBanner:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  o.previewBannerText:SetPoint("TOPLEFT", 10, -8)
+  o.previewBannerText:SetText("No aura selected")
+
+  o.previewBannerHint = o.previewBanner:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  o.previewBannerHint:SetPoint("TOPLEFT", 10, -24)
+  o.previewBannerHint:SetPoint("RIGHT", -10, 0)
+  o.previewBannerHint:SetJustifyH("LEFT")
+  o.previewBannerHint:SetText("Pick an aura from the list to see a live draft preview here.")
+
   o.tabStrip = CreateFrame("Frame", nil, o.frame)
-  o.tabStrip:SetPoint("TOPLEFT", 10, -48)
-  o.tabStrip:SetPoint("TOPRIGHT", -138, -48)
+  o.tabStrip:SetPoint("TOPLEFT", 10, -98)
+  o.tabStrip:SetPoint("TOPRIGHT", -138, -98)
   o.tabStrip:SetHeight(26)
 
   o.btnMode = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
   o.btnMode:SetSize(118, 22)
-  o.btnMode:SetPoint("TOPRIGHT", -12, -48)
+  o.btnMode:SetPoint("TOPRIGHT", -12, -98)
   o.btnMode:SetText("More Options")
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(o.btnMode, "ghost")
@@ -817,9 +854,9 @@ function AuraEditorPanel:Create(parent)
     o.showAdvanced = not o.showAdvanced
     o.btnMode:SetText(o.showAdvanced and "Simple View" or "More Options")
     o:RefreshTabButtons()
-    local activeTab = o.currentTab or "Trigger"
+    local activeTab = o.currentTab or "Tracking"
     if not isTabAvailable(o.draft, activeTab, o.showAdvanced) then
-      activeTab = "Trigger"
+      activeTab = "Tracking"
       if S and S.SetActiveTab then
         S:SetActiveTab(activeTab)
       end
@@ -836,7 +873,7 @@ function AuraEditorPanel:Create(parent)
     btn:SetPoint("TOPLEFT", x, 0)
     btn:SetText(tab.label or tab.key)
     if Skin and Skin.ApplyButton then
-      Skin:SetButtonVariant(btn, "ghost")
+      Skin:SetButtonVariant(btn, "tab")
     end
     btn:SetScript("OnClick", function()
       o:SelectTab(tab.key)
@@ -846,7 +883,7 @@ function AuraEditorPanel:Create(parent)
   end
 
   o.scroll = CreateFrame("ScrollFrame", nil, o.frame, "UIPanelScrollFrameTemplate")
-  o.scroll:SetPoint("TOPLEFT", 8, -76)
+  o.scroll:SetPoint("TOPLEFT", 8, -126)
   o.scroll:SetPoint("BOTTOMRIGHT", -28, 48)
 
   o.content = CreateFrame("Frame", nil, o.scroll)
@@ -913,6 +950,7 @@ function AuraEditorPanel:Create(parent)
       local tracking = getTrackingSummary(o.draft)
       local mode = o.showAdvanced and "Full options" or "Simple setup"
       o.status:SetText(dirtyTag .. " | " .. tracking .. " | " .. mode)
+      o:UpdateHeader()
     end)
   end
 
