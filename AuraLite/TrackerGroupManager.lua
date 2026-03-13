@@ -147,6 +147,52 @@ local function setIconBorderColor(icon, r, g, b, a)
   end
 end
 
+local function normalizeSizeOverride(value, fallback, minValue, maxValue)
+  local n = tonumber(value)
+  if not n or n <= 0 then
+    return fallback
+  end
+  n = math.floor(n + 0.5)
+  if n < (minValue or 4) then
+    n = minValue or 4
+  end
+  if n > (maxValue or 512) then
+    n = maxValue or 512
+  end
+  return n
+end
+
+local function parseColorCSV(text)
+  text = tostring(text or "")
+  if text == "" then
+    return nil
+  end
+  local out = {}
+  for token in text:gmatch("[^,%s;]+") do
+    local n = tonumber(token)
+    if not n then
+      return nil
+    end
+    if n < 0 then
+      n = 0
+    elseif n > 1 then
+      n = 1
+    end
+    out[#out + 1] = n
+    if #out == 3 then
+      break
+    end
+  end
+  if #out ~= 3 then
+    return nil
+  end
+  return out[1], out[2], out[3]
+end
+
+local function isEstimatedState(row)
+  return type(row) == "table" and tostring(row.stateKind or "") == "estimated_target_debuff"
+end
+
 local function applyIconTexture(textureRegion, primary, fallback, row)
   local selected = ns.AuraAPI:SelectBestTexture(primary, fallback, 136243)
   textureRegion:SetTexture(selected)
@@ -183,6 +229,13 @@ local function makeLayoutSignature(entries, iconSize, spacing, direction)
     parts[#parts + 1] = tostring(row.groupID or "g")
     parts[#parts + 1] = tostring(tonumber(row.spellID) or 0)
     parts[#parts + 1] = tostring(row.timerVisual or "icon")
+    parts[#parts + 1] = tostring(row.iconWidth or 0)
+    parts[#parts + 1] = tostring(row.iconHeight or 0)
+    parts[#parts + 1] = tostring(row.barWidth or 0)
+    parts[#parts + 1] = tostring(row.barHeight or 0)
+    parts[#parts + 1] = tostring(row.showTimerText ~= false)
+    parts[#parts + 1] = tostring(row.barColor or "")
+    parts[#parts + 1] = tostring(row.barSide or "right")
     parts[#parts + 1] = tostring(row.barTexture or "")
   end
   return table.concat(parts, ";")
@@ -207,6 +260,10 @@ local function createIcon(parent)
     if self.row.sourceLabel and self.row.sourceLabel ~= "" then
       local prefix = (L and L.T and L:T("tooltip_source")) or "Source: "
       GameTooltip:AddLine(prefix .. self.row.sourceLabel, 0.8, 0.8, 0.8)
+    end
+    if self.row.stateLabel and self.row.stateLabel ~= "" then
+      local color = isEstimatedState(self.row) and { 1.0, 0.82, 0.25 } or { 0.55, 0.9, 1.0 }
+      GameTooltip:AddLine("Tracking: " .. self.row.stateLabel, color[1], color[2], color[3])
     end
     GameTooltip:Show()
   end)
@@ -366,21 +423,21 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
 
     local timerVisual = tostring(row.timerVisual or "icon"):lower()
     local hasSideBar = (timerVisual == "bar" or timerVisual == "iconbar")
+    local rowIconWidth = normalizeSizeOverride(row.iconWidth, iconSize, 12, 256)
+    local rowIconHeight = normalizeSizeOverride(row.iconHeight, iconSize, 12, 256)
     local barWidth = 0
     if hasSideBar then
-      barWidth = math.floor(iconSize * 2.6)
-      if barWidth < 90 then
-        barWidth = 90
-      elseif barWidth > 260 then
-        barWidth = 260
-      end
+      barWidth = normalizeSizeOverride(row.barWidth, math.floor(rowIconWidth * 2.6), 60, 512)
     end
-    local slotWidth = iconSize + (hasSideBar and (6 + barWidth) or 0)
+    local slotWidth = rowIconWidth + (hasSideBar and (6 + barWidth) or 0)
     icon._hasSideBar = hasSideBar
     icon._barWidth = barWidth
+    icon._barHeight = normalizeSizeOverride(row.barHeight, 16, 6, 96)
+    icon._iconWidth = rowIconWidth
+    icon._iconHeight = rowIconHeight
     icon._slotWidth = slotWidth
     icon._layoutDirection = direction
-    icon:SetSize(iconSize, iconSize)
+    icon:SetSize(rowIconWidth, rowIconHeight)
     icon:ClearAllPoints()
 
     if direction == "LEFT" then
@@ -388,10 +445,10 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
       cursor = cursor + slotWidth + spacing
     elseif direction == "UP" then
       icon:SetPoint("BOTTOM", frame, "BOTTOM", 0, cursor)
-      cursor = cursor + iconSize + spacing
+      cursor = cursor + rowIconHeight + spacing
     elseif direction == "DOWN" then
       icon:SetPoint("TOP", frame, "TOP", 0, -cursor)
-      cursor = cursor + iconSize + spacing
+      cursor = cursor + rowIconHeight + spacing
     else
       icon:SetPoint("LEFT", frame, "LEFT", cursor, 0)
       cursor = cursor + slotWidth + spacing
@@ -475,16 +532,18 @@ function G:Render(activeByGroup)
 
       local timerVisual = tostring(row.timerVisual or "icon"):lower()
       local hasSideBar = (timerVisual == "bar" or timerVisual == "iconbar")
-      local barWidth = tonumber(icon._barWidth) or math.max(90, math.floor(iconSize * 2.6))
+      local rowIconWidth = tonumber(icon._iconWidth) or iconSize
+      local rowIconHeight = tonumber(icon._iconHeight) or iconSize
+      local barWidth = tonumber(icon._barWidth) or math.max(90, math.floor(rowIconWidth * 2.6))
       if hasSideBar then
-        local barOnLeft = tostring(icon._layoutDirection or "RIGHT"):upper() == "LEFT"
-        local barHeight = 16
+        local barOnLeft = tostring(row.barSide or "right"):lower() == "left"
+        local barHeight = tonumber(icon._barHeight) or 16
         icon.cdBarBG:ClearAllPoints()
         icon.cdBarBG:SetSize(barWidth, barHeight + 2)
         if barOnLeft then
-          icon.cdBarBG:SetPoint("CENTER", icon, "CENTER", -6 - (barWidth / 2) - (iconSize / 2), 0)
+          icon.cdBarBG:SetPoint("CENTER", icon, "CENTER", -6 - (barWidth / 2) - (rowIconWidth / 2), 0)
         else
-          icon.cdBarBG:SetPoint("CENTER", icon, "CENTER", 6 + (barWidth / 2) + (iconSize / 2), 0)
+          icon.cdBarBG:SetPoint("CENTER", icon, "CENTER", 6 + (barWidth / 2) + (rowIconWidth / 2), 0)
         end
         icon.cdBar:ClearAllPoints()
         icon.cdBar:SetPoint("TOPLEFT", icon.cdBarBG, "TOPLEFT", 1, -1)
@@ -498,7 +557,7 @@ function G:Render(activeByGroup)
       else
         icon.cdBar:ClearAllPoints()
         icon.cdBarBG:ClearAllPoints()
-        local barHeight = math.max(4, math.floor(iconSize * 0.16))
+        local barHeight = normalizeSizeOverride(row.barHeight, math.max(4, math.floor(rowIconHeight * 0.16)), 4, 64)
         -- Keep icon-mode anchors rooted on icon to prevent cdBar/cdBarBG circular dependency.
         icon.cdBarBG:SetPoint("BOTTOMLEFT", icon, "BOTTOMLEFT", 0, 0)
         icon.cdBarBG:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 0, 0)
@@ -512,7 +571,7 @@ function G:Render(activeByGroup)
         applyTextPosition(icon.timer, icon, row.timerAnchor, row.timerOffsetX, row.timerOffsetY, "BOTTOM", 0, -1)
       end
       icon.timer:SetText("")
-      icon.timer:Hide()
+      icon.timer:SetShown(row.showTimerText ~= false)
       applyTextPosition(icon.customText, icon, row.customTextAnchor, row.customTextOffsetX, row.customTextOffsetY, "TOP", 0, 2)
       updateCustomText(icon, row, nil)
 
@@ -548,6 +607,9 @@ function G:Render(activeByGroup)
       end
 
       local r, g, b = getColorForUnit(row.unit)
+      if isEstimatedState(row) then
+        r, g, b = 1.0, 0.76, 0.18
+      end
       setIconBorderColor(icon, r, g, b, 0.95)
 
       if row.canCompute and row.duration and row.duration > 0 then
@@ -601,11 +663,18 @@ function G:UpdateVisuals()
         local state = self.stateByKey[row.stateKey]
         local timerVisual = tostring(row.timerVisual or "icon"):lower()
         local hasSideBar = (timerVisual == "bar" or timerVisual == "iconbar")
+        local showTimerText = row.showTimerText ~= false
+        local customBarR, customBarG, customBarB = parseColorCSV(row.barColor)
         if row.canCompute and row.duration and row.duration > 0 then
           local remaining = math.max(0, row.expirationTime - now)
           if hasSideBar then
-            icon.timer:SetText(formatRemaining(remaining))
-            icon.timer:Show()
+            if showTimerText then
+              icon.timer:SetText(formatRemaining(remaining))
+              icon.timer:Show()
+            else
+              icon.timer:SetText("")
+              icon.timer:Hide()
+            end
           else
             icon.timer:SetText("")
             icon.timer:Hide()
@@ -620,7 +689,13 @@ function G:UpdateVisuals()
               ratio = 1
             end
             icon.cdBar:SetValue(ratio)
-            icon.cdBar:SetStatusBarColor(0.16, 0.64, 1.0, 0.95)
+            if customBarR and customBarG and customBarB then
+              icon.cdBar:SetStatusBarColor(customBarR, customBarG, customBarB, 0.95)
+            elseif isEstimatedState(row) then
+              icon.cdBar:SetStatusBarColor(1.0, 0.72, 0.18, 0.95)
+            else
+              icon.cdBar:SetStatusBarColor(0.16, 0.64, 1.0, 0.95)
+            end
             icon.cdBar:Show()
             icon.cdBarBG:Show()
           else

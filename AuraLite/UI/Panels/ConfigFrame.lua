@@ -6,9 +6,31 @@ ns.UIV2.Panels = ns.UIV2.Panels or {}
 local UI = ns.UIV2
 local Panels = UI.Panels
 local E = UI.Events
+local Skin = ns.UISkin
 
 local ConfigFrame = {}
 ConfigFrame.__index = ConfigFrame
+
+local function refreshMoverButton(button)
+  if not button then
+    return
+  end
+  local moversOn = ns.db and ns.db.locked == false
+  button:SetText(moversOn and "Movers: On" or "Movers: Off")
+end
+
+local function toggleMovers()
+  if not ns.db then
+    return
+  end
+  ns.db.locked = not (ns.db.locked == true)
+  if ns.Dragger and ns.Dragger.SetLocked then
+    ns.Dragger:SetLocked(ns.db.locked == true)
+  end
+  if ns.EventRouter and ns.EventRouter.RefreshAll then
+    ns.EventRouter:RefreshAll()
+  end
+end
 
 local function createPanelBackdrop(frame, r, g, b, a)
   frame:SetBackdrop({
@@ -44,20 +66,41 @@ function ConfigFrame:BuildFrame()
 
   local sub = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   sub:SetPoint("TOPLEFT", 16, -30)
-  sub:SetText("WeakAuras-like workflow: pick aura on the left, edit in the center, preview on the right.")
+  sub:SetText("Pick an aura on the left, use the simple guided setup in the center, and open more options only when you really need them.")
 
   local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -4, -4)
+  if Skin and Skin.ApplyCloseButton then
+    Skin:ApplyCloseButton(close)
+  end
 
   local btnGlobal = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   btnGlobal:SetSize(84, 22)
   btnGlobal:SetPoint("TOPRIGHT", -44, -30)
   btnGlobal:SetText("Global")
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(btnGlobal, "ghost")
+  end
 
   local btnNew = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-  btnNew:SetSize(94, 22)
+  btnNew:SetSize(140, 22)
   btnNew:SetPoint("RIGHT", btnGlobal, "LEFT", -8, 0)
-  btnNew:SetText("New Aura")
+  btnNew:SetText("Quick New Aura")
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(btnNew, "primary")
+  end
+
+  local btnMovers = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  btnMovers:SetSize(104, 22)
+  btnMovers:SetPoint("RIGHT", btnNew, "LEFT", -8, 0)
+  btnMovers:SetScript("OnClick", function(selfBtn)
+    toggleMovers()
+    refreshMoverButton(selfBtn)
+  end)
+  refreshMoverButton(btnMovers)
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(btnMovers, "default")
+  end
 
   local search = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
   search:SetAutoFocus(false)
@@ -135,10 +178,15 @@ function ConfigFrame:BuildFrame()
     end
   end)
 
+  frame:SetScript("OnShow", function()
+    refreshMoverButton(btnMovers)
+  end)
+
   self.frame = frame
   self.title = title
   self.btnGlobal = btnGlobal
   self.btnNew = btnNew
+  self.btnMovers = btnMovers
   self.searchBox = search
   self.leftPanel = left
   self.centerPanel = center

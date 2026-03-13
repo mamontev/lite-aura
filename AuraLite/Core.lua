@@ -84,10 +84,11 @@ function ns:Initialize()
 end
 
 function ns:RegisterRuntimeEvents()
-  -- Safe mode: avoid protected cast events that can taint the Blizzard UI.
-  self.state.runtimeEventsRegistered = false
+  -- Player spellcast observer events are read-only and help the resolver
+  -- correlate cast attempts without relying purely on heuristic cooldown edges.
+  self.state.runtimeEventsRegistered = true
   if self.Debug and self.Debug.Log then
-    self.Debug:Log("Runtime cast events disabled (safe mode).")
+    self.Debug:Log("Runtime cast observer events enabled.")
   end
 end
 
@@ -115,6 +116,7 @@ ns.frame:RegisterEvent("PLAYER_TALENT_UPDATE")
 ns.frame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 ns.frame:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
 ns.frame:RegisterEvent("UNIT_AURA")
+ns.frame:RegisterEvent("UNIT_HEALTH")
 ns.frame:RegisterEvent("UNIT_POWER_UPDATE")
 ns.frame:RegisterEvent("UNIT_MAXPOWER")
 ns.frame:RegisterEvent("UNIT_DISPLAYPOWER")
@@ -123,6 +125,10 @@ ns.frame:RegisterEvent("SPELL_UPDATE_CHARGES")
 ns.frame:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
 ns.frame:RegisterEvent("SPELL_UPDATE_USABLE")
 ns.frame:RegisterEvent("UI_ERROR_MESSAGE")
+ns.frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+ns.frame:RegisterEvent("UNIT_SPELLCAST_FAILED")
+ns.frame:RegisterEvent("UNIT_SPELLCAST_FAILED_QUIET")
+ns.frame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
 
 SLASH_AURALITE1 = "/al"
 SLASH_AURALITE2 = "/auralite"

@@ -75,7 +75,9 @@ function R:SaveRuleFromDraft(draft)
     return true
   end
 
-  if B.IsDirectAuraTracking and B:IsDirectAuraTracking(draft) then
+  if (B.IsDirectAuraTracking and B:IsDirectAuraTracking(draft))
+    or (B.IsEstimatedTargetDebuffTracking and B:IsEstimatedTargetDebuffTracking(draft))
+  then
     self:DeleteRulesForAura(auraSpellID)
     return true
   end

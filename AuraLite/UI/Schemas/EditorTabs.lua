@@ -48,14 +48,13 @@ end
 
 Schemas.EditorTabs = {
   { key = "Trigger", label = "Trigger", fields = {
-    { key = "unit", label = "Track Aura On", widget = "dropdown", options = {
+    { key = "unit", label = "Where To Track", widget = "dropdown", options = {
       { value = "player", label = "Player" },
       { value = "target", label = "Target" },
     } },
-    { key = "ruleName", label = "Rule Name", widget = "text", required = false },
-    { key = "ruleID", label = "Rule ID", widget = "text", required = false },
-    { key = "castSpellIDs", label = "WHEN Cast SpellIDs (CSV)", widget = "spellcsv", required = true },
-    { key = "spellID", label = "THEN Aura SpellID", widget = "spellid", required = true },
+    { key = "castSpellIDs", label = "SpellIDs I Cast (CSV)", widget = "spellcsv", required = true },
+    { key = "spellID", label = "Aura SpellID To Show", widget = "spellid", required = true },
+    { key = "estimatedDuration", label = "Expected Duration (sec)", widget = "number", min = 1, max = 600 },
   } },
   { key = "Conditions", label = "Conditions", fields = {
     { key = "conditionLogic", label = "Condition Logic", widget = "dropdown", options = {
@@ -67,11 +66,7 @@ Schemas.EditorTabs = {
     { key = "inCombatOnly", label = "In Combat Only", widget = "checkbox" },
   } },
   { key = "Actions", label = "Actions", fields = {
-    { key = "actionMode", label = "THEN Action", widget = "dropdown", options = {
-      { value = "produce", label = "Produce/Show Aura" },
-      { value = "consume", label = "Consume/Hide Aura" },
-    } },
-    { key = "duration", label = "Duration (sec)", widget = "number", min = 1, max = 120 },
+    { key = "duration", label = "Timer Duration (sec)", widget = "number", min = 1, max = 120 },
   } },
   { key = "Display", label = "Display", fields = {
     { key = "name", label = "Aura Name", widget = "text" },
@@ -81,13 +76,23 @@ Schemas.EditorTabs = {
       { value = "bar", label = "Bar" },
       { value = "iconbar", label = "Icon + Bar" },
     } },
+    { key = "iconWidth", label = "Icon Width", widget = "spinner", min = 12, max = 256, step = 2, default = 36, help = "Default: 36" },
+    { key = "iconHeight", label = "Icon Height", widget = "spinner", min = 12, max = 256, step = 2, default = 36, help = "Default: 36" },
+    { key = "barWidth", label = "Bar Width", widget = "spinner", min = 60, max = 512, step = 4, default = 94, help = "Default: 94" },
+    { key = "barHeight", label = "Bar Height", widget = "spinner", min = 6, max = 128, step = 2, default = 16, help = "Default: 16" },
+    { key = "barSide", label = "Icon Position", widget = "dropdown", options = {
+      { value = "right", label = "Icon Left / Bar Right" },
+      { value = "left", label = "Icon Right / Bar Left" },
+    } },
+    { key = "showTimerText", label = "Show Timer Text", widget = "checkbox" },
+    { key = "barColor", label = "Bar Color", widget = "color" },
     { key = "lowTime", label = "Low-Time Threshold", widget = "number", min = 0, max = 60 },
   } },
-  { key = "Sound", label = "Sound", fields = {
+  { key = "Advanced", label = "Advanced", fields = {
+    { key = "ruleName", label = "Rule Name", widget = "text", required = false },
+    { key = "ruleID", label = "Rule ID", widget = "text", required = false },
     { key = "soundOnShow", label = "Sound On Show", widget = "dropdown", optionsProvider = soundOptions },
     { key = "soundOnExpire", label = "Sound On Expire", widget = "dropdown", optionsProvider = soundOptions },
-  } },
-  { key = "Advanced", label = "Advanced", fields = {
     { key = "loadClassToken", label = "Load: Class", widget = "dropdown", optionsProvider = loadClassOptions },
     { key = "loadSpecID", label = "Load: Spec", widget = "dropdown", optionsProvider = loadSpecOptions },
     { key = "debug", label = "Debug for this aura", widget = "checkbox" },

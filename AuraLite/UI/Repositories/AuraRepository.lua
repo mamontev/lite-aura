@@ -32,15 +32,30 @@ local function isRealMode()
   return ns.SettingsData and type(ns.SettingsData.ListEntries) == "function"
 end
 
+local function hydrateDraftWithRule(draft)
+  if type(draft) ~= "table" then
+    return draft
+  end
+  if RuleRepo and RuleRepo.ApplyPrimaryRuleToDraft then
+    RuleRepo:ApplyPrimaryRuleToDraft(draft)
+  end
+  return draft
+end
+
 local function mapEntryRow(row)
   local item = row and row.item or {}
+  local trackingMode = tostring(item.trackingMode or "")
+  local triggerLabel = "Rule"
+  if tostring(row.unit or "player") == "target" then
+    triggerLabel = (trackingMode == "estimated") and "Estimated from your cast" or "Confirmed read"
+  end
   return {
     id = tostring(row.key or ""),
     spellID = tonumber(item.spellID) or 0,
     name = (item.displayName and item.displayName ~= "") and tostring(item.displayName) or ((ns.AuraAPI and ns.AuraAPI.GetSpellName and ns.AuraAPI:GetSpellName(item.spellID)) or ("Spell " .. tostring(item.spellID or "?"))),
     unit = tostring(row.unit or "player"),
     group = tostring(item.groupID or "important_procs"),
-    trigger = "Rule",
+    trigger = triggerLabel,
     status = (tonumber(item.spellID) or 0) > 0 and "ok" or "warn",
     icon = (ns.AuraAPI and ns.AuraAPI.GetSpellTexture and ns.AuraAPI:GetSpellTexture(item.spellID)) or 134400,
   }
@@ -55,6 +70,8 @@ local function ensureDraftFromEntry(key)
   if model and B and B.DraftFromEditableModel then
     local draft = B:DraftFromEditableModel(model)
     draft.id = key
+    draft._sourceKey = key
+    hydrateDraftWithRule(draft)
     R._drafts[key] = draft
     R._draftMeta[key] = { isNew = false, sourceKey = key }
     return draft
@@ -108,7 +125,10 @@ function R:GetAuraDraft(auraId)
   end
 
   if self._drafts[auraId] then
-    return cloneShallow(self._drafts[auraId])
+    local cached = cloneShallow(self._drafts[auraId])
+    cached.id = cached.id ~= "" and cached.id or auraId
+    cached._sourceKey = cached._sourceKey or auraId
+    return hydrateDraftWithRule(cached)
   end
 
   if isRealMode() then
@@ -125,9 +145,34 @@ function R:CreateDraft()
   self._newCounter = (self._newCounter or 0) + 1
   local id = string.format("__new__:%d:%d", math.floor((GetTime() or 0) * 1000), self._newCounter)
   local draft = B:NewDraft(id)
+  draft._sourceKey = nil
   self._drafts[id] = cloneShallow(draft)
   self._draftMeta[id] = { isNew = true, sourceKey = nil }
   return cloneShallow(draft)
+end
+
+function R:EnsureDraftID(draft)
+  if type(draft) ~= "table" then
+    return nil
+  end
+
+  local id = tostring(draft.id or draft._sourceKey or "")
+  if id ~= "" then
+    draft.id = id
+    return id
+  end
+
+  self._newCounter = (self._newCounter or 0) + 1
+  id = string.format("__new__:%d:%d", math.floor((GetTime() or 0) * 1000), self._newCounter)
+  draft.id = id
+  draft._sourceKey = nil
+
+  if ns.Debug and ns.Debug.Logf then
+    ns.Debug:Logf("AuraRepository generated missing draft id=%s name=%s spellID=%s", tostring(id), tostring(draft.name or ""), tostring(draft.spellID or ""))
+  end
+
+  self._draftMeta[id] = self._draftMeta[id] or { isNew = true, sourceKey = nil }
+  return id
 end
 
 function R:DeleteAura(auraId)
@@ -143,9 +188,11 @@ function R:DeleteAura(auraId)
     return true
   end
 
+  local draft = self._drafts[auraId] or ensureDraftFromEntry(auraId)
+  local auraSpellID = tonumber(draft and draft.spellID)
+  local instanceUID = tostring(draft and draft.instanceUID or "")
+
   if isRealMode() then
-    local draft = self._drafts[auraId] or ensureDraftFromEntry(auraId)
-    local auraSpellID = tonumber(draft and draft.spellID)
     if auraSpellID and auraSpellID > 0 and RuleRepo and RuleRepo.DeleteRulesForAura then
       RuleRepo:DeleteRulesForAura(auraSpellID)
     end
@@ -155,7 +202,15 @@ function R:DeleteAura(auraId)
     end
 
     local removed = ns.SettingsData:DeleteEntry(auraId)
-    if tonumber(removed) ~= 1 then
+    if ns.SettingsData.DeleteEntriesByInstanceUID and instanceUID ~= "" then
+      removed = (tonumber(removed) or 0) + (tonumber(ns.SettingsData:DeleteEntriesByInstanceUID(instanceUID, auraSpellID)) or 0)
+    end
+
+    if auraSpellID and auraSpellID > 0 and ns.state and type(ns.state.procRuleStates) == "table" then
+      ns.state.procRuleStates[auraSpellID] = nil
+    end
+
+    if tonumber(removed) < 1 then
       return false, "delete failed"
     end
   end
@@ -169,7 +224,7 @@ function R:SaveDraft(draft)
     return false, nil, "invalid draft"
   end
 
-  local id = tostring(draft.id or "")
+  local id = tostring(self:EnsureDraftID(draft) or "")
   if id == "" then
     return false, nil, "missing draft id"
   end
@@ -183,7 +238,8 @@ function R:SaveDraft(draft)
   if ns.Debug and ns.Debug.Logf then
     ns.Debug:Logf("AuraRepository SaveDraft id=%s metaSource=%s draft.unit=%s model.unit=%s spellID=%s", tostring(id), tostring((self._draftMeta[id] and self._draftMeta[id].sourceKey) or id), tostring(draft.unit or ""), tostring(model and model.unit or ""), tostring(draft.spellID or ""))
   end
-  local meta = self._draftMeta[id] or { isNew = B:IsDraftID(id), sourceKey = B:IsDraftID(id) and nil or id }
+  local sourceKey = tostring(draft._sourceKey or id)
+  local meta = self._draftMeta[id] or self._draftMeta[sourceKey] or { isNew = B:IsDraftID(id), sourceKey = B:IsDraftID(id) and nil or sourceKey }
 
   local savedKey, err
   if meta.isNew or not meta.sourceKey then
@@ -200,6 +256,7 @@ function R:SaveDraft(draft)
 
   local savedDraft = cloneShallow(draft)
   savedDraft.id = savedKey
+  savedDraft._sourceKey = savedKey
   self._drafts[savedKey] = savedDraft
   self._draftMeta[savedKey] = { isNew = false, sourceKey = savedKey }
 

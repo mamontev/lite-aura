@@ -51,6 +51,47 @@ local function firstNumber(value)
   return tonumber(value)
 end
 
+local function normalizeTrackingMode(value, unit)
+  local mode = tostring(value or ""):lower()
+  unit = tostring(unit or "player")
+  if unit == "target" and mode == "estimated" then
+    return "estimated"
+  end
+  return "confirmed"
+end
+
+local function defaultIconWidth(value)
+  local n = tonumber(value)
+  if n and n > 0 then
+    return n
+  end
+  return 36
+end
+
+local function defaultIconHeight(value)
+  local n = tonumber(value)
+  if n and n > 0 then
+    return n
+  end
+  return 36
+end
+
+local function defaultBarWidth(value)
+  local n = tonumber(value)
+  if n and n > 0 then
+    return n
+  end
+  return 94
+end
+
+local function defaultBarHeight(value)
+  local n = tonumber(value)
+  if n and n > 0 then
+    return n
+  end
+  return 16
+end
+
 function B:IsDraftID(auraId)
   return type(auraId) == "string" and auraId:find("^__new__:") ~= nil
 end
@@ -59,37 +100,83 @@ function B:IsDirectAuraTracking(draft)
   if type(draft) ~= "table" then
     return false
   end
+  if self:IsEstimatedTargetDebuffTracking(draft) then
+    return false
+  end
   if tostring(draft.triggerType or "") == "aura" then
     return true
   end
   return tostring(draft.unit or "player") == "target"
 end
 
+function B:IsEstimatedTargetDebuffTracking(draft)
+  if type(draft) ~= "table" then
+    return false
+  end
+  return tostring(draft.unit or "player") == "target"
+    and normalizeTrackingMode(draft.trackingMode, draft.unit) == "estimated"
+end
+
 function B:DraftFromEditableModel(model)
   model = model or {}
   local specList = parseCSVNumbers(model.loadSpecIDs)
+  local unit = tostring(model.unit or "player")
+  local trackingMode = normalizeTrackingMode(model.trackingMode, unit)
+  local displayName = tostring(model.displayName or "")
+  local groupID = tostring(model.groupID or "important_procs")
   return {
     id = tostring(model.key or ""),
-    name = tostring(model.displayName or ""),
+    name = displayName,
+    displayName = displayName,
     spellID = tostring(model.spellID or ""),
-    unit = tostring(model.unit or "player"),
-    group = tostring(model.groupID or "important_procs"),
-    triggerType = (tostring(model.unit or "player") == "target") and "aura" or "cast",
-    castSpellIDs = "",
+    unit = unit,
+    group = groupID,
+    groupID = groupID,
+    triggerType = (unit == "target" and trackingMode ~= "estimated") and "aura" or "cast",
+    trackingMode = trackingMode,
+    castSpellIDs = toCSV(model.castSpellIDs),
     ruleName = "",
     ruleID = "",
     conditionLogic = "all",
     talentSpellIDs = "",
     requiredAuraSpellIDs = "",
-    inCombatOnly = false,
+    inCombatOnly = model.inCombatOnly == true,
     actionMode = "produce",
     duration = tonumber(model.lowTimeThreshold) and math.max(1, tonumber(model.lowTimeThreshold)) or 8,
+    estimatedDuration = tonumber(model.estimatedDuration) or 8,
     displayMode = tostring(model.timerVisual or "icon"),
     lowTime = tonumber(model.lowTimeThreshold) or 0,
     soundOnShow = tostring(model.soundOnGain or "default"),
+    soundOnLow = tostring(model.soundOnLow or "default"),
     soundOnExpire = tostring(model.soundOnExpire or "none"),
     loadClassToken = tostring(model.loadClassToken or ""),
     loadSpecID = specList[1] or "",
+    loadSpecIDs = specList,
+    layoutGroupEnabled = model.layoutGroupEnabled ~= false,
+    instanceUID = tostring(model.instanceUID or ""),
+    onlyMine = model.onlyMine == true,
+    alert = model.alert ~= false,
+    iconMode = tostring(model.iconMode or "spell"),
+    customTexture = tostring(model.customTexture or ""),
+    barTexture = tostring(model.barTexture or ""),
+    customText = tostring(model.customText or ""),
+    timerVisual = tostring(model.timerVisual or "icon"),
+    iconWidth = defaultIconWidth(model.iconWidth),
+    iconHeight = defaultIconHeight(model.iconHeight),
+    barWidth = defaultBarWidth(model.barWidth),
+    barHeight = defaultBarHeight(model.barHeight),
+    showTimerText = model.showTimerText ~= false,
+    barColor = tostring(model.barColor or ""),
+    barSide = tostring(model.barSide or "right"),
+    timerAnchor = tostring(model.timerAnchor or "BOTTOM"),
+    timerOffsetX = tonumber(model.timerOffsetX) or 0,
+    timerOffsetY = tonumber(model.timerOffsetY) or -1,
+    customTextAnchor = tostring(model.customTextAnchor or "TOP"),
+    customTextOffsetX = tonumber(model.customTextOffsetX) or 0,
+    customTextOffsetY = tonumber(model.customTextOffsetY) or 2,
+    resourceConditionEnabled = model.resourceConditionEnabled == true,
+    resourceMinPct = tonumber(model.resourceMinPct) or 0,
+    resourceMaxPct = tonumber(model.resourceMaxPct) or 100,
     notes = "",
     debug = false,
   }
@@ -103,6 +190,7 @@ function B:NewDraft(auraId)
     unit = "player",
     group = "important_procs",
     triggerType = "cast",
+    trackingMode = "confirmed",
     castSpellIDs = "",
     ruleName = "",
     ruleID = "",
@@ -112,12 +200,20 @@ function B:NewDraft(auraId)
     inCombatOnly = false,
     actionMode = "produce",
     duration = 8,
+    estimatedDuration = 8,
     displayMode = "iconbar",
     lowTime = 3,
     soundOnShow = "default",
     soundOnExpire = "none",
     loadClassToken = "",
     loadSpecID = "",
+    iconWidth = 36,
+    iconHeight = 36,
+    barWidth = 94,
+    barHeight = 16,
+    showTimerText = true,
+    barColor = "",
+    barSide = "right",
     notes = "",
     debug = false,
   }
@@ -134,36 +230,47 @@ function B:ToSettingsDataModel(draft)
     spellInput = trim(draft.spellID),
     displayName = trim(draft.name),
     unit = normalizedUnit,
-    groupID = trim(draft.group) ~= "" and trim(draft.group) or "important_procs",
+    trackingMode = normalizeTrackingMode(draft.trackingMode, normalizedUnit),
+    castSpellIDs = parseCSVNumbers(draft.castSpellIDs),
+    estimatedDuration = tonumber(draft.estimatedDuration or draft.duration) or 8,
+    groupID = trim(draft.groupID or draft.group) ~= "" and trim(draft.groupID or draft.group) or "important_procs",
     loadClassToken = trim(draft.loadClassToken):upper(),
-    loadSpecIDs = specIDs,
+    loadSpecIDs = draft.loadSpecIDs or specIDs,
+    inCombatOnly = draft.inCombatOnly == true,
     layoutGroupEnabled = draft.layoutGroupEnabled ~= false,
     instanceUID = trim(draft.instanceUID),
-    onlyMine = draft.onlyMine == true,
-    alert = true,
-    iconMode = "spell",
-    customTexture = "",
-    barTexture = "",
-    timerVisual = (draft.displayMode == "bar" or draft.displayMode == "iconbar") and draft.displayMode or "icon",
-    customText = "",
-    resourceConditionEnabled = false,
-    resourceMinPct = 0,
-    resourceMaxPct = 100,
+    onlyMine = self:IsEstimatedTargetDebuffTracking(draft) or draft.onlyMine == true,
+    alert = draft.alert ~= false,
+    iconMode = draft.iconMode or "spell",
+    customTexture = draft.customTexture or "",
+    barTexture = draft.barTexture or "",
+    timerVisual = draft.timerVisual or ((draft.displayMode == "bar" or draft.displayMode == "iconbar") and draft.displayMode or "icon"),
+    iconWidth = defaultIconWidth(draft.iconWidth),
+    iconHeight = defaultIconHeight(draft.iconHeight),
+    barWidth = defaultBarWidth(draft.barWidth),
+    barHeight = defaultBarHeight(draft.barHeight),
+    showTimerText = draft.showTimerText ~= false,
+    barColor = draft.barColor or "",
+    barSide = tostring(draft.barSide or "right"),
+    customText = draft.customText or "",
+    resourceConditionEnabled = draft.resourceConditionEnabled == true,
+    resourceMinPct = tonumber(draft.resourceMinPct) or 0,
+    resourceMaxPct = tonumber(draft.resourceMaxPct) or 100,
     lowTimeThreshold = tonumber(draft.lowTime) or 0,
-    timerAnchor = "BOTTOM",
-    timerOffsetX = 0,
-    timerOffsetY = -1,
-    customTextAnchor = "TOP",
-    customTextOffsetX = 0,
-    customTextOffsetY = 2,
+    timerAnchor = draft.timerAnchor or "BOTTOM",
+    timerOffsetX = tonumber(draft.timerOffsetX) or 0,
+    timerOffsetY = tonumber(draft.timerOffsetY) or -1,
+    customTextAnchor = draft.customTextAnchor or "TOP",
+    customTextOffsetX = tonumber(draft.customTextOffsetX) or 0,
+    customTextOffsetY = tonumber(draft.customTextOffsetY) or 2,
     soundOnGain = draft.soundOnShow or "default",
-    soundOnLow = "default",
+    soundOnLow = draft.soundOnLow or "default",
     soundOnExpire = draft.soundOnExpire or "none",
   }
 end
 
 function B:ToRuleModel(draft, auraSpellID)
-  if self:IsDirectAuraTracking(draft) then
+  if self:IsDirectAuraTracking(draft) or self:IsEstimatedTargetDebuffTracking(draft) then
     return nil
   end
 

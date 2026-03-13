@@ -6,6 +6,7 @@ ns.UIV2.Panels = ns.UIV2.Panels or {}
 local UI = ns.UIV2
 local Panels = UI.Panels
 local E = UI.Events
+local Skin = ns.UISkin
 
 local GlobalPanel = {}
 GlobalPanel.__index = GlobalPanel
@@ -25,6 +26,9 @@ local function makeButton(parent, text, w, onClick)
   local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
   btn:SetSize(w or 150, 22)
   btn:SetText(text)
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(btn, "default")
+  end
   btn:SetScript("OnClick", function()
     if onClick then
       onClick()
@@ -58,8 +62,11 @@ function GlobalPanel:Create(parent)
   o.btnSettings:SetPoint("TOPLEFT", 14, -30)
 
   o.btnLocalization = makeButton(o.frame, "Localization", 210, function()
-    if ns.OptionsIntegration and ns.OptionsIntegration.OpenBlizzardCategory then
-      ns.OptionsIntegration:OpenBlizzardCategory()
+    if ns.UIV2 and ns.UIV2.ConfigFrame and ns.UIV2.ConfigFrame.Open then
+      ns.UIV2.ConfigFrame:Open()
+    end
+    if ns.ConfigUI and ns.ConfigUI.Message then
+      ns.ConfigUI:Message("Localization panel is not available in the new UI yet. Use the main AuraLite editor for now.")
     end
     o.frame:Hide()
   end)
@@ -90,12 +97,16 @@ function GlobalPanel:Create(parent)
       end
     end
   end)
+  o.btnLock:SetText((ns.db and ns.db.locked == false) and "Turn Movers Off" or "Turn Movers On")
   o.btnLock:SetPoint("TOPLEFT", 14, -142)
 
   o.btnClose = makeButton(o.frame, "Close", 210, function()
     o.frame:Hide()
   end)
   o.btnClose:SetPoint("TOPLEFT", 14, -170)
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(o.btnClose, "ghost")
+  end
 
   if E then
     E:On(E.Names.OPEN_GLOBAL_PANEL, function(payload)
@@ -104,6 +115,7 @@ function GlobalPanel:Create(parent)
         o.frame:ClearAllPoints()
         o.frame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -6)
       end
+      o.btnLock:SetText((ns.db and ns.db.locked == false) and "Turn Movers Off" or "Turn Movers On")
       o.frame:SetShown(not o.frame:IsShown())
     end)
   end

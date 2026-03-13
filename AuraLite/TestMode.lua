@@ -13,7 +13,10 @@ end
 
 function T:BuildPlaceholder(item, unit)
   local now = GetTime()
-  local duration = 12 + (item.spellID % 9)
+  local duration = tonumber(item and (item.estimatedDuration or item.duration)) or 0
+  if duration <= 0 then
+    duration = 12 + ((tonumber(item and item.spellID) or 0) % 9)
+  end
   local elapsed = (item.spellID % duration)
 
   return {

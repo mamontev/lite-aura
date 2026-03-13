@@ -75,6 +75,53 @@ local function normalizeThreshold(value)
   return n
 end
 
+local function normalizeDuration(value, fallback)
+  local n = tonumber(value)
+  if not n then
+    return fallback
+  end
+  if n < 1 then
+    n = 1
+  end
+  if n > 600 then
+    n = 600
+  end
+  return math.floor((n * 10) + 0.5) / 10
+end
+
+local function normalizeSpellIDList(value)
+  local out = {}
+  local seen = {}
+  if type(value) == "table" then
+    for i = 1, #value do
+      local n = tonumber(value[i])
+      if n and n > 0 and not seen[n] then
+        seen[n] = true
+        out[#out + 1] = n
+      end
+    end
+    return out
+  end
+
+  local text = tostring(value or "")
+  for token in text:gmatch("[^,%s;]+") do
+    local n = tonumber(token)
+    if n and n > 0 and not seen[n] then
+      seen[n] = true
+      out[#out + 1] = n
+    end
+  end
+  return out
+end
+
+local function normalizeTrackingMode(value, unit)
+  local mode = tostring(value or ""):lower()
+  if tostring(unit or "") == "target" and mode == "estimated" then
+    return "estimated"
+  end
+  return "confirmed"
+end
+
 local function normalizeTimerVisual(value)
   value = tostring(value or "icon"):lower()
   if value == "bar" or value == "iconbar" then
@@ -94,7 +141,7 @@ function R:IsValidUnit(unit)
   return trackedUnits[unit] == true
 end
 
-function R:NormalizeWatchItem(item)
+function R:NormalizeWatchItem(item, unit)
   if type(item) ~= "table" then
     return nil
   end
@@ -114,6 +161,10 @@ function R:NormalizeWatchItem(item)
   return {
     spellID = spellID,
     groupID = groupID,
+    trackingMode = normalizeTrackingMode(item.trackingMode, unit),
+    castSpellIDs = normalizeSpellIDList(item.castSpellIDs),
+    estimatedDuration = normalizeDuration(item.estimatedDuration, 8),
+    inCombatOnly = item.inCombatOnly == true,
     onlyMine = item.onlyMine == true,
     alert = item.alert ~= false,
     displayName = trim(item.displayName),
@@ -156,7 +207,7 @@ function R:Rebuild(profile)
     self.byUnitGroup[unit] = self.byUnitGroup[unit] or {}
 
     for i = #list, 1, -1 do
-      local normalized = self:NormalizeWatchItem(list[i])
+      local normalized = self:NormalizeWatchItem(list[i], unit)
       if not normalized then
         table.remove(list, i)
       else
@@ -205,6 +256,10 @@ function R:TouchesWatchlist(unit, updateInfo)
 
   if updateInfo.updatedAuraInstanceIDs then
     for _, auraInstanceID in ipairs(updateInfo.updatedAuraInstanceIDs) do
+      if not ns.AuraAPI:IsSafeNumber(auraInstanceID) then
+        -- Secret aura instance IDs cannot be resolved safely; refresh conservatively.
+        return true
+      end
       local aura = ns.AuraAPI:GetAuraByInstanceID(unit, auraInstanceID)
       local spellID = ns.AuraAPI:GetAuraSpellID(aura)
       if spellID and watched[spellID] then
@@ -224,7 +279,7 @@ function R:AddWatch(unit, item)
   if not self:IsValidUnit(unit) then
     return nil, "invalid unit"
   end
-  local normalized = self:NormalizeWatchItem(item)
+  local normalized = self:NormalizeWatchItem(item, unit)
   if not normalized then
     return nil, "invalid watch item"
   end

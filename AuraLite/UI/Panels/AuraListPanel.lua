@@ -7,6 +7,7 @@ local UI = ns.UIV2
 local Panels = UI.Panels
 local E = UI.Events
 local S = UI.State
+local Skin = ns.UISkin
 
 local AuraListPanel = {}
 AuraListPanel.__index = AuraListPanel
@@ -48,7 +49,7 @@ function AuraListPanel:BuildRows()
     local filtered = {}
     for i = 1, #rows do
       local row = rows[i]
-      local hay = lowerSafe(row.name) .. " " .. lowerSafe(row.group) .. " " .. lowerSafe(row.unit) .. " " .. tostring(row.spellID or "")
+      local hay = lowerSafe(row.name) .. " " .. lowerSafe(row.group) .. " " .. lowerSafe(row.unit) .. " " .. lowerSafe(row.trigger) .. " " .. tostring(row.spellID or "")
       if hay:find(search, 1, true) then
         filtered[#filtered + 1] = row
       end
@@ -97,6 +98,9 @@ function AuraListPanel:AcquireRow(index, rowType)
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.text:SetPoint("LEFT", 8, 0)
     btn.text:SetJustifyH("LEFT")
+    if Skin and Skin.ApplyClickableRow then
+      Skin:ApplyClickableRow(btn, "header")
+    end
   else
     btn:SetHeight(34)
     btn.bg = btn:CreateTexture(nil, "BACKGROUND")
@@ -126,12 +130,22 @@ function AuraListPanel:AcquireRow(index, rowType)
       end
     end)
 
+    if Skin and Skin.ApplyClickableRow then
+      Skin:ApplyClickableRow(btn, "row")
+    end
+
     btn:SetScript("OnEnter", function(selfBtn)
-      selfBtn.bg:SetColorTexture(0.14, 0.28, 0.44, 0.78)
+      if Skin and Skin.SetClickableRowState then
+        Skin:SetClickableRowState(selfBtn, "hover")
+      else
+        selfBtn.bg:SetColorTexture(0.14, 0.28, 0.44, 0.78)
+      end
     end)
 
     btn:SetScript("OnLeave", function(selfBtn)
-      if selfBtn.auraId and selfBtn.auraId == self.selectedAuraId then
+      if Skin and Skin.SetClickableRowState then
+        Skin:SetClickableRowState(selfBtn, (selfBtn.auraId and selfBtn.auraId == self.selectedAuraId) and "selected" or "normal")
+      elseif selfBtn.auraId and selfBtn.auraId == self.selectedAuraId then
         selfBtn.bg:SetColorTexture(0.18, 0.36, 0.56, 0.88)
       else
         selfBtn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
@@ -178,7 +192,9 @@ function AuraListPanel:Render()
       btn.statusText:SetText(status:upper())
       btn.statusText:SetTextColor(color[1], color[2], color[3])
 
-      if row.id and row.id == self.selectedAuraId then
+      if Skin and Skin.SetClickableRowState then
+        Skin:SetClickableRowState(btn, (row.id and row.id == self.selectedAuraId) and "selected" or "normal")
+      elseif row.id and row.id == self.selectedAuraId then
         btn.bg:SetColorTexture(0.18, 0.36, 0.56, 0.88)
       else
         btn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)

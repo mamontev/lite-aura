@@ -7,6 +7,7 @@ local UI = ns.UIV2
 local W = UI.Widgets
 
 local SpellInput = UI.SpellInput
+local Skin = ns.UISkin
 
 local ConditionTree = {}
 ConditionTree.__index = ConditionTree
@@ -39,6 +40,9 @@ function ConditionTree:SetDraft(draft)
   self.editTalents:SetText(self.draft.talentSpellIDs or "")
   self.editAuras:SetText(self.draft.requiredAuraSpellIDs or "")
   self.cbCombat:SetChecked(self.draft.inCombatOnly == true)
+  if Skin and Skin.RefreshCheckbox then
+    Skin:RefreshCheckbox(self.cbCombat)
+  end
   self:UpdateSummary()
   self:UpdateHints(false)
 end
@@ -107,6 +111,9 @@ function ConditionTree:Create(parent, onChanged)
   o.ddLogic = CreateFrame("Frame", nil, o.frame, "UIDropDownMenuTemplate")
   o.ddLogic:SetPoint("TOPLEFT", -6, -22)
   UIDropDownMenu_SetWidth(o.ddLogic, 150)
+  if Skin and Skin.ApplyDropdown then
+    Skin:ApplyDropdown(o.ddLogic)
+  end
   UIDropDownMenu_Initialize(o.ddLogic, function(_, level)
     if level ~= 1 then
       return
@@ -171,8 +178,14 @@ function ConditionTree:Create(parent, onChanged)
 
   o.cbCombat = CreateFrame("CheckButton", nil, o.frame, "UICheckButtonTemplate")
   o.cbCombat:SetPoint("TOPLEFT", 300, -72)
+  if Skin and Skin.ApplyCheckbox then
+    Skin:ApplyCheckbox(o.cbCombat)
+  end
   o.cbCombat:SetScript("OnClick", function(btn)
     o.draft.inCombatOnly = btn:GetChecked() == true
+    if Skin and Skin.RefreshCheckbox then
+      Skin:RefreshCheckbox(btn)
+    end
     o:NotifyChanged()
   end)
 

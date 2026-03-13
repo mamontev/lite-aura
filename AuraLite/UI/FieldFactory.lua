@@ -7,6 +7,7 @@ UI.FieldFactory = UI.FieldFactory or {}
 local F = UI.FieldFactory
 
 local SpellInput = UI.SpellInput
+local Skin = ns.UISkin
 
 local function createInputBackground(parent)
   local bg = parent:CreateTexture(nil, "BACKGROUND")
@@ -72,7 +73,39 @@ local function createDropdown(parent, width)
     self.onChanged = fn
   end
 
+  if Skin and Skin.ApplyDropdown then
+    Skin:ApplyDropdown(drop)
+  end
+
   return drop
+end
+
+local function parseColorCSV(text)
+  text = tostring(text or "")
+  local out = {}
+  for token in text:gmatch("[^,%s;]+") do
+    local n = tonumber(token)
+    if not n then
+      return nil
+    end
+    if n < 0 then
+      n = 0
+    elseif n > 1 then
+      n = 1
+    end
+    out[#out + 1] = n
+    if #out == 3 then
+      break
+    end
+  end
+  if #out ~= 3 then
+    return nil
+  end
+  return out[1], out[2], out[3]
+end
+
+local function formatColorCSV(r, g, b)
+  return string.format("%.2f,%.2f,%.2f", tonumber(r) or 1, tonumber(g) or 1, tonumber(b) or 1)
 end
 
 local function attachSpellResolver(holder, control, field, onChange)
@@ -104,6 +137,7 @@ local function attachSpellResolver(holder, control, field, onChange)
   auto:SetBackdropBorderColor(0.12, 0.50, 0.80, 0.90)
   auto:Hide()
   auto.buttons = {}
+  local autocompleteRevision = 0
 
   local function hideAutocomplete()
     auto:Hide()
@@ -175,6 +209,17 @@ local function attachSpellResolver(holder, control, field, onChange)
         btn:SetScript("OnMouseDown", function(selfBtn)
           applySuggestion(selfBtn.row)
         end)
+        if Skin and Skin.ApplyClickableRow then
+          Skin:ApplyClickableRow(btn, "row")
+        end
+        if Skin and Skin.SetClickableRowState then
+          btn:SetScript("OnEnter", function(selfBtn)
+            Skin:SetClickableRowState(selfBtn, "hover")
+          end)
+          btn:SetScript("OnLeave", function(selfBtn)
+            Skin:SetClickableRowState(selfBtn, "normal")
+          end)
+        end
         auto.buttons[i] = btn
       end
       btn.row = row
@@ -240,7 +285,17 @@ local function attachSpellResolver(holder, control, field, onChange)
 
   control:HookScript("OnTextChanged", function(_, userInput)
     updateHintAndMaybeNormalize(false)
-    updateAutocomplete(userInput)
+    autocompleteRevision = autocompleteRevision + 1
+    local revision = autocompleteRevision
+    C_Timer.After(0.06, function()
+      if revision ~= autocompleteRevision then
+        return
+      end
+      if not control or not control:IsShown() then
+        return
+      end
+      updateAutocomplete(userInput)
+    end)
   end)
 
   control:HookScript("OnEditFocusGained", function()
@@ -295,6 +350,9 @@ function F:CreateField(parent, field, model, onChange)
     control = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
     control:SetPoint("TOPLEFT", 0, -18)
     control:SetChecked(model[field.key] == true)
+    if Skin and Skin.ApplyCheckbox then
+      Skin:ApplyCheckbox(control)
+    end
 
     local cbLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     cbLabel:SetPoint("LEFT", control, "RIGHT", 4, 0)
@@ -302,10 +360,177 @@ function F:CreateField(parent, field, model, onChange)
     label:SetText(" ")
 
     control:SetScript("OnClick", function(btn)
+      if Skin and Skin.RefreshCheckbox then
+        Skin:RefreshCheckbox(btn)
+      end
       onChange(field.key, btn:GetChecked() == true)
     end)
+  elseif field.widget == "spinner" then
+    holder:SetHeight(52)
+    control = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+    control:SetAutoFocus(false)
+    control:SetPoint("TOPLEFT", 26, -18)
+    control:SetSize(72, 24)
+    control:SetNumeric(true)
+    control:SetNumber(tonumber(model[field.key]) or tonumber(field.default) or 0)
+
+    local function clampValue(value)
+      value = tonumber(value) or tonumber(field.default) or 0
+      if field.min ~= nil and value < field.min then
+        value = field.min
+      end
+      if field.max ~= nil and value > field.max then
+        value = field.max
+      end
+      return math.floor(value + 0.5)
+    end
+
+    local function commit(value)
+      value = clampValue(value)
+      control:SetNumber(value)
+      onChange(field.key, value)
+    end
+
+    local minus = CreateFrame("Button", nil, holder, "UIPanelButtonTemplate")
+    minus:SetSize(22, 22)
+    minus:SetPoint("LEFT", control, "LEFT", -24, 0)
+    minus:SetText("-")
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(minus, "ghost")
+    end
+    minus:SetScript("OnClick", function()
+      commit((tonumber(control:GetNumber()) or 0) - (tonumber(field.step) or 1))
+    end)
+
+    local plus = CreateFrame("Button", nil, holder, "UIPanelButtonTemplate")
+    plus:SetSize(22, 22)
+    plus:SetPoint("LEFT", control, "RIGHT", 4, 0)
+    plus:SetText("+")
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(plus, "ghost")
+    end
+    plus:SetScript("OnClick", function()
+      commit((tonumber(control:GetNumber()) or 0) + (tonumber(field.step) or 1))
+    end)
+
+    local hint = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("LEFT", plus, "RIGHT", 8, 0)
+    hint:SetText(field.help or "")
+
+    control:SetScript("OnEnterPressed", function(edit)
+      commit(edit:GetNumber())
+      edit:ClearFocus()
+    end)
+    control:SetScript("OnEditFocusLost", function(edit)
+      commit(edit:GetNumber())
+    end)
+  elseif field.widget == "color" then
+    local frame = CreateFrame("Frame", nil, holder)
+    frame:SetPoint("TOPLEFT", 0, -18)
+    frame:SetSize(220, 24)
+    control = frame
+
+    local swatch = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    swatch:SetSize(28, 22)
+    swatch:SetPoint("LEFT", 0, 0)
+    swatch:SetBackdrop({
+      bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+      edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+      edgeSize = 10,
+      insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    swatch:SetBackdropBorderColor(0.12, 0.50, 0.80, 0.90)
+    swatch:SetBackdropColor(0.16, 0.64, 1.0, 0.95)
+
+    local valueText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    valueText:SetPoint("LEFT", swatch, "RIGHT", 8, 0)
+    valueText:SetText(tostring(model[field.key] or field.default or ""))
+
+    local function setColorText(text)
+      local r, g, b = parseColorCSV(text)
+      if r and g and b then
+        swatch:SetBackdropColor(r, g, b, 0.95)
+        valueText:SetText(formatColorCSV(r, g, b))
+      else
+        swatch:SetBackdropColor(0.16, 0.64, 1.0, 0.95)
+        valueText:SetText("Default")
+      end
+    end
+
+    setColorText(model[field.key] or field.default or "")
+
+    swatch:SetScript("OnClick", function()
+      if not ColorPickerFrame then
+        return
+      end
+      local r, g, b = parseColorCSV(model[field.key] or field.default or "")
+      local startR, startG, startB = r or 0.16, g or 0.64, b or 1.0
+
+      local function commitColor(nr, ng, nb)
+        local text = formatColorCSV(nr, ng, nb)
+        model[field.key] = text
+        setColorText(text)
+        onChange(field.key, text)
+      end
+
+      if ColorPickerFrame.SetupColorPickerAndShow then
+        local info = {
+          r = startR,
+          g = startG,
+          b = startB,
+          opacity = 0,
+          hasOpacity = false,
+          swatchFunc = function()
+            local nr, ng, nb
+            if ColorPickerFrame.GetColorRGB then
+              nr, ng, nb = ColorPickerFrame:GetColorRGB()
+            end
+            if not nr and ColorPickerFrame.Content and ColorPickerFrame.Content.ColorPicker and ColorPickerFrame.Content.ColorPicker.GetColorRGB then
+              nr, ng, nb = ColorPickerFrame.Content.ColorPicker:GetColorRGB()
+            end
+            commitColor(nr or startR, ng or startG, nb or startB)
+          end,
+          cancelFunc = function(previousValues)
+            if previousValues then
+              commitColor(previousValues.r or startR, previousValues.g or startG, previousValues.b or startB)
+            else
+              commitColor(startR, startG, startB)
+            end
+          end,
+        }
+        ColorPickerFrame:SetupColorPickerAndShow(info)
+      else
+        ColorPickerFrame.hasOpacity = false
+        ColorPickerFrame.func = function()
+          local nr, ng, nb = ColorPickerFrame:GetColorRGB()
+          commitColor(nr or startR, ng or startG, nb or startB)
+        end
+        ColorPickerFrame.cancelFunc = function(previousValues)
+          if previousValues then
+            commitColor(previousValues.r or startR, previousValues.g or startG, previousValues.b or startB)
+          else
+            commitColor(startR, startG, startB)
+          end
+        end
+        if ColorPickerFrame.SetColorRGB then
+          ColorPickerFrame:SetColorRGB(startR, startG, startB)
+        end
+        ColorPickerFrame.previousValues = { r = startR, g = startG, b = startB }
+        ColorPickerFrame:Show()
+      end
+    end)
   else
-    local box = CreateFrame("EditBox", nil, holder, multiline and "InputBoxMultiLineTemplate" or "InputBoxTemplate")
+    local box
+    if multiline then
+      box = CreateFrame("EditBox", nil, holder)
+      box:SetMultiLine(true)
+      box:SetFontObject(ChatFontNormal)
+      box:SetTextInsets(6, 6, 6, 6)
+      box:SetJustifyH("LEFT")
+      box:SetJustifyV("TOP")
+    else
+      box = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+    end
     control = box
     control:SetAutoFocus(false)
     control:SetPoint("TOPLEFT", 0, -18)
@@ -323,14 +548,20 @@ function F:CreateField(parent, field, model, onChange)
       onChange(field.key, value)
     end)
 
-    if not multiline then
-      local bgHolder = CreateFrame("Frame", nil, holder)
-      bgHolder:SetPoint("TOPLEFT", control, -3, 3)
-      bgHolder:SetPoint("BOTTOMRIGHT", control, 3, -3)
-      bgHolder:SetFrameLevel(holder:GetFrameLevel())
-      createInputBackground(bgHolder)
-      control:SetFrameLevel(bgHolder:GetFrameLevel() + 1)
+    local bgHolder = CreateFrame("Frame", nil, holder)
+    bgHolder:SetPoint("TOPLEFT", control, -3, 3)
+    bgHolder:SetPoint("BOTTOMRIGHT", control, 3, -3)
+    bgHolder:SetFrameLevel(holder:GetFrameLevel())
+    createInputBackground(bgHolder)
+    control:SetFrameLevel(bgHolder:GetFrameLevel() + 1)
 
+    if multiline then
+      local scroll = CreateFrame("ScrollFrame", nil, holder, "UIPanelScrollFrameTemplate")
+      scroll:SetPoint("TOPLEFT", control, "TOPLEFT", -4, 4)
+      scroll:SetPoint("BOTTOMRIGHT", control, "BOTTOMRIGHT", 24, -4)
+      scroll:SetScrollChild(control)
+      holder.scroll = scroll
+    else
       attachSpellResolver(holder, control, field, onChange)
     end
   end

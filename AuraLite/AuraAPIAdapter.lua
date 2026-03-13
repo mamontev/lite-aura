@@ -4,6 +4,42 @@ ns.AuraAPI = ns.AuraAPI or {}
 local A = ns.AuraAPI
 
 local hasIsSecretValue = type(_G.issecretvalue) == "function"
+A._spellIDAliasCache = A._spellIDAliasCache or {}
+A._spellBaseDurationCache = A._spellBaseDurationCache or {}
+
+local SPELL_BASE_DURATION_OVERRIDES = {
+  [388539] = 15,
+}
+
+local function normalizeSpellName(text)
+  if type(text) ~= "string" then
+    return ""
+  end
+  return text:lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function makeLegacyAuraIterator(filter)
+  if filter == "HARMFUL" and type(UnitDebuff) == "function" then
+    return UnitDebuff, false
+  end
+  if filter == "HELPFUL" and type(UnitBuff) == "function" then
+    return UnitBuff, false
+  end
+  if type(UnitAura) == "function" then
+    return UnitAura, true
+  end
+  return nil, false
+end
+
+local function callLegacyAuraIterator(iterator, passFilter, unit, index, filter)
+  if type(iterator) ~= "function" then
+    return nil
+  end
+  if passFilter then
+    return iterator(unit, index, filter)
+  end
+  return iterator(unit, index)
+end
 
 function A:IsSecret(value)
   if hasIsSecretValue then
@@ -140,6 +176,80 @@ function A:GetSpellName(spellID)
   return nil
 end
 
+function A:GetSpellIDAliases(spellID)
+  spellID = tonumber(spellID)
+  if not spellID then
+    return {}
+  end
+
+  local cached = self._spellIDAliasCache[spellID]
+  if cached then
+    return cached
+  end
+
+  local aliases = { spellID }
+  local seen = {
+    [spellID] = true,
+  }
+
+  local spellName = normalizeSpellName(self:GetSpellName(spellID))
+  if spellName ~= "" and type(ns.SpellCatalogData) == "table" then
+    for _, row in ipairs(ns.SpellCatalogData) do
+      local candidateID = tonumber(row and row.id)
+      local candidateName = normalizeSpellName(row and row.name or "")
+      if candidateID and candidateName == spellName and not seen[candidateID] then
+        seen[candidateID] = true
+        aliases[#aliases + 1] = candidateID
+      end
+    end
+  end
+
+  self._spellIDAliasCache[spellID] = aliases
+  return aliases
+end
+
+function A:GetSpellNameAliases(spellID)
+  local out = {}
+  local seen = {}
+
+  local function addName(name)
+    if type(name) ~= "string" or name == "" then
+      return
+    end
+    local key = normalizeSpellName(name)
+    if key == "" or seen[key] then
+      return
+    end
+    seen[key] = true
+    out[#out + 1] = name
+  end
+
+  spellID = tonumber(spellID)
+  if not spellID then
+    return out
+  end
+
+  local aliases = self:GetSpellIDAliases(spellID)
+  for i = 1, #aliases do
+    addName(self:GetSpellName(aliases[i]))
+  end
+
+  if type(ns.SpellCatalogData) == "table" then
+    local aliasIDs = {}
+    for i = 1, #aliases do
+      aliasIDs[aliases[i]] = true
+    end
+    for _, row in ipairs(ns.SpellCatalogData) do
+      local candidateID = tonumber(row and row.id)
+      if candidateID and aliasIDs[candidateID] then
+        addName(row.name)
+      end
+    end
+  end
+
+  return out
+end
+
 function A:GetSpellTexture(spellID)
   local texture = nil
   if C_Spell and C_Spell.GetSpellTexture then
@@ -153,6 +263,34 @@ function A:GetSpellTexture(spellID)
     return texture
   end
   return nil
+end
+
+function A:GetSpellBaseDurationSeconds(spellID)
+  spellID = tonumber(spellID)
+  if not spellID then
+    return nil
+  end
+
+  local cached = self._spellBaseDurationCache[spellID]
+  if cached ~= nil then
+    return cached or nil
+  end
+
+  local duration = SPELL_BASE_DURATION_OVERRIDES[spellID]
+  if not duration and C_Spell and type(C_Spell.GetSpellDescription) == "function" then
+    local ok, description = pcall(C_Spell.GetSpellDescription, spellID)
+    if ok and type(description) == "string" and description ~= "" then
+      local seconds =
+        description:match("(%d+%.?%d*)%s+[Ss]ec") or
+        description:match("(%d+%.?%d*)%s+[Ss]econds") or
+        description:match("(%d+%.?%d*)%s+[Ss]econdi") or
+        description:match("(%d+%.?%d*)%s+[Ss]econdo")
+      duration = tonumber(seconds)
+    end
+  end
+
+  self._spellBaseDurationCache[spellID] = duration or false
+  return duration
 end
 
 function A:GetSpellCooldownData(spellID)
@@ -352,13 +490,81 @@ local function scanUnitAurasBySpellID(unit, spellID)
   if not unit or not spellID then
     return nil
   end
+  local candidateIDs = A:GetSpellIDAliases(spellID)
+  local candidateSet = {}
+  for i = 1, #candidateIDs do
+    candidateSet[candidateIDs[i]] = true
+  end
+
+  local function makeLegacyAura(name, icon, applications, duration, expirationTime, sourceUnit, spellIDValue)
+    local safeSpellID = tonumber(spellIDValue)
+    if not safeSpellID or safeSpellID <= 0 then
+      return nil
+    end
+    return {
+      name = name,
+      icon = icon,
+      applications = tonumber(applications) or 0,
+      duration = tonumber(duration) or nil,
+      expirationTime = tonumber(expirationTime) or nil,
+      sourceUnit = type(sourceUnit) == "string" and sourceUnit or nil,
+      spellId = safeSpellID,
+      spellID = safeSpellID,
+      auraInstanceID = 0,
+    }
+  end
+
+  local function scanLegacy(filter)
+    local iterator, passFilter = makeLegacyAuraIterator(filter)
+    if type(iterator) ~= "function" then
+      return nil
+    end
+    for index = 1, 255 do
+      local name, icon, applications, _, duration, expirationTime, sourceUnit, _, _, spellIDValue =
+        callLegacyAuraIterator(iterator, passFilter, unit, index, filter)
+      if name == nil and icon == nil and spellIDValue == nil then
+        break
+      end
+      if candidateSet[tonumber(spellIDValue)] then
+        return makeLegacyAura(name, icon, applications, duration, expirationTime, sourceUnit, spellIDValue)
+      end
+    end
+    return nil
+  end
+
+  local function scanLegacyByName(filter)
+    local iterator, passFilter = makeLegacyAuraIterator(filter)
+    if type(iterator) ~= "function" then
+      return nil
+    end
+    local spellNames = A:GetSpellNameAliases(spellID)
+    if #spellNames == 0 then
+      return nil
+    end
+    local spellNameSet = {}
+    for i = 1, #spellNames do
+      spellNameSet[spellNames[i]] = true
+    end
+    for index = 1, 255 do
+      local name, icon, applications, _, duration, expirationTime, sourceUnit, _, _, spellIDValue =
+        callLegacyAuraIterator(iterator, passFilter, unit, index, filter)
+      if name == nil and icon == nil and spellIDValue == nil then
+        break
+      end
+      if spellNameSet[name] then
+        local resolvedSpellID = tonumber(spellIDValue) or spellID
+        return makeLegacyAura(name, icon, applications, duration, expirationTime, sourceUnit, resolvedSpellID)
+      end
+    end
+    return nil
+  end
 
   local function matchesAuraSpellID(aura)
     local auraSpellID = aura and (aura.spellId or aura.spellID)
     if not A:IsSafeNumber(auraSpellID) then
       return false
     end
-    return tonumber(auraSpellID) == spellID
+    return candidateSet[tonumber(auraSpellID)] == true
   end
 
   if AuraUtil and type(AuraUtil.ForEachAura) == "function" then
@@ -397,29 +603,75 @@ local function scanUnitAurasBySpellID(unit, spellID)
     return scanFilter("HARMFUL") or scanFilter("HELPFUL")
   end
 
-  return nil
+  return scanLegacy("HARMFUL") or scanLegacy("HELPFUL") or scanLegacyByName("HARMFUL") or scanLegacyByName("HELPFUL")
 end
 
 function A:GetAuraBySpellID(unit, spellID)
   if not unit or not spellID then
     return nil
   end
+  local candidateIDs = self:GetSpellIDAliases(spellID)
 
   if C_UnitAuras and C_UnitAuras.GetUnitAuraBySpellID then
-    local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, spellID)
-    if ok and aura then
-      return aura
+    for i = 1, #candidateIDs do
+      local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, candidateIDs[i])
+      if ok and aura then
+        return aura
+      end
     end
   end
 
   if unit == "player" and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
-    local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
-    if ok and aura then
-      return aura
+    for i = 1, #candidateIDs do
+      local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, candidateIDs[i])
+      if ok and aura then
+        return aura
+      end
     end
   end
 
   return scanUnitAurasBySpellID(unit, spellID)
+end
+
+function A:DebugDumpUnitAuras(unit, limit)
+  if not (ns.Debug and ns.Debug.IsEnabled and ns.Debug:IsEnabled()) then
+    return
+  end
+
+  unit = tostring(unit or "")
+  if unit == "" then
+    return
+  end
+
+  limit = math.max(1, math.min(tonumber(limit) or 8, 16))
+
+  local function collectFromIterator(filter)
+    local out = {}
+    local iterator, passFilter = makeLegacyAuraIterator(filter)
+    if type(iterator) ~= "function" then
+      return out
+    end
+
+    for index = 1, limit do
+      local name, _, _, _, duration, expirationTime, sourceUnit, _, _, spellIDValue =
+        callLegacyAuraIterator(iterator, passFilter, unit, index, filter)
+      if name == nil and spellIDValue == nil then
+        break
+      end
+      out[#out + 1] = ("%s#%s src=%s dur=%s exp=%s"):format(
+        tostring(name or "?"),
+        tostring(tonumber(spellIDValue) or "?"),
+        tostring(sourceUnit or "?"),
+        tostring(tonumber(duration) or "?"),
+        tostring(tonumber(expirationTime) or "?")
+      )
+    end
+    return out
+  end
+
+  local harmful = collectFromIterator("HARMFUL")
+  local helpful = collectFromIterator("HELPFUL")
+  ns.Debug:Logf("Unit aura dump unit=%s harmful=[%s] helpful=[%s]", unit, table.concat(harmful, "; "), table.concat(helpful, "; "))
 end
 
 function A:IsPlayerAuraPresentBySpellID(spellID)

@@ -36,7 +36,11 @@ function Preview:SetDraft(draft)
   self.draft = draft or {}
   self.name:SetText(tostring(self.draft.name or "Aura Preview"))
   self.icon:SetTexture(getSpellTexture(self.draft.spellID))
-  self.mode:SetText("Mode: " .. tostring(self.draft.displayMode or "iconbar"))
+  local trackingLabel = "Confirmed"
+  if tostring(self.draft.trackingMode or "") == "estimated" and tostring(self.draft.unit or "") == "target" then
+    trackingLabel = "Estimated"
+  end
+  self.mode:SetText(string.format("Mode: %s | Tracking: %s", tostring(self.draft.displayMode or "iconbar"), trackingLabel))
 end
 
 function Preview:Play(duration)
@@ -103,7 +107,7 @@ function Preview:Create(parent)
   o.hint:SetPoint("TOPLEFT", 10, -108)
   o.hint:SetPoint("RIGHT", -10, 0)
   o.hint:SetJustifyH("LEFT")
-  o.hint:SetText("Use Sim Show / Sim Consume in Trigger tab to test icon + bar + timer without entering combat.")
+  o.hint:SetText("Use preview actions to test layout and timing. If Tracking is Estimated, the preview represents a local timer started from your cast, not a confirmed target aura.")
 
   o.frame:SetScript("OnUpdate", function()
     if not o.active then
