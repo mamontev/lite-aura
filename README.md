@@ -58,21 +58,6 @@ Sono stati aggiunti preset base extra in `SoundManager` e 3 file audio locali:
 
 I preset appaiono direttamente nei dropdown audio della UI.
 
-### Importare suoni base WeakAuras
-
-Puoi importare automaticamente tutti i suoni base di WeakAuras trovati nella tua installazione locale:
-
-`powershell -NoProfile -ExecutionPolicy Bypass -File .\import-wa-sounds.ps1`
-
-Oppure specificare la cartella addon WeakAuras:
-
-`powershell -NoProfile -ExecutionPolicy Bypass -File .\import-wa-sounds.ps1 -SourcePath "F:\World of Warcraft\_ptr_\Interface\AddOns\WeakAuras"`
-
-Questo comando:
-- copia i file audio in `AuraLite/Media/Sounds/WeakAuras`
-- rigenera `AuraLite/WeakAurasSoundCatalog.lua`
-- rende i suoni disponibili nei dropdown di AuraLite come `WA: ...`
-
 ### Formati audio WoW (PlaySoundFile)
 
 In generale WoW gestisce bene file addon in `ogg/mp3` e in molti casi anche `wav`.
@@ -103,6 +88,53 @@ Per file custom per-aura usa il formato token:
 - `/al sound`: toggle audio globale.
 - `/al debug`: toggle debug chat.
 - `/al debug on|off|verbose`: controllo esplicito debug.
+
+## Test
+
+Per eseguire la batteria di test Lua locale:
+
+`powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`
+
+Per eseguire il gate di beta readiness con report:
+
+`powershell -ExecutionPolicy Bypass -File .\run-beta-gate.ps1`
+
+La suite attuale copre soprattutto:
+
+- identita` stabile delle aura (`instanceUID`) su create/update/rebuild
+- persistenza posizione/saved state su update
+- gruppi: create, move, delete container, ordering
+- proc rules sintetiche: stack, decrement consume, extend-to-cap, expiry
+- import/export di aura singola e gruppi con riallocazione sicura degli ID locali
+- stress/stateful tests su sequenze ripetute di update/rebuild/group/ungroup
+
+Il gate beta aggiunge anche:
+
+- syntax check di tutti i file Lua dell'addon
+- report `GO / NO-GO` in `tests/out/beta-readiness-report.txt`
+- controllo base di hygiene sui log diagnostici temporanei
+
+L'idea e` usare test stateful e boundary-oriented sui punti piu` fragili del runtime, e poi completare con smoke test in-game per le API specifiche del client WoW.
+
+## Packaging e Release
+
+Per creare uno zip beta locale:
+
+`powershell -ExecutionPolicy Bypass -File .\package.ps1 -Channel beta -Label beta1`
+
+Lo zip viene generato in `dist/` e contiene `AuraLite/` come root, pronto per distribuzione manuale.
+
+Per la checklist di rilascio:
+
+- `docs/BETA_RELEASE_CHECKLIST.md`
+
+Per il testo base della release:
+
+- `docs/RELEASE_TEXT_BETA.md`
+
+Per preparare auto-packaging tipo CurseForge/BigWigs packager:
+
+- `.pkgmeta`
 
 ### Personalizzare texture UI
 

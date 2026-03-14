@@ -114,6 +114,18 @@ local function normalizeThreshold(value)
   return n
 end
 
+local function cloneSavedPosition(pos)
+  if type(pos) ~= "table" then
+    return nil
+  end
+  return {
+    point = tostring(pos.point or "CENTER"),
+    relativePoint = tostring(pos.relativePoint or "CENTER"),
+    x = tonumber(pos.x) or 0,
+    y = tonumber(pos.y) or 0,
+  }
+end
+
 local function normalizeSize(value, fallback, minValue, maxValue)
   local n = tonumber(value)
   if not n then
@@ -174,7 +186,7 @@ end
 
 local function normalizeGroupSort(value)
   value = safeLower(tostring(value or "list"))
-  if value == "name" or value == "spell" then
+  if value == "name" or value == "spell" or value == "manual" then
     return value
   end
   return "list"
@@ -254,9 +266,183 @@ local function normalizeInstanceUID(text)
   return text
 end
 
+local fallbackInstanceSeq = 1
+
+local function encodeBase36(value)
+  value = math.floor(math.max(tonumber(value) or 0, 0))
+  if value == 0 then
+    return "0"
+  end
+  local digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+  local out = {}
+  while value > 0 do
+    local index = (value % 36) + 1
+    out[#out + 1] = digits:sub(index, index)
+    value = math.floor(value / 36)
+  end
+  local text = ""
+  for i = #out, 1, -1 do
+    text = text .. out[i]
+  end
+  return text
+end
+
+local function decodeBase36(text)
+  text = safeLower(tostring(text or ""))
+  if text == "" then
+    return nil
+  end
+  local value = 0
+  for i = 1, #text do
+    local byte = text:byte(i)
+    local digit
+    if byte >= 48 and byte <= 57 then
+      digit = byte - 48
+    elseif byte >= 97 and byte <= 122 then
+      digit = byte - 87
+    else
+      return nil
+    end
+    value = (value * 36) + digit
+  end
+  return value
+end
+
+local function extractInstanceSequence(instanceUID)
+  local seqToken = tostring(instanceUID or ""):match("^a%d+_s([0-9a-z]+)$")
+  if not seqToken then
+    return nil
+  end
+  return decodeBase36(seqToken)
+end
+
+local function ensureInstanceSequenceState()
+  if not ns.db then
+    return nil
+  end
+  local current = tonumber(ns.db.nextInstanceSeq)
+  if current and current >= 1 then
+    current = math.floor(current)
+  else
+    current = 1
+  end
+
+  local maxSeq = 0
+  local watchlist = ns.db.watchlist or {}
+  for _, unit in ipairs(trackedUnits) do
+    local list = watchlist[unit] or {}
+    for i = 1, #list do
+      local item = list[i]
+      local seq = extractInstanceSequence(item and item.instanceUID)
+      if seq and seq > maxSeq then
+        maxSeq = seq
+      end
+    end
+  end
+
+  if current <= maxSeq then
+    current = maxSeq + 1
+  end
+
+  ns.db.nextInstanceSeq = current
+  return ns.db.nextInstanceSeq
+end
+
+local function reserveNextInstanceSequence()
+  local current = ensureInstanceSequenceState()
+  if current then
+    ns.db.nextInstanceSeq = current + 1
+    return current
+  end
+  local seq = fallbackInstanceSeq
+  fallbackInstanceSeq = seq + 1
+  return seq
+end
+
+local function registerExistingInstanceUID(instanceUID)
+  local seq = extractInstanceSequence(instanceUID)
+  if not seq then
+    return
+  end
+  if ns.db then
+    local nextSeq = ensureInstanceSequenceState() or 1
+    if seq >= nextSeq then
+      ns.db.nextInstanceSeq = seq + 1
+    end
+    return
+  end
+  if seq >= fallbackInstanceSeq then
+    fallbackInstanceSeq = seq + 1
+  end
+end
+
 local function buildInstanceUID(spellID)
-  local nowMs = math.floor((GetTime() or 0) * 1000)
-  return string.format("a%d_%d_%04d", tonumber(spellID) or 0, nowMs, math.random(0, 9999))
+  local seq = reserveNextInstanceSequence()
+  return string.format("a%d_s%s", tonumber(spellID) or 0, encodeBase36(seq))
+end
+
+local function sanitizeStandaloneToken(text)
+  text = safeLower(tostring(text or ""))
+  text = text:gsub("[^%w_]+", "_")
+  text = text:gsub("_+", "_")
+  text = text:gsub("^_+", "")
+  text = text:gsub("_+$", "")
+  return text
+end
+
+local function buildStandaloneContainerKey(unit, item)
+  local unitToken = sanitizeStandaloneToken(unit or "player")
+  local instanceUID = normalizeInstanceUID(item and item.instanceUID)
+  if instanceUID ~= "" then
+    return string.format("aura_%s_%s", unitToken, instanceUID)
+  end
+
+  local spellID = tonumber(item and item.spellID) or 0
+  local groupToken = sanitizeStandaloneToken(item and item.groupID or "")
+  local nameToken = sanitizeStandaloneToken(item and item.displayName or "")
+  if nameToken == "" then
+    nameToken = "spell" .. tostring(spellID)
+  end
+  return string.format("aura_%s_%s_%d_%s", unitToken, groupToken, spellID, nameToken)
+end
+
+local function ensureEntryInstanceUID(unit, item)
+  if type(item) ~= "table" then
+    return nil
+  end
+  local current = normalizeInstanceUID(item.instanceUID)
+  if current ~= "" then
+    item.instanceUID = current
+    registerExistingInstanceUID(current)
+    return current
+  end
+
+  local legacyKey = buildStandaloneContainerKey(unit, item)
+  local newUID = buildInstanceUID(item.spellID)
+  item.instanceUID = newUID
+  local newKey = buildStandaloneContainerKey(unit, item)
+
+  if ns.db and type(ns.db.positions) == "table" and legacyKey ~= newKey then
+    local legacyPos = ns.db.positions[legacyKey]
+    if type(legacyPos) == "table" and type(ns.db.positions[newKey]) ~= "table" then
+      ns.db.positions[newKey] = {
+        point = legacyPos.point,
+        relativePoint = legacyPos.relativePoint,
+        x = legacyPos.x,
+        y = legacyPos.y,
+      }
+    end
+  end
+
+  return newUID
+end
+
+function D:EnsureWatchItemIdentity(unit, item)
+  return ensureEntryInstanceUID(unit, item)
+end
+
+function D:EnsureIdentityState()
+  return ensureInstanceSequenceState() or 1
 end
 local function normalizeClassToken(value)
   local token = safeLower(tostring(value or "")):upper()
@@ -449,6 +635,7 @@ function D:EnsureGroup(groupID, displayName)
         spacing = 4,
         direction = "RIGHT",
         sort = "list",
+        wrapAfter = 0,
         nudgeX = 0,
         nudgeY = 0,
       },
@@ -479,6 +666,7 @@ function D:GetGroupConfig(groupID)
         spacing = 4,
         direction = "RIGHT",
         sort = "list",
+        wrapAfter = 0,
         nudgeX = 0,
         nudgeY = 0,
       },
@@ -496,6 +684,7 @@ function D:GetGroupConfig(groupID)
         spacing = 4,
         direction = "RIGHT",
         sort = "list",
+        wrapAfter = 0,
         nudgeX = 0,
         nudgeY = 0,
       },
@@ -512,6 +701,7 @@ function D:GetGroupConfig(groupID)
       spacing = normalizeSize(layout.spacing, 4, 0, 64),
       direction = normalizeGroupDirection(layout.direction),
       sort = normalizeGroupSort(layout.sort),
+      wrapAfter = normalizeSize(layout.wrapAfter, 0, 0, 20),
       nudgeX = normalizeOffset(layout.nudgeX, 0),
       nudgeY = normalizeOffset(layout.nudgeY, 0),
     },
@@ -537,6 +727,7 @@ function D:UpdateGroupConfig(groupID, model)
   cfg.layout.spacing = normalizeSize(model and model.groupSpacing, current.layout.spacing, 0, 64)
   cfg.layout.direction = normalizeGroupDirection(model and model.groupDirection or current.layout.direction)
   cfg.layout.sort = normalizeGroupSort(model and model.groupSort or current.layout.sort)
+  cfg.layout.wrapAfter = normalizeSize(model and model.groupWrapAfter, current.layout.wrapAfter, 0, 20)
   cfg.layout.nudgeX = normalizeOffset(model and model.groupOffsetX, current.layout.nudgeX)
   cfg.layout.nudgeY = normalizeOffset(model and model.groupOffsetY, current.layout.nudgeY)
 
@@ -569,6 +760,202 @@ function D:GetLoadClassOptions()
     out[#out + 1] = { value = cls.token, label = cls.label }
   end
   return out
+end
+
+function D:CountGroupMembers(groupID)
+  groupID = normalizeGroupID(groupID)
+  if groupID == "" then
+    return 0
+  end
+  local count = 0
+  for _, unit in ipairs(trackedUnits) do
+    local list = ns.db.watchlist[unit] or {}
+    for i = 1, #list do
+      if normalizeGroupID(list[i] and list[i].groupID) == groupID then
+        count = count + 1
+      end
+    end
+  end
+  return count
+end
+
+function D:ListGroupsDetailed()
+  local out = {}
+  local keys = U.KeysSortedByNumberField(ns.db.groups or {}, "order")
+  for i = 1, #keys do
+    local groupID = keys[i]
+    local cfg = self:GetGroupConfig(groupID)
+    out[#out + 1] = {
+      id = groupID,
+      name = cfg.name or groupID,
+      count = self:CountGroupMembers(groupID),
+      direction = cfg.layout.direction or "RIGHT",
+      spacing = tonumber(cfg.layout.spacing) or 4,
+      sort = cfg.layout.sort or "list",
+      wrapAfter = tonumber(cfg.layout.wrapAfter) or 0,
+      offsetX = tonumber(cfg.layout.nudgeX) or 0,
+      offsetY = tonumber(cfg.layout.nudgeY) or 0,
+    }
+  end
+  return out
+end
+
+function D:DeleteGroup(groupID)
+  groupID = normalizeGroupID(groupID)
+  if groupID == "" or not ns.db.groups[groupID] then
+    return 0
+  end
+
+  local changed = 0
+  for _, unit in ipairs(trackedUnits) do
+    local list = ns.db.watchlist[unit] or {}
+    for i = 1, #list do
+      local item = list[i]
+      if normalizeGroupID(item and item.groupID) == groupID then
+        item.groupID = ""
+        item.groupOrder = nil
+        changed = changed + 1
+      end
+    end
+  end
+
+  ns.db.groups[groupID] = nil
+  if type(ns.db.positions) == "table" then
+    ns.db.positions[groupID] = nil
+  end
+  if ns.Dragger and ns.Dragger.pendingPositions then
+    ns.Dragger.pendingPositions[groupID] = nil
+  end
+  if ns.GroupManager then
+    if ns.GroupManager.frames then
+      ns.GroupManager.frames[groupID] = nil
+    end
+    if ns.GroupManager.layoutSigByGroup then
+      ns.GroupManager.layoutSigByGroup[groupID] = nil
+    end
+  end
+
+  if changed > 0 then
+    ns:RebuildWatchIndex()
+  end
+  if ns.EventRouter and ns.EventRouter.RefreshAll then
+    ns.EventRouter:RefreshAll()
+  end
+  return changed
+end
+
+function D:ListGroupMembers(groupID)
+  groupID = normalizeGroupID(groupID)
+  local rows = {}
+  if groupID == "" then
+    return rows
+  end
+
+  for _, unit in ipairs(trackedUnits) do
+    local list = ns.db.watchlist[unit] or {}
+    for index = 1, #list do
+      local item = list[index]
+      if normalizeGroupID(item and item.groupID) == groupID then
+        local name = normalizeDisplayName(item and item.displayName)
+        if name == "" then
+          name = ns.AuraAPI:GetSpellName(item.spellID) or ("Spell " .. tostring(item.spellID or "?"))
+        end
+        rows[#rows + 1] = {
+          key = unit .. ":" .. index,
+          unit = unit,
+          spellID = tonumber(item and item.spellID) or 0,
+          name = name,
+          groupOrder = tonumber(item and item.groupOrder) or 0,
+        }
+      end
+    end
+  end
+
+  table.sort(rows, function(a, b)
+    local ao = tonumber(a.groupOrder) or 0
+    local bo = tonumber(b.groupOrder) or 0
+    if ao ~= bo then
+      return ao < bo
+    end
+    return tostring(a.name) < tostring(b.name)
+  end)
+  return rows
+end
+
+function D:SetEntryGroup(key, groupID)
+  local entry = self:ResolveEntry(key)
+  if not entry or not entry.item then
+    return false
+  end
+  local oldGroupID = normalizeGroupID(entry.item.groupID)
+  groupID = normalizeGroupID(groupID)
+  if groupID ~= "" then
+    self:EnsureGroup(groupID)
+  end
+  entry.item.groupID = groupID
+  if groupID == "" then
+    entry.item.groupOrder = nil
+  else
+    local members = self:ListGroupMembers(groupID)
+    entry.item.groupOrder = #members + 1
+  end
+  if oldGroupID ~= "" and oldGroupID ~= groupID and ns.GroupManager and ns.GroupManager.layoutSigByGroup then
+    ns.GroupManager.layoutSigByGroup[oldGroupID] = nil
+  end
+  if groupID ~= "" and ns.GroupManager and ns.GroupManager.layoutSigByGroup then
+    ns.GroupManager.layoutSigByGroup[groupID] = nil
+  end
+  ns:RebuildWatchIndex()
+  if ns.EventRouter and ns.EventRouter.RefreshAll then
+    ns.EventRouter:RefreshAll()
+  end
+  return true
+end
+
+function D:MoveGroupMember(groupID, entryKey, direction)
+  groupID = normalizeGroupID(groupID)
+  if groupID == "" then
+    return false
+  end
+  local members = self:ListGroupMembers(groupID)
+  local currentIndex = nil
+  for i = 1, #members do
+    if members[i].key == entryKey then
+      currentIndex = i
+      break
+    end
+  end
+  if not currentIndex then
+    return false
+  end
+
+  local otherIndex = (direction == "up") and (currentIndex - 1) or (currentIndex + 1)
+  if not otherIndex or otherIndex < 1 or otherIndex > #members then
+    return false
+  end
+
+  local currentEntry = self:ResolveEntry(members[currentIndex].key)
+  local otherEntry = self:ResolveEntry(members[otherIndex].key)
+  if not currentEntry or not otherEntry then
+    return false
+  end
+
+  local currentOrder = tonumber(currentEntry.item.groupOrder)
+  if not currentOrder or currentOrder <= 0 then
+    currentOrder = currentIndex
+  end
+  local otherOrder = tonumber(otherEntry.item.groupOrder)
+  if not otherOrder or otherOrder <= 0 then
+    otherOrder = otherIndex
+  end
+  currentEntry.item.groupOrder = otherOrder
+  otherEntry.item.groupOrder = currentOrder
+
+  ns:RebuildWatchIndex()
+  if ns.EventRouter and ns.EventRouter.RefreshAll then
+    ns.EventRouter:RefreshAll()
+  end
+  return true
 end
 
 function D:SuggestGroupID(displayName)
@@ -632,6 +1019,7 @@ function D:ResolveEntry(key)
   if not item then
     return nil
   end
+  ensureEntryInstanceUID(unit, item)
   return {
     key = key,
     unit = unit,
@@ -666,6 +1054,7 @@ function D:ListEntries(filterText)
   for _, unit in ipairs(trackedUnits) do
     local list = ns.db.watchlist[unit] or {}
     for idx, item in ipairs(list) do
+      ensureEntryInstanceUID(unit, item)
       local label = self:BuildEntryLabel(unit, item, idx)
       local haystack = safeLower(label .. " " .. tostring(item.spellID or ""))
       if filter == "" or haystack:find(filter, 1, true) then
@@ -702,6 +1091,12 @@ function D:BuildEditableModel(entry)
     trackingMode = normalizeTrackingMode(item.trackingMode, entry.unit),
     castSpellIDs = normalizeSpellIDList(item.castSpellIDs),
     estimatedDuration = normalizeDuration(item.estimatedDuration, 8),
+    timerBehavior = "reset",
+    maxDuration = 0,
+    stackBehavior = "replace",
+    stackAmount = 1,
+    maxStacks = 1,
+    consumeBehavior = "hide",
     spellID = tonumber(item.spellID) or 0,
     spellName = ns.AuraAPI:GetSpellName(item.spellID) or "",
     instanceUID = normalizeInstanceUID(item.instanceUID),
@@ -710,6 +1105,7 @@ function D:BuildEditableModel(entry)
     groupDirection = groupConfig.layout.direction or "RIGHT",
     groupSpacing = tonumber(groupConfig.layout.spacing) or 4,
     groupSort = groupConfig.layout.sort or "list",
+    groupWrapAfter = tonumber(groupConfig.layout.wrapAfter) or 0,
     groupOffsetX = tonumber(groupConfig.layout.nudgeX) or 0,
     groupOffsetY = tonumber(groupConfig.layout.nudgeY) or 0,
     loadClassToken = normalizeClassToken(item.loadClassToken),
@@ -722,6 +1118,7 @@ function D:BuildEditableModel(entry)
     customTexture = item.customTexture or "",
     barTexture = item.barTexture or "",
     customText = item.customText or "",
+    groupOrder = tonumber(item.groupOrder) or 0,
     timerVisual = item.timerVisual or "icon",
     iconWidth = tonumber(item.iconWidth) or 36,
     iconHeight = tonumber(item.iconHeight) or 36,
@@ -743,6 +1140,7 @@ function D:BuildEditableModel(entry)
     soundOnGain = item.soundOnGain or "default",
     soundOnLow = item.soundOnLow or "default",
     soundOnExpire = item.soundOnExpire or "default",
+    savedPosition = cloneSavedPosition(item.savedPosition),
   }
 end
 
@@ -753,12 +1151,19 @@ function D:BuildDefaultCreateModel()
     trackingMode = "confirmed",
     castSpellIDs = {},
     estimatedDuration = 8,
+    timerBehavior = "reset",
+    maxDuration = 0,
+    stackBehavior = "replace",
+    stackAmount = 1,
+    maxStacks = 1,
+    consumeBehavior = "hide",
     instanceUID = "",
     groupID = "",
     groupName = "",
     groupDirection = "RIGHT",
     groupSpacing = 4,
     groupSort = "list",
+    groupWrapAfter = 0,
     groupOffsetX = 0,
     groupOffsetY = 0,
     loadClassToken = "",
@@ -779,6 +1184,7 @@ function D:BuildDefaultCreateModel()
     showTimerText = true,
     barColor = "",
     barSide = "right",
+    groupOrder = 0,
     timerAnchor = "BOTTOM",
     timerOffsetX = 0,
     timerOffsetY = -1,
@@ -792,10 +1198,12 @@ function D:BuildDefaultCreateModel()
     soundOnGain = "default",
     soundOnLow = "default",
     soundOnExpire = "default",
+    savedPosition = nil,
   }
 end
 
-function D:BuildWatchItemFromModel(model)
+function D:BuildWatchItemFromModel(model, options)
+  options = type(options) == "table" and options or {}
   local spellID = U.ResolveSpellID(model.spellInput or model.spellID)
   if not spellID and ns.SpellCatalog and ns.SpellCatalog.ResolveNameToSpellID then
     spellID = ns.SpellCatalog:ResolveNameToSpellID(model.spellInput or model.spellID)
@@ -805,9 +1213,17 @@ function D:BuildWatchItemFromModel(model)
   end
 
   local groupID = normalizeGroupID(model.groupID)
-  local instanceUID = normalizeInstanceUID(model.instanceUID)
+  local existingItem = type(options.existingItem) == "table" and options.existingItem or nil
+  local existingItemUID = normalizeInstanceUID(existingItem and existingItem.instanceUID)
+  local modelUID = normalizeInstanceUID(model.instanceUID)
+  local instanceUID = existingItemUID
+  if instanceUID == "" then
+    instanceUID = modelUID
+  end
   if instanceUID == "" then
     instanceUID = buildInstanceUID(spellID)
+  else
+    registerExistingInstanceUID(instanceUID)
   end
   if groupID ~= "" then
     groupID = self:EnsureGroup(groupID)
@@ -840,6 +1256,7 @@ function D:BuildWatchItemFromModel(model)
     alert = normalizeBool(model.alert, true),
     displayName = normalizeDisplayName(model.displayName),
     customText = normalizeCustomText(model.customText),
+    groupOrder = tonumber(model.groupOrder) or 0,
     timerVisual = normalizeTimerVisual(model.timerVisual),
     iconWidth = normalizeSize(model.iconWidth, 36, 12, 256),
     iconHeight = normalizeSize(model.iconHeight, 36, 12, 256),
@@ -864,6 +1281,7 @@ function D:BuildWatchItemFromModel(model)
     iconMode = iconMode,
     customTexture = customTexture,
     barTexture = barTexture,
+    savedPosition = cloneSavedPosition(model.savedPosition) or cloneSavedPosition(existingItem and existingItem.savedPosition),
   }
 end
 
@@ -881,10 +1299,119 @@ function D:AddEntry(model)
 
   ns:RebuildWatchIndex()
   ns.EventRouter:RefreshAll()
-  ns.Debug:Logf("UI AddEntry unit=%s spellID=%d", unit, item.spellID)
 
   local list = ns.db.watchlist[unit] or {}
   return unit .. ":" .. #list
+end
+
+function D:FindEntryBySpell(unit, spellID, displayName)
+  unit = self:NormalizeUnit(unit)
+  spellID = tonumber(spellID)
+  displayName = normalizeDisplayName(displayName)
+  if not spellID then
+    return nil
+  end
+  local list = ns.db.watchlist[unit] or {}
+  for index = 1, #list do
+    local item = list[index]
+    if tonumber(item and item.spellID) == spellID then
+      if displayName == "" or normalizeDisplayName(item and item.displayName) == displayName then
+        return {
+          key = unit .. ":" .. index,
+          unit = unit,
+          index = index,
+          item = item,
+          list = list,
+        }
+      end
+    end
+  end
+  return nil
+end
+
+function D:InstallWarriorExamples()
+  local examples = {
+    {
+      entry = {
+        spellInput = 386030,
+        unit = "player",
+        displayName = "Brace for Impact",
+        groupID = "",
+        timerVisual = "iconbar",
+        estimatedDuration = 16,
+        castSpellIDs = { 23922 },
+        lowTimeThreshold = 3,
+      },
+      rule = {
+        id = "ui2_386030_produce",
+        name = "Brace for Impact",
+        castSpellIDs = { 23922 },
+        auraSpellID = 386030,
+        duration = 16,
+        conditionMode = "all",
+        actionMode = "produce",
+        stackBehavior = "add",
+        stackAmount = 1,
+        maxStacks = 5,
+        timerBehavior = "reset",
+        maxDuration = 0,
+      },
+    },
+    {
+      entry = {
+        spellInput = 2565,
+        unit = "player",
+        displayName = "Shield Block",
+        groupID = "",
+        timerVisual = "iconbar",
+        estimatedDuration = 6,
+        castSpellIDs = { 2565 },
+        lowTimeThreshold = 3,
+      },
+      rule = {
+        id = "ui2_2565_produce",
+        name = "Shield Block",
+        castSpellIDs = { 2565 },
+        auraSpellID = 2565,
+        duration = 6,
+        conditionMode = "all",
+        actionMode = "produce",
+        stackBehavior = "replace",
+        stackAmount = 1,
+        maxStacks = 1,
+        timerBehavior = "extend",
+        maxDuration = 18,
+      },
+    },
+  }
+
+  local changed = 0
+  for i = 1, #examples do
+    local spec = examples[i]
+    local existing = self:FindEntryBySpell(spec.entry.unit, spec.entry.spellInput, spec.entry.displayName)
+    if existing and existing.item then
+      ensureEntryInstanceUID(existing.unit, existing.item)
+      existing.item.displayName = spec.entry.displayName
+      existing.item.groupID = ""
+      existing.item.castSpellIDs = normalizeSpellIDList(spec.entry.castSpellIDs)
+      existing.item.timerVisual = normalizeTimerVisual(spec.entry.timerVisual)
+      existing.item.estimatedDuration = normalizeDuration(spec.entry.estimatedDuration, 8)
+      changed = changed + 1
+    else
+      self:AddEntry(spec.entry)
+      changed = changed + 1
+    end
+
+    if ns.ProcRules and ns.ProcRules.AddSimpleIfRuleEx then
+      ns.ProcRules:AddSimpleIfRuleEx(spec.rule)
+    end
+  end
+
+  ns:RebuildWatchIndex()
+  if ns.EventRouter and ns.EventRouter.RefreshAll then
+    ns.EventRouter:RefreshAll()
+  end
+  return changed
 end
 
 function D:UpdateEntry(key, model)
@@ -892,10 +1419,32 @@ function D:UpdateEntry(key, model)
   if not entry then
     return nil, "Aura selezionata non valida."
   end
+  local oldContainerKey = buildStandaloneContainerKey(entry.unit, entry.item)
+  local oldSavedPosition = cloneSavedPosition(entry.item and entry.item.savedPosition)
+  local oldDbPosition = ns.db and ns.db.positions and cloneSavedPosition(ns.db.positions[oldContainerKey]) or nil
 
-  local item, err = self:BuildWatchItemFromModel(model)
+  if type(model) == "table" then
+    local existingUID = normalizeInstanceUID(entry.item and entry.item.instanceUID)
+    if existingUID ~= "" then
+      model.instanceUID = existingUID
+    end
+    if not model.savedPosition then
+      model.savedPosition = oldSavedPosition or oldDbPosition
+    end
+  end
+
+  local item, err = self:BuildWatchItemFromModel(model, { existingItem = entry.item })
   if not item then
     return nil, err
+  end
+
+  local existingUID = normalizeInstanceUID(entry.item and entry.item.instanceUID)
+  local newUID = normalizeInstanceUID(item and item.instanceUID)
+  if existingUID ~= "" and newUID ~= existingUID then
+    item.instanceUID = existingUID
+  end
+  if not item.savedPosition then
+    item.savedPosition = oldSavedPosition or oldDbPosition
   end
 
   local fromUnit = entry.unit
@@ -904,19 +1453,31 @@ function D:UpdateEntry(key, model)
 
   if fromUnit == toUnit then
     entry.list[removedIndex] = item
+    local newContainerKey = buildStandaloneContainerKey(toUnit, item)
+    if ns.db and ns.db.positions and oldContainerKey ~= newContainerKey then
+      local preservedPos = oldDbPosition or cloneSavedPosition(item.savedPosition)
+      if preservedPos then
+        ns.db.positions[newContainerKey] = cloneSavedPosition(preservedPos)
+      end
+    end
     ns:RebuildWatchIndex()
     ns.EventRouter:RefreshAll()
-    ns.Debug:Logf("UI UpdateEntry key=%s unit=%s spellID=%d", tostring(key), tostring(toUnit), item.spellID)
     return key
   end
 
   -- If unit changes, we move the item across lists and return the new key.
   table.remove(entry.list, removedIndex)
   ns.db.watchlist[toUnit][#ns.db.watchlist[toUnit] + 1] = item
+  local movedContainerKey = buildStandaloneContainerKey(toUnit, item)
+  if ns.db and ns.db.positions then
+    local preservedPos = oldDbPosition or cloneSavedPosition(item.savedPosition)
+    if preservedPos then
+      ns.db.positions[movedContainerKey] = cloneSavedPosition(preservedPos)
+    end
+  end
 
   ns:RebuildWatchIndex()
   ns.EventRouter:RefreshAll()
-  ns.Debug:Logf("UI MoveEntry key=%s %s->%s spellID=%d", tostring(key), tostring(fromUnit), tostring(toUnit), item.spellID)
   return toUnit .. ":" .. #ns.db.watchlist[toUnit]
 end
 
@@ -928,7 +1489,6 @@ function D:DeleteEntry(key)
   table.remove(entry.list, entry.index)
   ns:RebuildWatchIndex()
   ns.EventRouter:RefreshAll()
-  ns.Debug:Logf("UI DeleteEntry key=%s", tostring(key))
   return 1
 end
 
@@ -956,7 +1516,6 @@ function D:DeleteEntriesByInstanceUID(instanceUID, spellID)
   if removed > 0 then
     ns:RebuildWatchIndex()
     ns.EventRouter:RefreshAll()
-    ns.Debug:Logf("UI DeleteEntriesByInstanceUID instanceUID=%s spellID=%s removed=%d", tostring(instanceUID), tostring(spellID or "nil"), removed)
   end
 
   return removed
@@ -994,7 +1553,6 @@ function D:DeleteMatchingEntries(unit, model)
   if removed > 0 then
     ns:RebuildWatchIndex()
     ns.EventRouter:RefreshAll()
-    ns.Debug:Logf("UI DeleteMatchingEntries unit=%s spellID=%s removed=%d", tostring(unit), tostring(targetSpellID), removed)
   end
 
   return removed
@@ -1024,8 +1582,46 @@ function D:CleanupOrphanAuraGroups()
     end
   end
 
-  if removed > 0 and ns.Debug and ns.Debug.Logf then
-    ns.Debug:Logf("UI CleanupOrphanAuraGroups removed=%d", removed)
+  return removed
+end
+
+function D:CleanupLegacyPositionKeys()
+  if not ns.db or type(ns.db.positions) ~= "table" then
+    return 0
+  end
+
+  local validStandalone = {}
+  for _, unit in ipairs(trackedUnits) do
+    local list = ns.db.watchlist[unit] or {}
+    for i = 1, #list do
+      local item = list[i]
+      if type(item) == "table" then
+        ensureEntryInstanceUID(unit, item)
+        local key = buildStandaloneContainerKey(unit, item)
+        if key ~= "" then
+          validStandalone[key] = true
+        end
+      end
+    end
+  end
+
+  local removed = 0
+  for key in pairs(ns.db.positions) do
+    if type(key) == "string" and key:find("^aura_", 1) == 1 and not validStandalone[key] then
+      ns.db.positions[key] = nil
+      removed = removed + 1
+      if ns.Dragger and ns.Dragger.pendingPositions then
+        ns.Dragger.pendingPositions[key] = nil
+      end
+      if ns.GroupManager then
+        if ns.GroupManager.frames then
+          ns.GroupManager.frames[key] = nil
+        end
+        if ns.GroupManager.layoutSigByGroup then
+          ns.GroupManager.layoutSigByGroup[key] = nil
+        end
+      end
+    end
   end
 
   return removed
@@ -1045,6 +1641,25 @@ function D:MigrateGroupLayoutState()
       local item = list[i]
       if type(item) == "table" then
         local groupID = normalizeGroupID(item.groupID)
+        local instanceUID = normalizeInstanceUID(item.instanceUID)
+        if instanceUID == "" then
+          local legacyKey = buildStandaloneContainerKey(unit, item)
+          instanceUID = buildInstanceUID(item.spellID)
+          item.instanceUID = instanceUID
+          local stableKey = buildStandaloneContainerKey(unit, item)
+          if type(ns.db.positions) == "table"
+            and stableKey ~= ""
+            and stableKey ~= legacyKey
+            and type(ns.db.positions[stableKey]) ~= "table"
+            and type(ns.db.positions[legacyKey]) == "table"
+          then
+            ns.db.positions[stableKey] = ns.db.positions[legacyKey]
+          end
+          changed = changed + 1
+        else
+          item.instanceUID = instanceUID
+          registerExistingInstanceUID(instanceUID)
+        end
         if groupID ~= "" then
           if item.layoutGroupEnabled ~= nil then
             item.layoutGroupEnabled = nil
@@ -1074,6 +1689,8 @@ function D:MigrateGroupLayoutState()
       changed = changed + 1
     end
   end
+
+  changed = changed + self:CleanupLegacyPositionKeys()
 
   return changed
 end

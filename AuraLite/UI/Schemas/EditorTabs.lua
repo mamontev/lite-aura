@@ -75,6 +75,28 @@ local function groupSortOptions()
   }
 end
 
+local function timerBehaviorOptions()
+  return {
+    { value = "reset", label = "Reset Timer" },
+    { value = "extend", label = "Extend To Cap" },
+    { value = "keep", label = "Keep Current Timer" },
+  }
+end
+
+local function stackBehaviorOptions()
+  return {
+    { value = "replace", label = "Replace Stacks" },
+    { value = "add", label = "Add Stacks" },
+  }
+end
+
+local function consumeBehaviorOptions()
+  return {
+    { value = "hide", label = "Hide Aura" },
+    { value = "decrement", label = "Remove 1 Stack" },
+  }
+end
+
 Schemas.EditorTabs = {
   { key = "Tracking", label = "Tracking", fields = {
     { key = "unit", label = "Watch This Aura On", widget = "dropdown", options = {
@@ -83,6 +105,13 @@ Schemas.EditorTabs = {
     } },
     { key = "castSpellIDs", label = "SpellIDs I Cast", widget = "spellcsv", required = true },
     { key = "spellID", label = "Aura SpellID To Show", widget = "spellid", required = true },
+    { key = "duration", label = "Base Timer Length (sec)", widget = "number", min = 1, max = 120 },
+    { key = "timerBehavior", label = "When Reapplied", widget = "dropdown", optionsProvider = timerBehaviorOptions },
+    { key = "maxDuration", label = "Maximum Extended Length (sec)", widget = "number", min = 1, max = 120 },
+    { key = "stackBehavior", label = "Stack Handling", widget = "dropdown", optionsProvider = stackBehaviorOptions },
+    { key = "stackAmount", label = "Stacks Gained Per Trigger", widget = "number", min = 1, max = 20 },
+    { key = "maxStacks", label = "Maximum Stacks", widget = "number", min = 1, max = 20 },
+    { key = "consumeBehavior", label = "When Consumed", widget = "dropdown", optionsProvider = consumeBehaviorOptions },
     { key = "estimatedDuration", label = "Expected Timer Length (sec)", widget = "number", min = 1, max = 600 },
   } },
   { key = "Appearance", label = "Appearance", fields = {
@@ -91,8 +120,9 @@ Schemas.EditorTabs = {
     { key = "groupName", label = "Group Name", widget = "text" },
     { key = "groupDirection", label = "Group Direction", widget = "dropdown", optionsProvider = groupDirectionOptions },
     { key = "groupSpacing", label = "Group Spacing", widget = "spinner", min = 0, max = 64, step = 1, default = 4, help = "Default: 4" },
-    { key = "groupSort", label = "Group Sort", widget = "dropdown", optionsProvider = groupSortOptions },
-    { key = "groupOffsetX", label = "Group Offset X", widget = "spinner", min = -200, max = 200, step = 1, default = 0, help = "Default: 0" },
+  { key = "groupSort", label = "Group Sort", widget = "dropdown", optionsProvider = groupSortOptions },
+  { key = "groupWrapAfter", label = "Wrap After", widget = "spinner", min = 0, max = 20, step = 1, default = 0, help = "0 = no wrap" },
+  { key = "groupOffsetX", label = "Group Offset X", widget = "spinner", min = -200, max = 200, step = 1, default = 0, help = "Default: 0" },
     { key = "groupOffsetY", label = "Group Offset Y", widget = "spinner", min = -200, max = 200, step = 1, default = 0, help = "Default: 0" },
     { key = "displayMode", label = "Display Mode", widget = "dropdown", options = {
       { value = "icon", label = "Icon" },

@@ -5,9 +5,7 @@ local S = ns.SoundManager
 
 local SK = SOUNDKIT or {}
 local ADDON_SOUND_BASE = "Interface\\AddOns\\AuraLite\\Media\\Sounds\\"
-local WA_SOUND_BASE = ADDON_SOUND_BASE .. "WeakAuras\\"
 S.lastPlayByKey = S.lastPlayByKey or {}
-S.catalogLoaded = S.catalogLoaded == true
 S.stateThrottle = S.stateThrottle or {
   gain = 0.20,
   low = 0.80,
@@ -49,46 +47,6 @@ S.presets = {
     label = "Urgent Alarm (Addon)",
     file = ADDON_SOUND_BASE .. "urgent_alarm.wav",
   },
-  nerd_robot_blip = {
-    label = "Nerd: Robot Blip",
-    file = WA_SOUND_BASE .. "RobotBlip.ogg",
-  },
-  nerd_synth_chord = {
-    label = "Nerd: Synth Chord",
-    file = WA_SOUND_BASE .. "SynthChord.ogg",
-  },
-  utility_error_beep = {
-    label = "Utility: Error Beep",
-    file = WA_SOUND_BASE .. "ErrorBeep.ogg",
-  },
-  utility_focus = {
-    label = "Utility: Focus",
-    file = WA_SOUND_BASE .. "Focus.ogg",
-  },
-  utility_run_away = {
-    label = "Utility: Run Away",
-    file = WA_SOUND_BASE .. "RunAway.ogg",
-  },
-  fun_bike_horn = {
-    label = "Fun: Bike Horn",
-    file = WA_SOUND_BASE .. "BikeHorn.ogg",
-  },
-  fun_oh_no = {
-    label = "Fun: Oh No",
-    file = WA_SOUND_BASE .. "OhNo.ogg",
-  },
-  fun_tada = {
-    label = "Fun: Tada Fanfare",
-    file = WA_SOUND_BASE .. "TadaFanfare.ogg",
-  },
-  fun_air_horn = {
-    label = "Fun: Air Horn",
-    file = WA_SOUND_BASE .. "AirHorn.ogg",
-  },
-  fun_glass = {
-    label = "Fun: Glass",
-    file = WA_SOUND_BASE .. "Glass.mp3",
-  },
 }
 
 S.stateNames = {
@@ -117,31 +75,6 @@ local function normalizeSoundPath(path)
     end
   until false
   return path
-end
-
-function S:EnsureCatalogLoaded()
-  if self.catalogLoaded == true then
-    return
-  end
-  self.catalogLoaded = true
-
-  local catalog = ns.WeakAurasSoundCatalog
-  if type(catalog) ~= "table" then
-    return
-  end
-
-  for token, cfg in pairs(catalog) do
-    if type(token) == "string" and token ~= "" and self.presets[token] == nil and type(cfg) == "table" then
-      local label = tostring(cfg.label or "")
-      local file = normalizeSoundPath(tostring(cfg.file or ""))
-      if label ~= "" and file ~= "" then
-        self.presets[token] = {
-          label = label,
-          file = file,
-        }
-      end
-    end
-  end
 end
 
 local function safePlaySound(soundKitID, channel)
@@ -197,7 +130,6 @@ function S:GetChannel()
 end
 
 function S:NormalizeToken(token)
-  self:EnsureCatalogLoaded()
   if type(token) ~= "string" then
     return "default"
   end
@@ -225,7 +157,6 @@ function S:NormalizeToken(token)
 end
 
 function S:GetTokenLabel(token, state)
-  self:EnsureCatalogLoaded()
   token = self:NormalizeToken(token)
   if token == "default" then
     local fallback = self.defaultByState[state] or "raid_warning"
@@ -258,7 +189,6 @@ function S:GetTokenLabel(token, state)
 end
 
 function S:GetDropdownOptions(includeDefault)
-  self:EnsureCatalogLoaded()
   local options = {}
   if includeDefault then
     options[#options + 1] = { value = "default", label = "Default" }
@@ -299,7 +229,6 @@ function S:GetDropdownOptions(includeDefault)
 end
 
 function S:ResolveToken(token, state)
-  self:EnsureCatalogLoaded()
   token = self:NormalizeToken(token)
 
   if token == "default" then
@@ -405,7 +334,6 @@ function S:Play(token, state)
 end
 
 function S:Preview(token, state)
-  self:EnsureCatalogLoaded()
   local mode, value = self:ResolveToken(token, state or "gain")
   if not mode then
     return false

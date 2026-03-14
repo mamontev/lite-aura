@@ -41,10 +41,26 @@ function B:FallbackCommand(msg)
 end
 
 function B:HandleSlash(msg)
-  local cmd = tostring(msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  local raw = tostring(msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local cmd = raw:lower()
 
   if cmd == "" or cmd == "v2" or cmd == "ui2" or cmd == "newui" or cmd == "config" or cmd == "ui" or cmd == "options" then
     if self:ToggleConfig() then
+      return
+    end
+  end
+
+  if cmd == "examples warrior" or cmd == "seed warrior" then
+    if ns.SettingsData and ns.SettingsData.InstallWarriorExamples then
+      local count = tonumber(ns.SettingsData:InstallWarriorExamples()) or 0
+      if UI and UI.Events and UI.Events.Emit and UI.Events.Names and UI.Events.Names.FILTER_CHANGED then
+        UI.Events:Emit(UI.Events.Names.FILTER_CHANGED, { key = "examples_warrior", value = count })
+      end
+      if UI and UI.Events and UI.Events.Emit and UI.Events.Names and UI.Events.Names.STATE_CHANGED and UI.State and UI.State.Get then
+        UI.Events:Emit(UI.Events.Names.STATE_CHANGED, UI.State:Get())
+      end
+      print(string.format("AuraLite: installed/updated %d warrior example aura(s).", count))
+      self:OpenConfig()
       return
     end
   end

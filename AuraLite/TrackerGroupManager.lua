@@ -16,6 +16,85 @@ local function isStandaloneContainer(groupID)
   return type(groupID) == "string" and groupID:find("^aura_", 1) == 1
 end
 
+local function buildDefaultPositionForEntries(groupID, entries)
+  local first = type(entries) == "table" and entries[1] or nil
+  local sourceGroupID = tostring(first and first.sourceGroupID or "")
+  if sourceGroupID ~= "" and ns.db and ns.db.positions and type(ns.db.positions[sourceGroupID]) == "table" then
+    local src = ns.db.positions[sourceGroupID]
+    return {
+      point = src.point or "CENTER",
+      relativePoint = src.relativePoint or "CENTER",
+      x = tonumber(src.x) or 0,
+      y = tonumber(src.y) or -72,
+    }
+  end
+
+  local savedPos = first and first.savedPosition or nil
+  if type(savedPos) == "table" then
+    return {
+      point = savedPos.point or "CENTER",
+      relativePoint = savedPos.relativePoint or "CENTER",
+      x = tonumber(savedPos.x) or 0,
+      y = tonumber(savedPos.y) or -72,
+    }
+  end
+
+  local unit = tostring(first and first.unit or "")
+  local defaultsByUnit = {
+    player = { point = "CENTER", relativePoint = "CENTER", x = 0, y = -72 },
+    target = { point = "CENTER", relativePoint = "CENTER", x = 0, y = -176 },
+    focus = { point = "CENTER", relativePoint = "CENTER", x = 0, y = -228 },
+    pet = { point = "CENTER", relativePoint = "CENTER", x = 0, y = -280 },
+  }
+  local fallback = defaultsByUnit[unit] or defaultsByUnit.player
+  return {
+    point = fallback.point,
+    relativePoint = fallback.relativePoint,
+    x = fallback.x,
+    y = fallback.y,
+  }
+end
+
+local function ensureContainerPosition(groupID, entries)
+  if not (ns.db and ns.db.positions) then
+    return
+  end
+  if type(ns.db.positions[groupID]) == "table" then
+    return
+  end
+  ns.db.positions[groupID] = buildDefaultPositionForEntries(groupID, entries)
+end
+
+local function buildMirrorPositionKeys(groupID, entries)
+  local keys = {}
+  if type(groupID) == "string" and groupID ~= "" then
+    keys[groupID] = true
+  end
+  if not isStandaloneContainer(groupID) then
+    return keys
+  end
+  for i = 1, #(entries or {}) do
+    local row = entries[i]
+    local identityKey = tostring(row and row.identityKey or "")
+    if identityKey ~= "" then
+      keys[identityKey] = true
+    end
+  end
+  return keys
+end
+
+local function buildMirrorEntryKeys(entries)
+  local keys = {}
+  for i = 1, #(entries or {}) do
+    local row = entries[i]
+    local entryKey = tostring(row and row.entryKey or "")
+    if entryKey ~= "" then
+      keys[entryKey] = true
+    end
+  end
+  return keys
+end
+
 local function getContainerConfig(groupID)
   if ns.SettingsData and ns.SettingsData.GetGroupConfig then
     return ns.SettingsData:GetGroupConfig(groupID)
@@ -33,6 +112,7 @@ local function getContainerConfig(groupID)
       spacing = 4,
       direction = "RIGHT",
       sort = "list",
+      wrapAfter = 0,
       nudgeX = 0,
       nudgeY = 0,
     },
@@ -42,6 +122,13 @@ end
 local function sortEntries(entries, groupConfig)
   local sortMode = tostring(groupConfig and groupConfig.layout and groupConfig.layout.sort or "list"):lower()
   table.sort(entries, function(a, b)
+    if sortMode == "manual" then
+      local am = tonumber(a and a.groupOrder) or 0
+      local bm = tonumber(b and b.groupOrder) or 0
+      if am ~= bm then
+        return am < bm
+      end
+    end
     if sortMode == "name" then
       local an = tostring(a and a.displayName or "")
       local bn = tostring(b and b.displayName or "")
@@ -284,11 +371,14 @@ local function makeRowKey(row, fallbackGroupID)
   return unit .. "|" .. groupID .. "|" .. spellID
 end
 
-local function makeLayoutSignature(entries, iconSize, spacing, direction)
+local function makeLayoutSignature(entries, iconSize, spacing, direction, wrapAfter, nudgeX, nudgeY)
   local parts = {
     tostring(iconSize),
     tostring(spacing),
     tostring(direction),
+    tostring(wrapAfter),
+    tostring(nudgeX or 0),
+    tostring(nudgeY or 0),
     tostring(#entries),
   }
   for i = 1, #entries do
@@ -420,6 +510,9 @@ local function createGroupFrame(groupID)
   f.groupID = groupID
   f.icons = {}
   f:SetSize(220, 44)
+  f:SetFrameStrata("DIALOG")
+  f:SetFrameLevel(20)
+  f:SetAlpha(1)
 
   f.label = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   f.label:SetPoint("BOTTOMLEFT", 0, 2)
@@ -439,6 +532,7 @@ function G:EnsureGroupFrame(groupID)
     return self.frames[groupID]
   end
   local frame = createGroupFrame(groupID)
+  frame._alNeedsLayout = true
   self.frames[groupID] = frame
   return frame
 end
@@ -447,11 +541,7 @@ function G:RefreshDragState()
   for _, frame in pairs(self.frames) do
     ns.Dragger:SetGroupVisualState(frame)
     if frame.back then
-      if ns.db.locked then
-        frame.back:Hide()
-      else
-        frame.back:Show()
-      end
+      frame.back:Hide()
     end
   end
 end
@@ -465,6 +555,7 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
   local iconSize = tonumber(layout.iconSize) or 36
   local spacing = tonumber(layout.spacing) or 4
   local direction = tostring(layout.direction or "RIGHT"):upper()
+  local wrapAfter = tonumber(layout.wrapAfter) or 0
   local nudgeX = tonumber(layout.nudgeX) or 0
   local nudgeY = tonumber(layout.nudgeY) or 0
 
@@ -473,10 +564,11 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
     spacing = math.max(1, spacing - 1)
   end
 
-  local layoutSig = makeLayoutSignature(entries, iconSize, spacing, direction)
-  local layoutChanged = self.layoutSigByGroup[groupID] ~= layoutSig
+  local layoutSig = makeLayoutSignature(entries, iconSize, spacing, direction, wrapAfter, nudgeX, nudgeY)
+  local layoutChanged = frame._alNeedsLayout == true or self.layoutSigByGroup[groupID] ~= layoutSig
   if layoutChanged then
     self.layoutSigByGroup[groupID] = layoutSig
+    frame._alNeedsLayout = false
   end
 
   if not layoutChanged then
@@ -484,6 +576,9 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
   end
 
   local cursor = 0
+  local line = 0
+  local rowMax = 0
+  local maxCursor = 0
   for idx, row in ipairs(entries) do
     local icon = frame.icons[idx]
     if not icon then
@@ -510,20 +605,34 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
     icon:SetSize(rowIconWidth, rowIconHeight)
     icon:ClearAllPoints()
 
+    local shouldWrap = wrapAfter > 0 and idx > 1 and ((idx - 1) % wrapAfter == 0)
+    if shouldWrap then
+      maxCursor = math.max(maxCursor, cursor)
+      if direction == "UP" or direction == "DOWN" then
+        line = line + rowMax + spacing
+      else
+        line = line + rowMax + spacing
+      end
+      cursor = 0
+      rowMax = 0
+    end
+
     if direction == "LEFT" then
-      icon:SetPoint("RIGHT", frame, "RIGHT", -cursor + nudgeX, nudgeY)
+      icon:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -cursor + nudgeX, -line + nudgeY)
       cursor = cursor + slotWidth + spacing
     elseif direction == "UP" then
-      icon:SetPoint("BOTTOM", frame, "BOTTOM", nudgeX, cursor + nudgeY)
+      icon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", line + nudgeX, cursor + nudgeY)
       cursor = cursor + rowIconHeight + spacing
     elseif direction == "DOWN" then
-      icon:SetPoint("TOP", frame, "TOP", nudgeX, -cursor + nudgeY)
+      icon:SetPoint("TOPLEFT", frame, "TOPLEFT", line + nudgeX, -cursor + nudgeY)
       cursor = cursor + rowIconHeight + spacing
     else
-      icon:SetPoint("LEFT", frame, "LEFT", cursor + nudgeX, nudgeY)
+      icon:SetPoint("TOPLEFT", frame, "TOPLEFT", cursor + nudgeX, -line + nudgeY)
       cursor = cursor + slotWidth + spacing
     end
+    rowMax = math.max(rowMax, (direction == "UP" or direction == "DOWN") and slotWidth or rowIconHeight)
   end
+  maxCursor = math.max(maxCursor, cursor)
 
   for idx = #entries + 1, #frame.icons do
     local icon = frame.icons[idx]
@@ -536,16 +645,11 @@ function G:RenderLayout(frame, groupID, entries, groupConfig)
   local height = iconSize + 14
   if contentCount > 0 then
     if direction == "UP" or direction == "DOWN" then
-      local maxSlotWidth = iconSize
-      for idx = 1, #entries do
-        local icon = frame.icons[idx]
-        maxSlotWidth = math.max(maxSlotWidth, tonumber(icon and icon._slotWidth) or iconSize)
-      end
-      width = math.max(160, maxSlotWidth)
-      height = math.max(iconSize + 14, (contentCount * (iconSize + spacing)) - spacing + 14)
+      width = math.max(160, line + rowMax)
+      height = math.max(iconSize + 14, maxCursor - spacing + 14)
     else
-      width = math.max(160, cursor - spacing)
-      height = iconSize + 14
+      width = math.max(160, maxCursor - spacing)
+      height = math.max(iconSize + 14, line + rowMax + 14)
     end
   end
   frame:SetSize(width, height)
@@ -588,6 +692,9 @@ function G:Render(activeByGroup)
     local entries = self.activeByGroup[groupID] or {}
     sortEntries(entries, groupConfig)
     local frame = self:EnsureGroupFrame(groupID)
+    frame._alMirrorPositionKeys = buildMirrorPositionKeys(groupID, entries)
+    frame._alEntryKeys = buildMirrorEntryKeys(entries)
+    ensureContainerPosition(groupID, entries)
     if ns.db and ns.db.locked == true then
       ns.Dragger:ApplyPosition(frame, groupID)
     elseif not frame._alPositionApplied then
@@ -606,6 +713,9 @@ function G:Render(activeByGroup)
       end
 
       icon.row = row
+      icon:SetAlpha(1)
+      icon.icon:SetAlpha(1)
+      icon.bg:SetAlpha(1)
       local baseLevel = icon:GetFrameLevel()
       if icon.cdBar and icon.cdBar.SetFrameLevel then
         icon.cdBar:SetFrameLevel(baseLevel + 1)
@@ -733,8 +843,9 @@ function G:Render(activeByGroup)
     if not orderByGroup[groupID] then
       frame.activeIconCount = 0
       frame:Hide()
-      if isStandaloneContainer(groupID) then
+      if isStandaloneContainer(groupID) or not (ns.db and ns.db.groups and ns.db.groups[groupID]) then
         self.frames[groupID] = nil
+        self.layoutSigByGroup[groupID] = nil
       end
     end
   end

@@ -72,6 +72,7 @@ end
 function P:BuildEmptyProfile()
   return {
     locked = true,
+    nextInstanceSeq = 1,
     units = buildUnits(),
     options = buildOptions(),
     groups = buildGroups(),

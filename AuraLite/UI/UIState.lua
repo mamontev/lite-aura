@@ -21,6 +21,7 @@ S._data = S._data or {
     startedAt = 0,
     duration = 0,
   },
+  draggingAuraId = nil,
 }
 
 local function shallowCopy(tbl)
@@ -36,6 +37,28 @@ function S:Get()
   snap.filters = shallowCopy(self._data.filters)
   snap.preview = shallowCopy(self._data.preview)
   return snap
+end
+
+function S:GetDraggingAura()
+  return self._data.draggingAuraId
+end
+
+function S:SetDraggingAura(auraId)
+  auraId = tostring(auraId or "")
+  self._data.draggingAuraId = (auraId ~= "") and auraId or nil
+  if E then
+    E:Emit(E.Names.STATE_CHANGED, self:Get())
+  end
+end
+
+function S:ClearDraggingAura()
+  if self._data.draggingAuraId == nil then
+    return
+  end
+  self._data.draggingAuraId = nil
+  if E then
+    E:Emit(E.Names.STATE_CHANGED, self:Get())
+  end
 end
 
 function S:SetSelectedAura(auraId, source)

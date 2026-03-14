@@ -1068,6 +1068,7 @@ function F:CreateField(parent, field, model, onChange)
   holder.label = label
   holder.control = control
   holder.key = field.key
+  holder.field = field
   return holder
 end
 

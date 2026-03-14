@@ -84,6 +84,7 @@ local function applyGroupConfigToDraft(draft, groupID)
     draft.groupDirection = "RIGHT"
     draft.groupSpacing = 4
     draft.groupSort = "list"
+    draft.groupWrapAfter = 0
     draft.groupOffsetX = 0
     draft.groupOffsetY = 0
     return
@@ -96,9 +97,22 @@ local function applyGroupConfigToDraft(draft, groupID)
     draft.groupDirection = tostring(layout.direction or "RIGHT")
     draft.groupSpacing = tonumber(layout.spacing) or 4
     draft.groupSort = tostring(layout.sort or "list")
+    draft.groupWrapAfter = tonumber(layout.wrapAfter) or 0
     draft.groupOffsetX = tonumber(layout.nudgeX) or 0
     draft.groupOffsetY = tonumber(layout.nudgeY) or 0
   end
+end
+
+local function inferTrackingPreset(draft)
+  draft = draft or {}
+  local unit = tostring(draft.unit or "player")
+  if unit == "target" and isEstimatedTargetTracking(draft) then
+    return "debuff_target"
+  end
+  if unit == "target" then
+    return "target_aura"
+  end
+  return "buff_player"
 end
 
 local function isTabAvailable(draft, tabKey, showAdvanced)
@@ -184,6 +198,7 @@ end
 local LIVE_PREVIEW_FIELDS = {
   name = true,
   displayName = true,
+  displayMode = true,
   spellID = true,
   unit = true,
   trackingMode = true,
@@ -233,7 +248,18 @@ function AuraEditorPanel:RefreshLivePreview(forceRefresh)
   local previewItem = nil
   if UI and UI.Bindings and UI.Bindings.ToSettingsDataModel and ns.SettingsData and ns.SettingsData.BuildWatchItemFromModel then
     local settingsModel = UI.Bindings:ToSettingsDataModel(self.draft)
-    previewItem = ns.SettingsData:BuildWatchItemFromModel(settingsModel)
+    local existingEntry = nil
+    if ns.SettingsData.ResolveEntry then
+      local sourceKey = tostring(self.currentAuraId or self.draft._sourceKey or self.draft.id or "")
+      existingEntry = ns.SettingsData:ResolveEntry(sourceKey)
+      local existingUID = existingEntry and existingEntry.item and tostring(existingEntry.item.instanceUID or "") or ""
+      if existingUID ~= "" then
+        settingsModel.instanceUID = existingUID
+        self.draft.instanceUID = existingUID
+        ns.state.selectedAura.instanceUID = existingUID
+      end
+    end
+    previewItem = ns.SettingsData:BuildWatchItemFromModel(settingsModel, { existingItem = existingEntry and existingEntry.item or nil })
   end
   ns.state.selectedAuraPreviewItem = previewItem
 
@@ -267,6 +293,21 @@ function AuraEditorPanel:ValidateDraft()
     end
   elseif not isDirectAuraTracking(self.draft) and tostring(self.draft.triggerType or "cast") == "cast" and tostring(self.draft.castSpellIDs or "") == "" then
     issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "Add at least one trigger spell to drive this aura." }
+  end
+
+  if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) then
+    if tostring(self.draft.actionMode or "produce") == "produce" then
+      if tostring(self.draft.timerBehavior or "reset") == "extend" then
+        if (tonumber(self.draft.maxDuration) or 0) <= 0 then
+          issues[#issues + 1] = { severity = "warn", path = "maxDuration", message = "Set a maximum extended length so the timer has a cap." }
+        elseif tonumber(self.draft.maxDuration) < (tonumber(self.draft.duration) or 0) then
+          issues[#issues + 1] = { severity = "warn", path = "maxDuration", message = "The cap should be greater than or equal to the base timer length." }
+        end
+      end
+      if tostring(self.draft.stackBehavior or "replace") == "add" and (tonumber(self.draft.maxStacks) or 0) < 2 then
+        issues[#issues + 1] = { severity = "warn", path = "maxStacks", message = "Add-stack auras should usually allow at least 2 maximum stacks." }
+      end
+    end
   end
 
   if #issues == 0 then
@@ -342,11 +383,100 @@ function AuraEditorPanel:ApplyRuleMode(mode)
     self.draft.talentSpellIDs = tostring(self.draft.talentSpellIDs or "")
     self.draft.requiredAuraSpellIDs = (mode == "consume" and auraSpellID) and tostring(auraSpellID) or tostring(self.draft.requiredAuraSpellIDs or "")
     self.draft.duration = tonumber(self.draft.duration) or 8
+    self.draft.timerBehavior = tostring(self.draft.timerBehavior or "reset")
+    self.draft.maxDuration = tonumber(self.draft.maxDuration) or 0
+    self.draft.stackBehavior = tostring(self.draft.stackBehavior or "replace")
+    self.draft.stackAmount = tonumber(self.draft.stackAmount) or 1
+    self.draft.maxStacks = tonumber(self.draft.maxStacks) or 1
+    self.draft.consumeBehavior = tostring(self.draft.consumeBehavior or "hide")
   end
 
   if self.ruleBuilder and self.ruleBuilder.SetDraft then
     self.ruleBuilder:SetDraft(self.draft)
   end
+end
+
+function AuraEditorPanel:ApplyTrackingPreset(presetKey)
+  if not self.draft then
+    return
+  end
+
+  if presetKey == "debuff_target" then
+    self.draft.unit = "target"
+    self.draft.trackingMode = "estimated"
+    self.draft.triggerType = "cast"
+    self.draft.actionMode = "produce"
+    self.draft.onlyMine = true
+    if not tonumber(self.draft.estimatedDuration) or tonumber(self.draft.estimatedDuration) <= 0 then
+      self.draft.estimatedDuration = tonumber(self.draft.duration) or 8
+    end
+  elseif presetKey == "target_aura" then
+    self.draft.unit = "target"
+    self.draft.trackingMode = "confirmed"
+    self.draft.triggerType = "aura"
+    self.draft.actionMode = "produce"
+  else
+    self.draft.unit = "player"
+    self.draft.trackingMode = "confirmed"
+    self.draft.triggerType = "cast"
+    self.draft.actionMode = "produce"
+  end
+
+  if S and S.SetDirty then
+    S:SetDirty(true)
+  end
+  self:UpdateHeader()
+  self:ValidateDraft()
+  self:RefreshTabButtons()
+  self:RenderTab("Tracking")
+  self:RefreshLivePreview(true)
+end
+
+function AuraEditorPanel:ApplyLayoutPreset(presetKey)
+  if not self.draft then
+    return
+  end
+
+  if presetKey == "icon" then
+    self.draft.displayMode = "icon"
+    self.draft.timerVisual = "icon"
+    self.draft.iconWidth = 36
+    self.draft.iconHeight = 36
+    self.draft.showTimerText = true
+    self.draft.timerAnchor = "BOTTOM"
+    self.draft.customTextAnchor = "TOP"
+  elseif presetKey == "compact" then
+    self.draft.displayMode = "icon"
+    self.draft.timerVisual = "icon"
+    self.draft.iconWidth = 28
+    self.draft.iconHeight = 28
+    self.draft.showTimerText = false
+    self.draft.customText = ""
+  elseif presetKey == "iconbar" then
+    self.draft.displayMode = "iconbar"
+    self.draft.timerVisual = "iconbar"
+    self.draft.iconWidth = 36
+    self.draft.iconHeight = 36
+    self.draft.barWidth = 94
+    self.draft.barHeight = 16
+    self.draft.barSide = "right"
+    self.draft.showTimerText = true
+  elseif presetKey == "targetbar" then
+    self.draft.displayMode = "bar"
+    self.draft.timerVisual = "bar"
+    self.draft.barWidth = 180
+    self.draft.barHeight = 18
+    self.draft.showTimerText = true
+    self.draft.timerAnchor = "BOTTOM"
+    self.draft.customTextAnchor = "TOP"
+  end
+
+  if S and S.SetDirty then
+    S:SetDirty(true)
+  end
+  self:ValidateDraft()
+  self:RefreshLivePreview(true)
+  self:RenderTab("Appearance")
 end
 function AuraEditorPanel:LoadAura(auraId)
   self.draft = Repo:GetAuraDraft(auraId)
@@ -514,6 +644,79 @@ function AuraEditorPanel:RenderAppearanceCard(y, title, body, fields)
   return y - cardHeight - 10
 end
 
+function AuraEditorPanel:RenderDisplayCanvas(y)
+  local card = createCard(self.content, y, "Visual Layout", "Use quick layout presets here, then check the Live Preview panel on the right for the real draft preview.", 132)
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local presetLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  presetLabel:SetPoint("TOPLEFT", 2, -2)
+  presetLabel:SetText("Quick Layout Presets")
+
+  local function makePreset(text, x, presetKey)
+    local btn = CreateFrame("Button", nil, card.content, "UIPanelButtonTemplate")
+    btn:SetSize(82, 20)
+    btn:SetPoint("TOPLEFT", 2 + x, -18)
+    btn:SetText(text)
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(btn, "segment")
+    end
+    btn:SetScript("OnClick", function()
+      self:ApplyLayoutPreset(presetKey)
+    end)
+    self.fieldWidgets[#self.fieldWidgets + 1] = btn
+  end
+
+  makePreset("Icon", 0, "icon")
+  makePreset("Compact", 88, "compact")
+  makePreset("Icon + Bar", 176, "iconbar")
+  makePreset("Target Bar", 264, "targetbar")
+
+  local mode = tostring(self.draft.displayMode or self.draft.timerVisual or "icon")
+
+  local function makeMiniButton(text, x, onClick)
+    local btn = CreateFrame("Button", nil, card.content, "UIPanelButtonTemplate")
+    btn:SetSize(82, 20)
+    btn:SetPoint("TOPLEFT", 2 + x, -46)
+    btn:SetText(text)
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(btn, "segment")
+    end
+    btn:SetScript("OnClick", onClick)
+    self.fieldWidgets[#self.fieldWidgets + 1] = btn
+    return btn
+  end
+
+  if mode == "iconbar" then
+    makeMiniButton("Icon Left", 0, function()
+      self:OnFieldChanged("barSide", "right")
+      self:RenderTab("Appearance")
+    end)
+    makeMiniButton("Icon Right", 88, function()
+      self:OnFieldChanged("barSide", "left")
+      self:RenderTab("Appearance")
+    end)
+  end
+  makeMiniButton("Timer Above", 0, function()
+    self:OnFieldChanged("timerAnchor", "TOP")
+    self:RenderTab("Appearance")
+  end):SetPoint("TOPLEFT", 2, -74)
+  makeMiniButton("Timer Below", 88, function()
+    self:OnFieldChanged("timerAnchor", "BOTTOM")
+    self:RenderTab("Appearance")
+  end):SetPoint("TOPLEFT", 90, -74)
+  makeMiniButton("Text Above", 176, function()
+    self:OnFieldChanged("customTextAnchor", "TOP")
+    self:RenderTab("Appearance")
+  end):SetPoint("TOPLEFT", 178, -74)
+  makeMiniButton("Text Below", 266, function()
+    self:OnFieldChanged("customTextAnchor", "BOTTOM")
+    self:RenderTab("Appearance")
+  end):SetPoint("TOPLEFT", 266, -74)
+
+  card.content:SetHeight(98)
+  return y - 142
+end
+
 function AuraEditorPanel:RenderTab(tabKey)
   self.currentTab = tabKey
   self:ClearTabContent()
@@ -536,6 +739,59 @@ function AuraEditorPanel:RenderTab(tabKey)
   local y = -12
 
   if tabKey == "Tracking" then
+    local presetFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
+    createBackdrop(presetFrame)
+    presetFrame:SetHeight(64)
+    presetFrame:SetPoint("TOPLEFT", 12, y)
+    presetFrame:SetPoint("RIGHT", -14, 0)
+
+    local presetLabel = presetFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    presetLabel:SetPoint("TOPLEFT", 10, -8)
+    presetLabel:SetText("Choose the kind of aura you want to build")
+
+    local activePreset = inferTrackingPreset(self.draft)
+    local btnPlayer = CreateFrame("Button", nil, presetFrame, "UIPanelButtonTemplate")
+    btnPlayer:SetSize(150, 24)
+    btnPlayer:SetPoint("BOTTOMLEFT", 10, 8)
+    btnPlayer:SetText("Buff / Proc On Me")
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(btnPlayer, "segment")
+    end
+    setTabVisual(btnPlayer, activePreset == "buff_player")
+    btnPlayer:SetScript("OnClick", function()
+      self:ApplyTrackingPreset("buff_player")
+    end)
+
+    local btnDebuff = CreateFrame("Button", nil, presetFrame, "UIPanelButtonTemplate")
+    btnDebuff:SetSize(150, 24)
+    btnDebuff:SetPoint("LEFT", btnPlayer, "RIGHT", 8, 0)
+    btnDebuff:SetText("Debuff I Apply")
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(btnDebuff, "segment")
+    end
+    setTabVisual(btnDebuff, activePreset == "debuff_target")
+    btnDebuff:SetScript("OnClick", function()
+      self:ApplyTrackingPreset("debuff_target")
+    end)
+
+    local btnTarget = CreateFrame("Button", nil, presetFrame, "UIPanelButtonTemplate")
+    btnTarget:SetSize(150, 24)
+    btnTarget:SetPoint("LEFT", btnDebuff, "RIGHT", 8, 0)
+    btnTarget:SetText("Aura On Target")
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(btnTarget, "segment")
+    end
+    setTabVisual(btnTarget, activePreset == "target_aura")
+    btnTarget:SetScript("OnClick", function()
+      self:ApplyTrackingPreset("target_aura")
+    end)
+
+    self.fieldWidgets[#self.fieldWidgets + 1] = presetFrame
+    self.fieldWidgets[#self.fieldWidgets + 1] = btnPlayer
+    self.fieldWidgets[#self.fieldWidgets + 1] = btnDebuff
+    self.fieldWidgets[#self.fieldWidgets + 1] = btnTarget
+    y = y - 72
+
     if tostring(self.draft.unit or "player") == "target" then
       local modeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
       createBackdrop(modeFrame)
@@ -685,7 +941,19 @@ function AuraEditorPanel:RenderTab(tabKey)
           filtered[#filtered + 1] = fields[i]
         end
       elseif not self.showAdvanced then
+        local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
         if key == "unit" or key == "spellID" or key == "castSpellIDs" then
+          filtered[#filtered + 1] = fields[i]
+        elseif actionMode == "produce" and (
+          key == "duration"
+          or key == "timerBehavior"
+          or key == "stackBehavior"
+          or key == "stackAmount"
+          or key == "maxStacks"
+          or (key == "maxDuration" and tostring(self.draft.timerBehavior or "reset") == "extend")
+        ) then
+          filtered[#filtered + 1] = fields[i]
+        elseif actionMode == "consume" and (key == "requiredAuraSpellIDs" or key == "consumeBehavior" or key == "conditionLogic") then
           filtered[#filtered + 1] = fields[i]
         end
       else
@@ -703,6 +971,8 @@ function AuraEditorPanel:RenderTab(tabKey)
     end
     local mode = tostring(self.draft.displayMode or self.draft.timerVisual or "icon")
 
+    y = self:RenderDisplayCanvas(y)
+
     y = self:RenderAppearanceCard(y, "Layout", "Define the overall shape and placement of this aura.", {
       byKey.name,
       byKey.group,
@@ -716,6 +986,7 @@ function AuraEditorPanel:RenderTab(tabKey)
         byKey.groupDirection,
         byKey.groupSpacing,
         byKey.groupSort,
+        byKey.groupWrapAfter,
         byKey.groupOffsetX,
         byKey.groupOffsetY,
       })
@@ -834,6 +1105,50 @@ function AuraEditorPanel:DeleteCurrent()
     E:Emit(E.Names.FILTER_CHANGED, { key = "delete", value = true })
   end
 end
+
+function AuraEditorPanel:DuplicateCurrent()
+  if not self.draft or not self.draft.id or tostring(self.draft.id) == "" then
+    V:SetStatus("warn", "No aura selected.")
+    return
+  end
+
+  local ok, newId, err = Repo and Repo.DuplicateAura and Repo:DuplicateAura(self.draft.id)
+  if not ok then
+    V:SetStatus("error", tostring(err or "Duplicate failed"))
+    return
+  end
+
+  if S and S.SetSelectedAura then
+    S:SetSelectedAura(newId, "duplicate")
+  end
+  V:SetStatus("ok", "Aura duplicated.")
+  if E then
+    E:Emit(E.Names.FILTER_CHANGED, { key = "duplicate", value = newId })
+  end
+end
+
+function AuraEditorPanel:ExportCurrent()
+  if not self.draft or not self.draft.id or tostring(self.draft.id) == "" then
+    V:SetStatus("warn", "No aura selected.")
+    return
+  end
+
+  local text, err = Repo and Repo.ExportAura and Repo:ExportAura(self.draft.id)
+  if not text then
+    V:SetStatus("error", tostring(err or "Export failed"))
+    return
+  end
+
+  if UI and UI.ImportExportDialog and UI.ImportExportDialog.ShowExport then
+    UI.ImportExportDialog:ShowExport(
+      "Export Aura",
+      text,
+      "This exports only the selected aura. Linked rules are included; the imported copy gets fresh local IDs."
+    )
+  end
+  V:SetStatus("ok", "Aura export generated.")
+end
+
 function AuraEditorPanel:SaveCurrent()
   if not self.draft then
     return
@@ -850,7 +1165,25 @@ function AuraEditorPanel:SaveCurrent()
     return
   end
 
-  self.draft.id = savedId or self.draft.id
+  if savedId and tostring(savedId) ~= "" then
+    self.currentAuraId = tostring(savedId)
+    local refreshedDraft = Repo:GetAuraDraft(savedId)
+    if type(refreshedDraft) == "table" then
+      self.draft = refreshedDraft
+    else
+      self.draft.id = tostring(savedId)
+      self.draft._sourceKey = tostring(savedId)
+      if ns.SettingsData and ns.SettingsData.ResolveEntry then
+        local savedEntry = ns.SettingsData:ResolveEntry(savedId)
+        local savedUID = savedEntry and savedEntry.item and tostring(savedEntry.item.instanceUID or "") or ""
+        if savedUID ~= "" then
+          self.draft.instanceUID = savedUID
+        end
+      end
+    end
+  else
+    self.draft.id = savedId or self.draft.id
+  end
 
   if RuleRepo and RuleRepo.SaveRuleFromDraft then
     local rok, rerr = RuleRepo:SaveRuleFromDraft(self.draft)
@@ -995,7 +1328,7 @@ function AuraEditorPanel:Create(parent)
 
   o.btnDelete = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
   o.btnDelete:SetSize(90, 24)
-  o.btnDelete:SetPoint("LEFT", o.btnReset, "RIGHT", 8, 0)
+  o.btnDelete:SetPoint("LEFT", o.btnDuplicate, "RIGHT", 96, 0)
   o.btnDelete:SetText("Delete")
   o.btnDelete:SetScript("OnClick", function()
     o:DeleteCurrent()
@@ -1003,6 +1336,32 @@ function AuraEditorPanel:Create(parent)
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(o.btnDelete, "danger")
   end
+
+  o.btnDuplicate = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
+  o.btnDuplicate:SetSize(90, 24)
+  o.btnDuplicate:SetPoint("LEFT", o.btnReset, "RIGHT", 8, 0)
+  o.btnDuplicate:SetText("Duplicate")
+  o.btnDuplicate:SetScript("OnClick", function()
+    o:DuplicateCurrent()
+  end)
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(o.btnDuplicate, "ghost")
+  end
+  o.duplicateButton = o.btnDuplicate
+
+  o.btnExport = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
+  o.btnExport:SetSize(80, 24)
+  o.btnExport:SetPoint("LEFT", o.btnDuplicate, "RIGHT", 8, 0)
+  o.btnExport:SetText("Export")
+  o.btnExport:SetScript("OnClick", function()
+    o:ExportCurrent()
+  end)
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(o.btnExport, "ghost")
+  end
+
+  o.btnDelete:ClearAllPoints()
+  o.btnDelete:SetPoint("LEFT", o.btnExport, "RIGHT", 8, 0)
 
   if E then
     E:On(E.Names.AURA_SELECTED, function(payload)

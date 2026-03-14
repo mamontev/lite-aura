@@ -28,25 +28,14 @@ end
 
 local function printStartupBanner()
   local version = getAddonVersion()
-  local line1 = "|cffffd200[AuraLite]|r    _____                        .____    .__  __          "
-  local line2 = "|cffffd200[AuraLite]|r   /  _  \\  __ ______________    |    |   |__|/  |_  ____  "
-  local line3 = "|cffffd200[AuraLite]|r  /  /_\\  \\|  |  \\_  __ \\__  \\   |    |   |  \\   __\\/ __ \\ "
-  local line4 = "|cffffd200[AuraLite]|r /    |    \\  |  /|  | \\/ __ \\_ |    |___|  ||  | \\  ___/ "
-  local line5 = "|cffffd200[AuraLite]|r \\____|__  /____/ |__|  (____  / |_______ \\__||__|  \\___  >"
-  local line6 = string.format("|cffffd200[AuraLite]|r         \\/                  \\/          \\/             \\/  v%s", tostring(version))
+  local line1 = "|cffffd200[AuraLite]|r _____                  _     _ _       v" .. tostring(version)
+  local line2 = "|cffffd200[AuraLite]|r Simple aura tracking and cast-driven timers"
 
   if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
     DEFAULT_CHAT_FRAME:AddMessage(line1)
     DEFAULT_CHAT_FRAME:AddMessage(line2)
-    DEFAULT_CHAT_FRAME:AddMessage(line3)
-    DEFAULT_CHAT_FRAME:AddMessage(line4)
-    DEFAULT_CHAT_FRAME:AddMessage(line5)
-    DEFAULT_CHAT_FRAME:AddMessage(line6)
   end
 
-  if ns.Debug and ns.Debug.Log then
-    ns.Debug:Log(string.format("Startup banner shown. version=%s", tostring(version)))
-  end
 end
 
 function ns:RebuildWatchIndex()
@@ -62,6 +51,9 @@ function ns:Initialize()
   end
 
   self.ProfileManager:Init()
+  if self.SettingsData and self.SettingsData.EnsureIdentityState then
+    self.SettingsData:EnsureIdentityState()
+  end
   if self.SettingsData and self.SettingsData.MigrateGroupLayoutState then
     self.SettingsData:MigrateGroupLayoutState()
   end
@@ -80,9 +72,6 @@ function ns:Initialize()
     self.OptionsIntegration:Register()
   end
   printStartupBanner()
-  if self.Debug then
-    self.Debug:Log("Addon initialized.")
-  end
   initialized = true
 end
 
@@ -90,9 +79,6 @@ function ns:RegisterRuntimeEvents()
   -- Player spellcast observer events are read-only and help the resolver
   -- correlate cast attempts without relying purely on heuristic cooldown edges.
   self.state.runtimeEventsRegistered = true
-  if self.Debug and self.Debug.Log then
-    self.Debug:Log("Runtime cast observer events enabled.")
-  end
 end
 
 function ns:UnregisterRuntimeEvents()

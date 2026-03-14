@@ -214,7 +214,23 @@ local function normalizeAction(raw)
   out.auraSpellID = tonumber(raw.auraSpellID) or tonumber(raw.spellID) or nil
   out.duration = tonumber(raw.duration) or nil
   out.stacks = tonumber(raw.stacks) or nil
+  out.stackAmount = tonumber(raw.stackAmount) or tonumber(raw.stack_amount) or tonumber(raw.stacks) or nil
   out.maxStacks = tonumber(raw.maxStacks) or nil
+  out.maxDuration = tonumber(raw.maxDuration) or tonumber(raw.max_duration) or nil
+  local stackBehavior = tostring(raw.stackBehavior or raw.stack_behavior or ""):lower()
+  if stackBehavior ~= "replace" and stackBehavior ~= "add" then
+    if (tonumber(out.maxStacks) or 1) > 1 then
+      stackBehavior = "add"
+    else
+      stackBehavior = "replace"
+    end
+  end
+  out.stackBehavior = stackBehavior
+  local timerBehavior = tostring(raw.timerBehavior or raw.timer_behavior or ""):lower()
+  if timerBehavior ~= "extend" and timerBehavior ~= "keep" then
+    timerBehavior = "reset"
+  end
+  out.timerBehavior = timerBehavior
   local hideOnTimerEnd = raw.hideOnTimerEnd
   if hideOnTimerEnd == nil then
     hideOnTimerEnd = raw.hide_on_timer_end
@@ -225,6 +241,26 @@ local function normalizeAction(raw)
     out.hideOnTimerEnd = hideOnTimerEnd == true
   end
   return out
+end
+
+local function clampStacks(value, maxStacks)
+  local stacks = math.max(1, tonumber(value) or 1)
+  maxStacks = tonumber(maxStacks)
+  if maxStacks and maxStacks > 0 and stacks > maxStacks then
+    stacks = maxStacks
+  end
+  return stacks
+end
+
+local function buildShowOptions(duration, stacks, maxStacks, hideOnTimerEnd)
+  return {
+    duration = tonumber(duration) or nil,
+    stackAmount = tonumber(stacks) or 1,
+    maxStacks = tonumber(maxStacks) or nil,
+    stackBehavior = ((tonumber(maxStacks) or 1) > 1) and "add" or "replace",
+    timerBehavior = "reset",
+    hideOnTimerEnd = hideOnTimerEnd,
+  }
 end
 
 local function normalizeIfRule(raw, idx)
@@ -558,12 +594,13 @@ function P:EnsureContext()
   end
 end
 
-function P:ShowSyntheticAura(auraSpellID, duration, stacks, triggerSpellID, maxStacks, hideOnTimerEnd)
+function P:ShowSyntheticAura(auraSpellID, action, triggerSpellID)
   auraSpellID = tonumber(auraSpellID)
   if not auraSpellID then
     return false
   end
 
+  local actionData = type(action) == "table" and action or buildShowOptions(action, nil, nil, nil)
   local states = ensureProcState()
   local state = states[auraSpellID] or {}
   local wasActive = state.active == true
@@ -571,26 +608,77 @@ function P:ShowSyntheticAura(auraSpellID, duration, stacks, triggerSpellID, maxS
   local prevExpiration = tonumber(state.expirationTime) or 0
 
   local now = GetTime()
-  local finalStacks = tonumber(stacks)
-  if not finalStacks then
-    finalStacks = math.max(1, prevStacks + 1)
+  local stackBehavior = tostring(actionData.stackBehavior or ""):lower()
+  if stackBehavior ~= "add" then
+    stackBehavior = "replace"
   end
-  if maxStacks and maxStacks > 0 and finalStacks > maxStacks then
-    finalStacks = maxStacks
+  local timerBehavior = tostring(actionData.timerBehavior or ""):lower()
+  if timerBehavior ~= "extend" and timerBehavior ~= "keep" then
+    timerBehavior = "reset"
+  end
+  local maxStacks = tonumber(actionData.maxStacks)
+  local stackAmount = tonumber(actionData.stackAmount) or tonumber(actionData.stacks) or 1
+  if stackAmount <= 0 then
+    stackAmount = 1
   end
 
-  local finalDuration = tonumber(duration) or tonumber(state.duration) or 0
-  local expirationTime = finalDuration > 0 and (now + finalDuration) or nil
+  local finalStacks
+  if stackBehavior == "add" then
+    finalStacks = clampStacks(math.max(0, prevStacks) + stackAmount, maxStacks)
+  else
+    finalStacks = clampStacks(stackAmount, maxStacks)
+  end
+
+  local baseDuration = tonumber(actionData.duration) or tonumber(state.duration) or 0
+  local expirationTime = nil
+  local startTime = now
+  local finalDuration = baseDuration > 0 and baseDuration or nil
+
+  if timerBehavior == "keep" and wasActive and prevExpiration and prevExpiration > now + 0.05 then
+    expirationTime = prevExpiration
+    finalDuration = tonumber(state.duration) or baseDuration or nil
+    startTime = tonumber(state.startTime) or (expirationTime - (tonumber(finalDuration) or 0))
+  elseif timerBehavior == "extend" then
+    local extendAmount = baseDuration
+    local currentRemaining = 0
+    if wasActive and prevExpiration and prevExpiration > now then
+      currentRemaining = prevExpiration - now
+    end
+    local nextRemaining = currentRemaining + math.max(0, extendAmount or 0)
+    local maxDuration = tonumber(actionData.maxDuration)
+    if maxDuration and maxDuration > 0 then
+      nextRemaining = math.min(nextRemaining, maxDuration)
+      finalDuration = maxDuration
+    else
+      finalDuration = math.max(baseDuration or 0, nextRemaining)
+    end
+    if nextRemaining > 0 then
+      expirationTime = now + nextRemaining
+      startTime = expirationTime - (tonumber(finalDuration) or nextRemaining)
+    else
+      expirationTime = nil
+      startTime = now
+      finalDuration = nil
+    end
+  elseif baseDuration and baseDuration > 0 then
+    finalDuration = baseDuration
+    expirationTime = now + baseDuration
+    startTime = now
+  else
+    expirationTime = nil
+    finalDuration = nil
+    startTime = now
+  end
 
   state.active = true
   state.applications = finalStacks
-  state.startTime = now
-  state.duration = finalDuration > 0 and finalDuration or nil
+  state.startTime = startTime
+  state.duration = tonumber(finalDuration) and finalDuration > 0 and finalDuration or nil
   state.expirationTime = expirationTime
-  if hideOnTimerEnd == nil then
+  if actionData.hideOnTimerEnd == nil then
     state.hideOnTimerEnd = true
   else
-    state.hideOnTimerEnd = hideOnTimerEnd == true
+    state.hideOnTimerEnd = actionData.hideOnTimerEnd == true
   end
   state.lastTriggerSpellID = tonumber(triggerSpellID) or 0
   states[auraSpellID] = state
@@ -799,11 +887,8 @@ function P:ExecuteActions(actions, triggerSpellID)
     if action.type == "showaura" then
       changed = self:ShowSyntheticAura(
         action.auraSpellID,
-        action.duration,
-        action.stacks,
-        triggerSpellID,
-        action.maxStacks,
-        action.hideOnTimerEnd
+        action,
+        triggerSpellID
       ) or changed
     elseif action.type == "hideaura" then
       changed = self:HideSyntheticAura(action.auraSpellID, triggerSpellID) or changed
@@ -820,7 +905,11 @@ function P:ProcessLegacyRules(spellID)
   if activateRules then
     for i = 1, #activateRules do
       local rule = activateRules[i]
-      changed = self:ShowSyntheticAura(rule.auraSpellID, rule.defaultDuration, nil, spellID, rule.maxStacks, true) or changed
+      changed = self:ShowSyntheticAura(
+        rule.auraSpellID,
+        buildShowOptions(rule.defaultDuration, 1, rule.maxStacks, true),
+        spellID
+      ) or changed
     end
   end
 
@@ -1018,7 +1107,17 @@ function P:AddSimpleIfRuleEx(model)
     specIDs = normalizeSpellIDList(model.loadSpecIDs),
     ifAll = buildConditionsFromModel(model),
     thenActions = {
-      { type = "showAura", auraSpellID = auraSpellID, duration = duration, stacks = 1, maxStacks = 1, hideOnTimerEnd = true },
+      {
+        type = "showAura",
+        auraSpellID = auraSpellID,
+        duration = duration,
+        stackAmount = tonumber(model.stackAmount) or 1,
+        maxStacks = tonumber(model.maxStacks) or 1,
+        stackBehavior = tostring(model.stackBehavior or "replace"),
+        timerBehavior = tostring(model.timerBehavior or "reset"),
+        maxDuration = tonumber(model.maxDuration) or nil,
+        hideOnTimerEnd = true,
+      },
     },
     elseActions = {
       { type = "hideAura", auraSpellID = auraSpellID },
@@ -1074,7 +1173,7 @@ function P:AddSimpleConsumeRuleEx(model)
       requireInCombat = model.requireInCombat,
     }),
     thenActions = {
-      { type = "hideAura", auraSpellID = auraSpellID },
+      { type = ((tostring(model.consumeBehavior or "hide") == "decrement") and "decrementAura" or "hideAura"), auraSpellID = auraSpellID },
     },
     elseActions = {},
   }

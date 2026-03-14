@@ -21,7 +21,6 @@ UISkin.lua
 PresetLibrary.lua
 ProfileManager.lua
 DebugManager.lua
-WeakAurasSoundCatalog.lua
 SoundManager.lua
 AuraAPIAdapter.lua
 PlayerResource.lua
@@ -35,12 +34,14 @@ ProcRuleEngine.lua
 EventRouter.lua
 ConfigUI.lua
 SettingsData.lua
+ImportExport.lua
 UIComponents.lua
 UI\UIEvents.lua
 UI\UIState.lua
 UI\ValidationBus.lua
 UI\UIBindings.lua
 UI\SpellInput.lua
+UI\ImportExportDialog.lua
 UI\Schemas\EditorTabs.lua
 UI\FieldFactory.lua
 UI\Repositories\AuraRepository.lua
@@ -51,7 +52,9 @@ UI\Widgets\PreviewPanelWidget.lua
 UI\Panels\AuraEditorPanel.lua
 UI\Panels\AuraListPanel.lua
 UI\Panels\AuraWizard.lua
+UI\Panels\GroupsPanel.lua
 UI\Panels\GlobalPanel.lua
+UI\Panels\ImportPanel.lua
 UI\Panels\ConfigFrame.lua
 UI\UIBootstrap.lua
 OptionsIntegration.lua

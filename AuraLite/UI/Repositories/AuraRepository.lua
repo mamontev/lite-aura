@@ -235,14 +235,28 @@ function R:SaveDraft(draft)
     return false, nil, "missing draft id"
   end
 
+  if isRealMode() and not B:IsDraftID(id) then
+    local sourceKey = tostring(draft._sourceKey or id)
+    local existingEntry = ns.SettingsData and ns.SettingsData.ResolveEntry and ns.SettingsData:ResolveEntry(sourceKey)
+    local existingUID = existingEntry and existingEntry.item and tostring(existingEntry.item.instanceUID or "") or ""
+    if existingUID ~= "" then
+      draft.instanceUID = existingUID
+    end
+  end
+
   if not isRealMode() then
     self._drafts[id] = cloneShallow(draft)
     return true, id
   end
 
   local model = B:ToSettingsDataModel(draft)
-  if ns.Debug and ns.Debug.Logf then
-    ns.Debug:Logf("AuraRepository SaveDraft id=%s metaSource=%s draft.unit=%s model.unit=%s spellID=%s", tostring(id), tostring((self._draftMeta[id] and self._draftMeta[id].sourceKey) or id), tostring(draft.unit or ""), tostring(model and model.unit or ""), tostring(draft.spellID or ""))
+  if isRealMode() and not B:IsDraftID(id) then
+    local sourceKey = tostring(draft._sourceKey or id)
+    local existingEntry = ns.SettingsData and ns.SettingsData.ResolveEntry and ns.SettingsData:ResolveEntry(sourceKey)
+    local existingUID = existingEntry and existingEntry.item and tostring(existingEntry.item.instanceUID or "") or ""
+    if existingUID ~= "" then
+      model.instanceUID = existingUID
+    end
   end
   local sourceKey = tostring(draft._sourceKey or id)
   local meta = self._draftMeta[id] or self._draftMeta[sourceKey] or { isNew = B:IsDraftID(id), sourceKey = B:IsDraftID(id) and nil or sourceKey }
@@ -266,6 +280,12 @@ function R:SaveDraft(draft)
   end
 
   local savedDraft = cloneShallow(draft)
+  local savedEntry = ns.SettingsData and ns.SettingsData.ResolveEntry and ns.SettingsData:ResolveEntry(savedKey)
+  if savedEntry and savedEntry.item and tostring(savedEntry.item.instanceUID or "") ~= "" then
+    savedDraft.instanceUID = tostring(savedEntry.item.instanceUID)
+  elseif model and tostring(model.instanceUID or "") ~= "" then
+    savedDraft.instanceUID = tostring(model.instanceUID)
+  end
   savedDraft.id = savedKey
   savedDraft._sourceKey = savedKey
   self._drafts[savedKey] = savedDraft
@@ -277,6 +297,50 @@ function R:SaveDraft(draft)
   end
 
   return true, savedKey
+end
+
+function R:DuplicateAura(auraId)
+  auraId = tostring(auraId or "")
+  if auraId == "" then
+    return false, nil, "missing aura id"
+  end
+
+  local source = self:GetAuraDraft(auraId)
+  if type(source) ~= "table" then
+    return false, nil, "source aura not found"
+  end
+
+  local clone = cloneShallow(source)
+  clone.id = nil
+  clone._sourceKey = nil
+  clone.instanceUID = ""
+  local baseName = tostring(clone.name or clone.displayName or "Aura")
+  if baseName == "" then
+    baseName = "Aura"
+  end
+  clone.name = baseName .. " Copy"
+  clone.displayName = clone.name
+
+  return self:SaveDraft(clone)
+end
+
+function R:ExportAura(auraId)
+  auraId = tostring(auraId or "")
+  if auraId == "" or not ns.ImportExport or not ns.ImportExport.ExportAuraString then
+    return nil, "export unavailable"
+  end
+  return ns.ImportExport:ExportAuraString(auraId)
+end
+
+function R:ImportAura(serialized)
+  if not ns.ImportExport or not ns.ImportExport.ImportString then
+    return false, nil, "import unavailable"
+  end
+  local result, err = ns.ImportExport:ImportString(serialized, { forceStandalone = true })
+  if not result then
+    return false, nil, err
+  end
+  return true, result.auraKey
 end
 
 

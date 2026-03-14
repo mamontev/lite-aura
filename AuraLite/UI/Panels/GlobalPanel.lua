@@ -41,7 +41,7 @@ function GlobalPanel:Create(parent)
   local o = setmetatable({}, self)
 
   o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-  o.frame:SetSize(240, 150)
+  o.frame:SetSize(240, 178)
   o.frame:SetFrameStrata("DIALOG")
   o.frame:SetToplevel(true)
   createBackdrop(o.frame)
@@ -78,10 +78,18 @@ function GlobalPanel:Create(parent)
   end)
   o.btnDebug:SetPoint("TOPLEFT", 14, -86)
 
+  o.btnImport = makeButton(o.frame, "Import", 210, function()
+    if E then
+      E:Emit(E.Names.OPEN_IMPORT_PANEL, { anchor = o.btnImport })
+    end
+    o.frame:Hide()
+  end)
+  o.btnImport:SetPoint("TOPLEFT", 14, -114)
+
   o.btnClose = makeButton(o.frame, "Close", 210, function()
     o.frame:Hide()
   end)
-  o.btnClose:SetPoint("TOPLEFT", 14, -114)
+  o.btnClose:SetPoint("TOPLEFT", 14, -142)
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(o.btnClose, "ghost")
   end

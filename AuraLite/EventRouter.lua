@@ -238,18 +238,17 @@ local function sanitizeGroupToken(text)
 end
 
 local function buildIndependentGroupID(unit, item)
+  if ns.SettingsData and ns.SettingsData.EnsureWatchItemIdentity then
+    ns.SettingsData:EnsureWatchItemIdentity(unit, item)
+  end
   local spellID = tonumber(item and item.spellID) or 0
   local unitToken = sanitizeGroupToken(unit or "player")
   local uidToken = sanitizeGroupToken(item and item.instanceUID or "")
   if uidToken ~= "" then
     return string.format("aura_%s_%s", unitToken, uidToken)
   end
-  local groupToken = sanitizeGroupToken(item and item.groupID or "group")
-  local nameToken = sanitizeGroupToken(item and item.displayName or "")
-  if nameToken == "" then
-    nameToken = "spell" .. tostring(spellID)
-  end
-  return string.format("aura_%s_%s_%d_%s", unitToken, groupToken, spellID, nameToken)
+
+  return string.format("aura_%s_emergency_%d", unitToken, spellID)
 end
 
 local function resolveDisplayGroupID(unit, item)
@@ -566,7 +565,7 @@ expireResolverState = function(self, state, reason, now)
   end
   for i = #attempts, 1, -1 do
     if attempts[i] == state then
-      ns.Debug:Logf(
+      ns.Debug:Verbosef(
         "CastResolver attempt_expire token=%d spellID=%d reason=%s age=%.2f score=%.2f",
         tonumber(state.attemptToken) or 0,
         tonumber(state.spellID) or 0,
@@ -596,7 +595,7 @@ blockResolverState = function(self, state, reason, now)
   state.lastErrorAt = tonumber(now) or GetTime()
   state.blockReason = tostring(reason or "ui_error")
   addAttemptSignal(state, "runtime_fail", RESOLVER_SCORE_RUNTIME_FAIL, now, state.blockReason)
-  ns.Debug:Logf(
+  ns.Debug:Verbosef(
     "CastResolver attempt_block token=%d spellID=%d reason=%s age=%.2f score=%.2f",
     tonumber(state.attemptToken) or 0,
     tonumber(state.spellID) or 0,
@@ -625,7 +624,7 @@ confirmResolverState = function(self, state, sourceTag, now)
   self.castResolverLastConfirmAt[state.spellID] = now
   state.status = "confirmed"
   state.lastConfirmAt = now
-  ns.Debug:Logf(
+  ns.Debug:Verbosef(
     "CastResolver attempt_confirm token=%d spellID=%d via=%s age=%.2f restricted=%s score=%.2f",
     tonumber(state.attemptToken) or 0,
     tonumber(state.spellID) or 0,
@@ -680,7 +679,7 @@ local function openResolverState(self, spellID, sourceTag, now)
   }
   attempts[#attempts + 1] = state
   addAttemptSignal(state, "raw_hook", RESOLVER_SCORE_RAW_HOOK, now, sourceTag)
-  ns.Debug:Logf(
+  ns.Debug:Verbosef(
     "CastResolver attempt_open token=%d spellID=%d source=%s restricted=%s offGCD=%s",
     tonumber(token) or 0,
     tonumber(spellID) or 0,
@@ -727,9 +726,7 @@ local function queueCastAttempt(self, spellID, sourceTag)
   end
 
   recordRawAttempt(self, tracked and state or nil, now)
-  ns.Debug:Throttled(
-    "cast-attempt-raw-" .. tostring(spellID) .. "-" .. tostring(sourceTag or "HOOK"),
-    0.25,
+  ns.Debug:Verbosef(
     "Cast attempt raw spellID=%d name=%s source=%s tracked=%s",
     spellID,
     tostring(getSpellDebugName(spellID)),
@@ -807,9 +804,7 @@ local function applySyntheticTargetAura(self, configuredSpellID, duration, appli
   state.sourceTag = tostring(sourceTag or "")
   state.updatedAt = now
   self.syntheticTargetAuras[targetKey][configuredSpellID] = state
-  ns.Debug:Throttled(
-    "synthetic-target-show-" .. tostring(configuredSpellID),
-    0.25,
+  ns.Debug:Verbosef(
     "Synthetic target aura show slot=%s spellID=%d duration=%.1f source=%s",
     targetKey,
     configuredSpellID,
@@ -833,9 +828,7 @@ local function removeSyntheticTargetAura(self, configuredSpellID, reason)
   if next(states) == nil then
     self.syntheticTargetAuras[targetKey] = nil
   end
-  ns.Debug:Throttled(
-    "synthetic-target-hide-" .. tostring(configuredSpellID),
-    0.25,
+  ns.Debug:Verbosef(
     "Synthetic target aura hide slot=%s spellID=%d reason=%s",
     targetKey,
     configuredSpellID,
@@ -853,7 +846,7 @@ local function forEachTrackedTargetSpell(self, sourceSpellID, fn)
   if type(list) ~= "table" then
     return
   end
-  for _, item in ipairs(list) do
+  for itemIndex, item in ipairs(list) do
     local configuredSpellID = tonumber(item and item.spellID)
     if configuredSpellID then
       if normalizeTrackingMode(item, "target") == "estimated" and isTrackedByCastList(sourceSpellID, item.castSpellIDs) then
@@ -884,9 +877,7 @@ applyConfirmedSyntheticTargetAuras = function(self, sourceSpellID, sourceTag)
     local duration = tonumber(configuredDuration) or ns.AuraAPI:GetSpellBaseDurationSeconds(configuredSpellID)
     if duration and duration > 0 then
       applySyntheticTargetAura(self, configuredSpellID, duration, 1, sourceSpellID, sourceTag or "resolver")
-      ns.Debug:Throttled(
-        "synthetic-target-config-" .. tostring(configuredSpellID) .. "-" .. tostring(sourceSpellID),
-        0.25,
+      ns.Debug:Verbosef(
         "Synthetic target config match aura=%d cast=%d duration=%.1f mode=%s",
         tonumber(configuredSpellID) or 0,
         tonumber(sourceSpellID) or 0,
@@ -902,7 +893,7 @@ logResolverOutcome = function(state, outcome, detail, now)
     return
   end
   now = tonumber(now) or GetTime()
-  ns.Debug:Logf(
+  ns.Debug:Verbosef(
     "CastResolver outcome=%s token=%d spellID=%d name=%s detail=%s age=%.2f",
     tostring(outcome or "unknown"),
     tonumber(state.attemptToken) or 0,
@@ -1065,7 +1056,6 @@ function E:EnsureCastHooks()
   end
 
   self.castHooksInstalled = true
-  ns.Debug:Log("Cast hooks installed (cast resolver active).")
 end
 
 function E:BuildRowsForUnit(unit)
@@ -1086,9 +1076,13 @@ function E:BuildRowsForUnit(unit)
       local previewItem = getSelectedAuraPreviewItem(unit, item)
       local renderItem = previewItem or item
       local selectedPreview = previewItem ~= nil
-      local effectiveGroupID = resolveDisplayGroupID(unit, renderItem)
-      if selectedInUnlock or selectedPreview then
-        effectiveGroupID = buildIndependentGroupID(unit, renderItem)
+      local identityKey = buildIndependentGroupID(unit, item)
+      local effectiveGroupID = resolveDisplayGroupID(unit, item)
+      local renderGroupID = tostring(item and item.groupID or "")
+      local groupedMoverPreview = (ns.db and ns.db.locked == false and sanitizeGroupToken(renderGroupID) ~= "")
+      local shouldIsolatePreview = (selectedInUnlock or selectedPreview) and sanitizeGroupToken(renderGroupID) == ""
+      if shouldIsolatePreview then
+        effectiveGroupID = identityKey
       end
       local aura = nil
       if directAuraTracking or trackingMode == "estimated" or not rulesOnlyMode then
@@ -1169,8 +1163,12 @@ function E:BuildRowsForUnit(unit)
         local stateLabel = (aura and aura._alStateLabel) or ((trackingMode == "estimated") and "Estimated from your cast" or "Direct aura read")
         rowsByGroup[effectiveGroupID] = rowsByGroup[effectiveGroupID] or {}
         rowsByGroup[effectiveGroupID][#rowsByGroup[effectiveGroupID] + 1] = {
+          entryKey = tostring(unit) .. ":" .. tostring(itemIndex),
           unit = unit,
           groupID = effectiveGroupID,
+          identityKey = identityKey,
+          sourceGroupID = sanitizeGroupToken(item and item.groupID),
+          savedPosition = renderItem.savedPosition,
           spellID = renderItem.spellID,
           auraInstanceID = ns.AuraAPI:GetAuraInstanceID(aura),
           icon = ns.AuraAPI:GetDisplayTextureForItem(renderItem, aura),
@@ -1181,6 +1179,7 @@ function E:BuildRowsForUnit(unit)
           sourceLabel = sourceLabel,
           stateKind = stateKind,
           stateLabel = stateLabel,
+          groupOrder = tonumber(renderItem.groupOrder) or 0,
           trackingMode = trackingMode,
           canCompute = canCompute,
           alert = renderItem.alert ~= false,
@@ -1213,13 +1212,18 @@ function E:BuildRowsForUnit(unit)
           isPlaceholder = false,
         }
       elseif selectedInUnlock
-        or selectedPreview
+        or groupedMoverPreview
         or ns.TestMode:IsEnabled()
         or ((ns.db and ns.db.locked == false) and not configPreviewVisible)
       then
         local fake = ns.TestMode:BuildPlaceholder(renderItem, unit)
+        fake.entryKey = tostring(unit) .. ":" .. tostring(itemIndex)
         fake.groupID = effectiveGroupID
+        fake.identityKey = identityKey
+        fake.sourceGroupID = sanitizeGroupToken(item and item.groupID)
+        fake.savedPosition = renderItem.savedPosition
         fake.displayName = renderItem.displayName or ""
+        fake.groupOrder = tonumber(renderItem.groupOrder) or 0
         fake.customText = renderItem.customText or ""
         fake.timerVisual = renderItem.timerVisual or "icon"
         fake.iconWidth = tonumber(renderItem.iconWidth) or 36
@@ -1452,14 +1456,25 @@ function E:UI_ERROR_MESSAGE(msgType, message)
     end
   end
 
-  ns.Debug:Logf(
-    "Event UI_ERROR_MESSAGE type=%s affectsTracked=%s rawSpell=%s rawTracked=%s msg=%s",
-    tostring(msgType),
-    tostring(affectsTrackedResolver),
-    tostring(self.lastRawAttempt and self.lastRawAttempt.spellID or "nil"),
-    tostring(self.lastRawAttempt and self.lastRawAttempt.tracked == true),
-    tostring(message)
-  )
+  if affectsTrackedResolver then
+    ns.Debug:Logf(
+      "Event UI_ERROR_MESSAGE type=%s affectsTracked=%s rawSpell=%s rawTracked=%s msg=%s",
+      tostring(msgType),
+      tostring(affectsTrackedResolver),
+      tostring(self.lastRawAttempt and self.lastRawAttempt.spellID or "nil"),
+      tostring(self.lastRawAttempt and self.lastRawAttempt.tracked == true),
+      tostring(message)
+    )
+  else
+    ns.Debug:Verbosef(
+      "Event UI_ERROR_MESSAGE type=%s affectsTracked=%s rawSpell=%s rawTracked=%s msg=%s",
+      tostring(msgType),
+      tostring(affectsTrackedResolver),
+      tostring(self.lastRawAttempt and self.lastRawAttempt.spellID or "nil"),
+      tostring(self.lastRawAttempt and self.lastRawAttempt.tracked == true),
+      tostring(message)
+    )
+  end
 end
 
 local function handleResourceEvent(self, unit)

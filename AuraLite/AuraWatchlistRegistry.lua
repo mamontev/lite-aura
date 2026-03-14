@@ -89,6 +89,80 @@ local function normalizeDuration(value, fallback)
   return math.floor((n * 10) + 0.5) / 10
 end
 
+local function normalizeInstanceUID(value)
+  local text = trim(tostring(value or ""))
+  if text == "" then
+    return ""
+  end
+  text = text:gsub("[^%w_%-%.:]", "")
+  if #text > 64 then
+    text = text:sub(1, 64)
+  end
+  return text
+end
+
+local function normalizeSize(value, fallback, minValue, maxValue)
+  local n = tonumber(value)
+  if not n then
+    return fallback
+  end
+  n = math.floor(n + 0.5)
+  if n < (minValue or 4) then
+    n = minValue or 4
+  end
+  if n > (maxValue or 512) then
+    n = maxValue or 512
+  end
+  return n
+end
+
+local function normalizeColorCSV(value)
+  local text = trim(tostring(value or ""))
+  if text == "" then
+    return ""
+  end
+  local parts = {}
+  for token in text:gmatch("[^,%s;]+") do
+    local n = tonumber(token)
+    if not n then
+      return ""
+    end
+    if n < 0 then
+      n = 0
+    elseif n > 1 then
+      n = 1
+    end
+    parts[#parts + 1] = string.format("%.2f", n)
+    if #parts == 3 then
+      break
+    end
+  end
+  if #parts ~= 3 then
+    return ""
+  end
+  return table.concat(parts, ",")
+end
+
+local function normalizeBarSide(value)
+  value = tostring(value or "right"):lower()
+  if value == "left" then
+    return "left"
+  end
+  return "right"
+end
+
+local function cloneSavedPosition(pos)
+  if type(pos) ~= "table" then
+    return nil
+  end
+  return {
+    point = tostring(pos.point or "CENTER"),
+    relativePoint = tostring(pos.relativePoint or "CENTER"),
+    x = tonumber(pos.x) or 0,
+    y = tonumber(pos.y) or 0,
+  }
+end
+
 local function normalizeSpellIDList(value)
   local out = {}
   local seen = {}
@@ -160,16 +234,27 @@ function R:NormalizeWatchItem(item, unit)
 
   return {
     spellID = spellID,
+    instanceUID = normalizeInstanceUID(item.instanceUID),
     groupID = groupID,
     trackingMode = normalizeTrackingMode(item.trackingMode, unit),
     castSpellIDs = normalizeSpellIDList(item.castSpellIDs),
     estimatedDuration = normalizeDuration(item.estimatedDuration, 8),
+    loadClassToken = trim(item.loadClassToken),
+    loadSpecIDs = normalizeSpellIDList(item.loadSpecIDs),
     inCombatOnly = item.inCombatOnly == true,
     onlyMine = item.onlyMine == true,
     alert = item.alert ~= false,
     displayName = trim(item.displayName),
     customText = trim(item.customText),
+    groupOrder = tonumber(item.groupOrder) or 0,
     timerVisual = normalizeTimerVisual(item.timerVisual),
+    iconWidth = normalizeSize(item.iconWidth, 36, 12, 256),
+    iconHeight = normalizeSize(item.iconHeight, 36, 12, 256),
+    barWidth = normalizeSize(item.barWidth, 94, 60, 512),
+    barHeight = normalizeSize(item.barHeight, 16, 6, 128),
+    showTimerText = item.showTimerText ~= false,
+    barColor = normalizeColorCSV(item.barColor),
+    barSide = normalizeBarSide(item.barSide),
     timerAnchor = normalizeAnchor(item.timerAnchor, "BOTTOM"),
     timerOffsetX = normalizeOffset(item.timerOffsetX, 0),
     timerOffsetY = normalizeOffset(item.timerOffsetY, -1),
@@ -186,6 +271,7 @@ function R:NormalizeWatchItem(item, unit)
     iconMode = (item.iconMode == "custom") and "custom" or "spell",
     customTexture = ns.AuraAPI and ns.AuraAPI:ResolveCustomTexturePath(trim(item.customTexture)) or trim(item.customTexture),
     barTexture = ns.AuraAPI and ns.AuraAPI:ResolveBarTexturePath(trim(item.barTexture)) or trim(item.barTexture),
+    savedPosition = cloneSavedPosition(item.savedPosition),
   }
 end
 
@@ -282,7 +368,6 @@ function R:AddWatch(unit, item)
 
   ns.db.watchlist[unit][#ns.db.watchlist[unit] + 1] = normalized
   self:Rebuild(ns.db)
-  ns.Debug:Logf("AddWatch unit=%s spellID=%d group=%s", unit, normalized.spellID, tostring(normalized.groupID))
   return normalized
 end
 
@@ -306,7 +391,6 @@ function R:RemoveWatch(unit, spellID)
 
   if removed > 0 then
     self:Rebuild(ns.db)
-    ns.Debug:Logf("RemoveWatch unit=%s spellID=%d removed=%d", unit, spellID, removed)
   end
   return removed
 end

@@ -100,9 +100,17 @@ function ConfigFrame:BuildFrame()
     Skin:SetButtonVariant(btnGlobal, "ghost")
   end
 
+  local btnGroups = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  btnGroups:SetSize(84, 22)
+  btnGroups:SetPoint("RIGHT", btnGlobal, "LEFT", -8, 0)
+  btnGroups:SetText("Groups")
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(btnGroups, "ghost")
+  end
+
   local btnNew = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
   btnNew:SetSize(140, 22)
-  btnNew:SetPoint("RIGHT", btnGlobal, "LEFT", -8, 0)
+  btnNew:SetPoint("RIGHT", btnGroups, "LEFT", -8, 0)
   btnNew:SetText("Quick New Aura")
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(btnNew, "primary")
@@ -217,11 +225,29 @@ function ConfigFrame:BuildFrame()
     globalPanel = Panels.GlobalPanel:Create(frame)
   end
 
+  local importPanel = nil
+  if Panels.ImportPanel and Panels.ImportPanel.Create then
+    importPanel = Panels.ImportPanel:Create(frame)
+  end
+
+  local groupsPanel = nil
+  if Panels.GroupsPanel and Panels.GroupsPanel.Create then
+    groupsPanel = Panels.GroupsPanel:Create(frame)
+  end
+
   btnGlobal:SetScript("OnClick", function()
     if E then
       E:Emit(E.Names.OPEN_GLOBAL_PANEL, { anchor = btnGlobal })
     elseif globalPanel and globalPanel.frame then
       globalPanel.frame:SetShown(not globalPanel.frame:IsShown())
+    end
+  end)
+
+  btnGroups:SetScript("OnClick", function()
+    if E then
+      E:Emit(E.Names.OPEN_GROUPS_PANEL, { anchor = btnGroups })
+    elseif groupsPanel and groupsPanel.frame then
+      groupsPanel.frame:SetShown(not groupsPanel.frame:IsShown())
     end
   end)
 
@@ -240,12 +266,16 @@ function ConfigFrame:BuildFrame()
   end)
   frame:SetScript("OnHide", function()
     disableMovers()
+    if ns and ns.state then
+      ns.state.selectedAuraPreviewItem = nil
+    end
     refreshMoverButton(btnMovers)
   end)
 
   self.frame = frame
   self.title = title
   self.btnGlobal = btnGlobal
+  self.btnGroups = btnGroups
   self.btnNew = btnNew
   self.btnMovers = btnMovers
   self.searchBox = search
@@ -256,6 +286,8 @@ function ConfigFrame:BuildFrame()
   self.editorPanel = editorPanel
   self.previewPanel = previewPanel
   self.globalPanel = globalPanel
+  self.importPanel = importPanel
+  self.groupsPanel = groupsPanel
   self.wizardPanel = wizardPanel
 end
 

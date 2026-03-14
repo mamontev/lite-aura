@@ -1,0 +1,27 @@
+package-as: AuraLite
+
+ignore:
+  - docs
+  - tests
+  - dist
+  - .git
+  - .github
+  - deploy.ps1
+  - package.ps1
+  - run-tests.ps1
+  - run-beta-gate.ps1
+  - import-texture.ps1
+  - import-wa-sounds.ps1
+  - sync-wowhead-spells.ps1
+  - spell-catalog-terms.txt
+  - tmp_SpellCatalogData.lua
+  - tmp_spell_catalog.csv
+
+license-output: LICENSE.txt
+
+enable-nolib-creation: no
+
+manual-changelog:
+  filename: docs/RELEASE_NOTES_BETA.md
+  markup-type: markdown
+

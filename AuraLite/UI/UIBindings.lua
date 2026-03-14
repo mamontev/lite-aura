@@ -136,6 +136,7 @@ function B:DraftFromEditableModel(model)
     groupDirection = tostring(model.groupDirection or "RIGHT"),
     groupSpacing = tonumber(model.groupSpacing) or 4,
     groupSort = tostring(model.groupSort or "list"),
+    groupWrapAfter = tonumber(model.groupWrapAfter) or 0,
     groupOffsetX = tonumber(model.groupOffsetX) or 0,
     groupOffsetY = tonumber(model.groupOffsetY) or 0,
     triggerType = (unit == "target" and trackingMode ~= "estimated") and "aura" or "cast",
@@ -150,6 +151,12 @@ function B:DraftFromEditableModel(model)
     actionMode = "produce",
     duration = tonumber(model.lowTimeThreshold) and math.max(1, tonumber(model.lowTimeThreshold)) or 8,
     estimatedDuration = tonumber(model.estimatedDuration) or 8,
+    timerBehavior = "reset",
+    maxDuration = tonumber(model.maxDuration) or 0,
+    stackBehavior = "replace",
+    stackAmount = 1,
+    maxStacks = 1,
+    consumeBehavior = "hide",
     displayMode = tostring(model.timerVisual or "icon"),
     lowTime = tonumber(model.lowTimeThreshold) or 0,
     soundOnShow = tostring(model.soundOnGain or "default"),
@@ -199,6 +206,7 @@ function B:NewDraft(auraId)
     groupDirection = "RIGHT",
     groupSpacing = 4,
     groupSort = "list",
+    groupWrapAfter = 0,
     groupOffsetX = 0,
     groupOffsetY = 0,
     triggerType = "cast",
@@ -213,6 +221,12 @@ function B:NewDraft(auraId)
     actionMode = "produce",
     duration = 8,
     estimatedDuration = 8,
+    timerBehavior = "reset",
+    maxDuration = 0,
+    stackBehavior = "replace",
+    stackAmount = 1,
+    maxStacks = 1,
+    consumeBehavior = "hide",
     displayMode = "iconbar",
     lowTime = 3,
     soundOnShow = "default",
@@ -235,9 +249,6 @@ function B:ToSettingsDataModel(draft)
   draft = draft or {}
   local specIDs = parseCSVNumbers(draft.loadSpecID)
   local normalizedUnit = trim(draft.unit) ~= "" and trim(draft.unit) or "player"
-  if ns.Debug and ns.Debug.Logf then
-    ns.Debug:Logf("UIBindings ToSettingsDataModel draft.id=%s draft.unit=%s normalized.unit=%s spellID=%s", tostring(draft.id or ""), tostring(draft.unit or ""), tostring(normalizedUnit), tostring(draft.spellID or ""))
-  end
   return {
     spellInput = trim(draft.spellID),
     displayName = trim(draft.name),
@@ -250,6 +261,7 @@ function B:ToSettingsDataModel(draft)
     groupDirection = tostring(draft.groupDirection or "RIGHT"),
     groupSpacing = tonumber(draft.groupSpacing) or 4,
     groupSort = tostring(draft.groupSort or "list"),
+    groupWrapAfter = tonumber(draft.groupWrapAfter) or 0,
     groupOffsetX = tonumber(draft.groupOffsetX) or 0,
     groupOffsetY = tonumber(draft.groupOffsetY) or 0,
     loadClassToken = trim(draft.loadClassToken):upper(),
@@ -283,6 +295,7 @@ function B:ToSettingsDataModel(draft)
     soundOnGain = draft.soundOnShow or "default",
     soundOnLow = draft.soundOnLow or "default",
     soundOnExpire = draft.soundOnExpire or "none",
+    groupOrder = tonumber(draft.groupOrder) or 0,
   }
 end
 
@@ -319,6 +332,12 @@ function B:ToRuleModel(draft, auraSpellID)
     castSpellIDs = castIDs,
     auraSpellID = auraID,
     duration = tonumber(draft and draft.duration) or 8,
+    timerBehavior = tostring(draft and draft.timerBehavior or "reset"),
+    maxDuration = tonumber(draft and draft.maxDuration) or 0,
+    stackBehavior = tostring(draft and draft.stackBehavior or "replace"),
+    stackAmount = tonumber(draft and draft.stackAmount) or 1,
+    maxStacks = tonumber(draft and draft.maxStacks) or 1,
+    consumeBehavior = tostring(draft and draft.consumeBehavior or "hide"),
     conditionMode = (tostring(draft and draft.conditionLogic or "all") == "any") and "any" or "all",
     loadClassToken = trim((draft and draft.loadClassToken) or ""):upper(),
     loadSpecIDs = parseCSVNumbers(draft and draft.loadSpecID),
@@ -355,10 +374,19 @@ function B:ApplyRuleToDraft(draft, rule)
 
   local thenActions = rule.thenActions or {}
   local firstType = tostring((thenActions[1] and thenActions[1].type) or "")
-  draft.actionMode = firstType:lower() == "hideaura" and "consume" or "produce"
+  local normalizedFirstType = firstType:lower()
+  draft.actionMode = (normalizedFirstType == "hideaura" or normalizedFirstType == "decrementaura") and "consume" or "produce"
+  draft.consumeBehavior = (normalizedFirstType == "decrementaura") and "decrement" or "hide"
 
   if thenActions[1] and tonumber(thenActions[1].duration) then
     draft.duration = tonumber(thenActions[1].duration)
+  end
+  if thenActions[1] then
+    draft.timerBehavior = tostring(thenActions[1].timerBehavior or "reset")
+    draft.maxDuration = tonumber(thenActions[1].maxDuration) or 0
+    draft.stackBehavior = tostring(thenActions[1].stackBehavior or (((tonumber(thenActions[1].maxStacks) or 1) > 1) and "add" or "replace"))
+    draft.stackAmount = tonumber(thenActions[1].stackAmount or thenActions[1].stacks) or 1
+    draft.maxStacks = tonumber(thenActions[1].maxStacks) or 1
   end
 
   draft.conditionLogic = tostring(rule.conditionMode or "all") == "any" and "any" or "all"

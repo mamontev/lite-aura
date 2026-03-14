@@ -1,0 +1,26 @@
+# Build and release artifacts
+/dist/
+/quarantine/
+
+# Test outputs
+/tests/out/
+
+# Local generated temporary files
+/tmp_*.lua
+/tmp_*.csv
+
+# Local imported/custom media
+/AuraLite/Media/Custom/
+
+# Editor / OS noise
+/.vscode/
+/.idea/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+
+# Python cache
+__pycache__/
+*.pyc
+
