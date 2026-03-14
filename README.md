@@ -1,200 +1,195 @@
 # AuraLite
 
-Addon WoW Retail per tracciare aura selezionate con approccio "WA-lite": scegli aura, poi personalizzi i dettagli.
+AuraLite is a lightweight WoW Retail aura tracker focused on fast setup, clean visuals, cast-driven timers, and a workflow familiar to WeakAuras users without the overhead of a fully open-ended scripting environment.
 
-## Refactor Eseguito
+The addon is currently in active beta refinement.
 
-- UI ricostruita in stile editor:
-  - colonna sinistra: elenco aura con filtro/selezione
-  - colonna destra: editor completo dell'aura selezionata
-  - barra quick actions globale (lock, edit mode, compact, source, canale audio, threshold)
-- Moduli condivisi introdotti:
-  - `AuraLite/SettingsData.lua`: stato e CRUD watchlist, validazioni e mapping dati UI
-  - `AuraLite/UIComponents.lua`: factory riusabile per componenti UI (section, button, checkbox, input, dropdown)
-  - `AuraLite/SettingsUI.lua`: orchestrazione view modulare (create/edit)
-- Riutilizzo logica comune:
-  - `ConfigUI` ora usa `SettingsData:EnsureGroup()` quando disponibile.
-- Debug mode:
-  - nuovo modulo `AuraLite/DebugManager.lua`
-  - comando `/al debug` (`on|off|verbose`) per stampare in chat le operazioni interne.
-- Autocomplete spell:
-  - campo SpellID/Name in UI con suggerimenti dinamici (nome + ID, TAB per selezione rapida)
-  - fallback risoluzione nome tramite catalogo locale.
-- Nome aura opzionale:
-  - campo `Nome Aura (opzionale)` nell'editor
-  - usato per identificazione in lista e tooltip in-game.
-- Custom text + positioning:
-  - campo `Custom text (optional)` per aura con token dinamici
-  - positioning per-aura di timer e custom text (`Anchor` + `Offset X/Y`).
-- CD visual mode:
-  - per aura puoi scegliere `Icon` o `Bar` per il countdown.
-- Primary resource condition:
-  - per aura puoi abilitare condizione su risorsa primaria player con range `% Min/Max`.
-- Localizzazione UI:
-  - pannello `Localization` in quick actions
-  - lingua di default `English (Default)` con supporto `Italiano`.
-- UI moderna + texture custom:
-  - nuovo modulo condiviso `AuraLite/UISkin.lua`
-  - tema `Modern` (default) e `Classic` dal pannello `Localization / UI`
-  - campo `Custom UI texture (optional)` per personalizzare lo sfondo dei pannelli.
-- Editor a tab (stile WA-lite):
-  - tab `Aura`, `Trigger`, `Display`, `Actions` nel pannello dettagli aura.
-  - nel tab `Trigger` il builder regole usa sotto-tab `Trigger | Conditions | Actions`.
-- UX/UI revamp modulare:
-  - workspace mode `Auras | Editor | Split` con componente segmentato custom
-  - `Guided UI` per utenti meno esperti (nasconde campi avanzati)
-  - hint contestuali in alto e layout adattivo dei pannelli
-  - lista aura con larghezza dinamica per migliorare leggibilita
-  - pannello `Rules` in UI per creare/modificare/rimuovere regole senza slash command
-  - quick presets nel Rule Builder (`Show Aura`, `Show + Talent`, `Consume Aura`) per setup rapido
+## Highlights
 
-## Audio
+- Modern in-game editor with:
+  - aura library
+  - guided configuration flow
+  - live preview
+- Standalone auras and grouped auras
+- Group movers with shared layout and ordering
+- Icon, bar, and icon+bar display modes
+- Per-aura appearance controls
+- Import/export for single auras and groups
+- Synthetic proc/consume rules
+- Stackable aura logic
+- Reapply timer policies, including extend-to-cap
+- Local audio presets bundled with the addon
 
-Sono stati aggiunti preset base extra in `SoundManager` e 3 file audio locali:
+## Current UI Flow
+
+- Left panel:
+  - aura library
+  - search
+  - grouped and ungrouped organization
+- Center panel:
+  - `Tracking`
+  - `Appearance`
+  - `More Options`
+- Right panel:
+  - `Live Preview`
+
+Additional tools:
+- `Groups` panel for shared group layout and movers
+- `Global` panel for import and utility actions
+
+## Features
+
+### Tracking
+
+- Track buffs, debuffs, procs, and cast-driven synthetic auras
+- Confirmed and estimated tracking paths
+- Rule-based `show/produce` and `consume/hide`
+- Multi-spell triggers
+- Talent/resource/condition support
+
+### Appearance
+
+- Icon size
+- Bar width and height
+- Timer visibility
+- Bar color
+- Bar texture picker
+- Icon position relative to bar
+- Layout presets for quick setup
+
+### Groups
+
+- Shared mover per group
+- Shared direction, spacing, sort, wrap, and offsets
+- Export group directly from the group header in the aura library
+- Delete group container without deleting member auras
+
+### Import / Export
+
+- Export single aura from the editor
+- Export group from:
+  - the `Groups` panel
+  - the group header in the aura library
+- Import from a unified import panel
+- Payload type autodetection (`aura` or `group`)
+
+### Audio
+
+Bundled addon-local sounds:
 
 - `AuraLite/Media/Sounds/soft_ping.wav`
 - `AuraLite/Media/Sounds/bright_chime.wav`
 - `AuraLite/Media/Sounds/urgent_alarm.wav`
 
-I preset appaiono direttamente nei dropdown audio della UI.
+Custom file paths are also supported via:
 
-### Formati audio WoW (PlaySoundFile)
+`file:Interface\\AddOns\\AuraLite\\Media\\Sounds\\your_file.wav`
 
-In generale WoW gestisce bene file addon in `ogg/mp3` e in molti casi anche `wav`.
-Per file custom per-aura usa il formato token:
+## Slash Commands
 
-`file:Interface\\AddOns\\AuraLite\\Media\\Sounds\\nomefile.wav`
+- `/al`
+- `/al ui`
+- `/al config`
+  Opens or toggles the modern editor.
 
-## Struttura File Principali
+- `/al debug`
+- `/al debug on|off|verbose`
+  Controls debug logging.
 
-- `AuraLite/Core.lua`: bootstrap addon e slash command.
-- `AuraLite/ProfileManager.lua`: profili (manual/perSpec), export/import.
-- `AuraLite/AuraWatchlistRegistry.lua`: normalizzazione e indice watchlist.
-- `AuraLite/EventRouter.lua`: eventi WoW -> rebuild dati -> render.
-- `AuraLite/TrackerGroupManager.lua`: rendering icone/timer/glow e suoni runtime.
-- `AuraLite/SettingsUI.lua`: pannello settings modulare.
-- `AuraLite/UISkin.lua`: skin condivisa UI (tema + texture custom).
-- `docs/UX_UI_STUDY.md`: studio UX/UI, flussi e principi di design adottati.
-- `docs/AuraLite_Audit_and_Roadmap.md`: audit tecnico completo + roadmap implementativa API-safe.
-- `AuraLite/SpellCatalog.lua`: ricerca/autocomplete spell.
-- `AuraLite/SpellCatalogData.lua`: dataset locale generato da Wowhead.
-- `AuraLite/DebugManager.lua`: logging debug.
+- `/al examples warrior`
+  Installs or refreshes bundled warrior example auras for testing.
 
-## Uso Rapido
+Legacy slash handling still exists as fallback for older flows, but the modern V2 editor is the primary path.
 
-- `/al config` oppure `/al ui`: apre il pannello editor.
-- `/al lock` / `/al unlock`: blocca/sblocca drag gruppi.
-- `/al edit`: abilita/disabilita placeholder mode.
-- `/al sound`: toggle audio globale.
-- `/al debug`: toggle debug chat.
-- `/al debug on|off|verbose`: controllo esplicito debug.
+## Project Structure
 
-## Test
+- [F:\testAddon\AuraLite\Core.lua](F:\testAddon\AuraLite\Core.lua)
+  Addon bootstrap, slash routing, startup banner, event registration.
+- [F:\testAddon\AuraLite\EventRouter.lua](F:\testAddon\AuraLite\EventRouter.lua)
+  Runtime event processing, aura state rebuild, preview/runtime orchestration.
+- [F:\testAddon\AuraLite\TrackerGroupManager.lua](F:\testAddon\AuraLite\TrackerGroupManager.lua)
+  Runtime frame creation, group containers, layout, rendering.
+- [F:\testAddon\AuraLite\SettingsData.lua](F:\testAddon\AuraLite\SettingsData.lua)
+  Data model, CRUD, identity, group config, migrations.
+- [F:\testAddon\AuraLite\ProcRuleEngine.lua](F:\testAddon\AuraLite\ProcRuleEngine.lua)
+  Synthetic aura logic, consume rules, stack and reapply behavior.
+- [F:\testAddon\AuraLite\ImportExport.lua](F:\testAddon\AuraLite\ImportExport.lua)
+  Aura and group serialization/import logic.
+- [F:\testAddon\AuraLite\UI\Panels\ConfigFrame.lua](F:\testAddon\AuraLite\UI\Panels\ConfigFrame.lua)
+  Main editor shell.
+- [F:\testAddon\AuraLite\UI\Panels\AuraEditorPanel.lua](F:\testAddon\AuraLite\UI\Panels\AuraEditorPanel.lua)
+  Main aura editor.
+- [F:\testAddon\AuraLite\UI\Panels\AuraListPanel.lua](F:\testAddon\AuraLite\UI\Panels\AuraListPanel.lua)
+  Aura library and group headers.
+- [F:\testAddon\AuraLite\UI\Panels\GroupsPanel.lua](F:\testAddon\AuraLite\UI\Panels\GroupsPanel.lua)
+  Group management UI.
 
-Per eseguire la batteria di test Lua locale:
+## Tests
+
+Run the Lua test suite:
 
 `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`
 
-Per eseguire il gate di beta readiness con report:
+Run the beta readiness gate:
 
 `powershell -ExecutionPolicy Bypass -File .\run-beta-gate.ps1`
 
-La suite attuale copre soprattutto:
+The suite currently covers:
 
-- identita` stabile delle aura (`instanceUID`) su create/update/rebuild
-- persistenza posizione/saved state su update
-- gruppi: create, move, delete container, ordering
-- proc rules sintetiche: stack, decrement consume, extend-to-cap, expiry
-- import/export di aura singola e gruppi con riallocazione sicura degli ID locali
-- stress/stateful tests su sequenze ripetute di update/rebuild/group/ungroup
+- stable aura identity (`instanceUID`) on create/update/rebuild
+- position persistence and fallback state
+- group create/move/delete/reorder behavior
+- proc rule behavior:
+  - stack
+  - decrement consume
+  - extend-to-cap
+  - expiry
+- aura/group import-export round trips
+- release gate regression checks
 
-Il gate beta aggiunge anche:
+The beta gate also checks:
 
-- syntax check di tutti i file Lua dell'addon
-- report `GO / NO-GO` in `tests/out/beta-readiness-report.txt`
-- controllo base di hygiene sui log diagnostici temporanei
+- syntax of addon Lua files
+- debug hygiene
+- overall `GO / NO-GO` readiness
 
-L'idea e` usare test stateful e boundary-oriented sui punti piu` fragili del runtime, e poi completare con smoke test in-game per le API specifiche del client WoW.
+Latest expected outcome:
 
-## Packaging e Release
+- `14 passed, 0 failed`
+- `BETA READY: YES`
 
-Per creare uno zip beta locale:
+## Packaging
+
+Create a local beta zip:
 
 `powershell -ExecutionPolicy Bypass -File .\package.ps1 -Channel beta -Label beta1`
 
-Lo zip viene generato in `dist/` e contiene `AuraLite/` come root, pronto per distribuzione manuale.
+The package is written to `dist/` and contains `AuraLite/` as the zip root.
 
-Per la checklist di rilascio:
+Release helpers:
 
-- `docs/BETA_RELEASE_CHECKLIST.md`
+- [F:\testAddon\docs\BETA_RELEASE_CHECKLIST.md](F:\testAddon\docs\BETA_RELEASE_CHECKLIST.md)
+- [F:\testAddon\docs\RELEASE_TEXT_BETA.md](F:\testAddon\docs\RELEASE_TEXT_BETA.md)
+- [F:\testAddon\.pkgmeta](F:\testAddon\.pkgmeta)
 
-Per il testo base della release:
+Current safe beta package example:
 
-- `docs/RELEASE_TEXT_BETA.md`
+- [F:\testAddon\dist\AuraLite-0.1.0-beta-beta1-safe.zip](F:\testAddon\dist\AuraLite-0.1.0-beta-beta1-safe.zip)
 
-Per preparare auto-packaging tipo CurseForge/BigWigs packager:
+## Media and Licensing Notes
 
-- `.pkgmeta`
+The distributed addon package now includes only AuraLite-local bundled media and project dependencies needed for functionality.
 
-### Personalizzare texture UI
+No imported WeakAuras sound pack assets are included in the release package.
 
-1. Importa una texture in `AuraLite/Media/Custom`:
+If you publish on CurseForge and want a conservative default, use:
 
-`powershell -NoProfile -ExecutionPolicy Bypass -File .\import-texture.ps1 -SourcePath C:\path\myTexture.png`
+- License: `All Rights Reserved`
+- Distribution: disable third-party redistribution
 
-2. Apri `/al ui` -> `Localization / UI`.
-3. In `Custom UI texture (optional)` inserisci:
-   - nome corto (es. `myTexture`) oppure
-   - path completo WoW (es. `Interface\\AddOns\\AuraLite\\Media\\Custom\\myTexture`).
-4. Premi `Apply`.
+## Documentation
 
-### Token Custom Text
+- [F:\testAddon\docs\UX_UI_STUDY.md](F:\testAddon\docs\UX_UI_STUDY.md)
+- [F:\testAddon\docs\AuraLite_Audit_and_Roadmap.md](F:\testAddon\docs\AuraLite_Audit_and_Roadmap.md)
+- [F:\testAddon\docs\ui-ux-refactor-spec.md](F:\testAddon\docs\ui-ux-refactor-spec.md)
 
-Nel campo custom text puoi usare:
-
-- `{name}` nome aura personalizzato (fallback nome spell)
-- `{spell}` nome spell
-- `{stacks}` stack correnti
-- `{remaining}` tempo rimanente
-- `{duration}` durata base
-- `{source}` label source
-- `{unit}` unit monitorata
-
-## Aggiornare Catalogo Wowhead
-
-Per rigenerare il catalogo spell usato dall'autocomplete:
-
-`powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-wowhead-spells.ps1 -MaxEntries 6000`
-
-## Restrizioni API in Combat (Retail 12.x)
-
-- Blizzard ha introdotto `Secret Values` / `Restricted Actions`: in certi contesti i cooldown spell possono essere nascosti agli addon.
-- Quando `SecretCooldowns` è attivo, AuraLite non prova a leggere cooldown non consentiti (evita errori Lua e falsi positivi nel debug).
-- Se esiste uno storico cooldown per quella spell, AuraLite usa un fallback di stima (avvio su cast) finché la restrizione è attiva.
-- In questi casi può funzionare il tracking aura (buff/debuff), mentre il tracking cooldown spell può risultare parziale o non disponibile finché la restrizione resta attiva.
-
-## Proc/Consume Rule Engine
-
-- Trigger cast in combat via path sicuro:
-  - hook non-protetti (`CastSpellByID`, `CastSpellByName`, `UseAction`, `C_Spell.CastSpell`)
-  - conferma tentativi via cooldown/GCD edge polling (close-enough, taint-safe)
-- Motore regole in `AuraLite/ProcRuleEngine.lua`:
-  - `ifAll` conditions con logica `AND/OR`
-  - liste multi-clausola CSV su cast/talent/required-aura
-  - `thenActions` / `elseActions`
-  - azioni `showAura`, `hideAura`, `decrementAura`
-  - regole custom salvate nel profilo: `ns.db.procRules`
-- Modalita consigliata: `Rules Only` (default ON) per usare solo il motore regole come source di attivazione aura.
-- Comandi rapidi:
-  - `/al rule list`
-  - `/al rule addif <id> <castSpellID> <talentSpellID> <auraSpellID> <durationSec>`
-  - `/al rule addconsume <id> <castSpellID> <auraSpellID>`
-  - `/al rule remove <id>`
-  - `/al rule clear`
-- Esempio Phalanx:
-  - `/al rule addif phalanx_show 6343 1278009 1278009 8`
-  - `/al rule addconsume phalanx_consume 23922 1278009`
-
-## Note Dev
-
-L'ordine di load nel `.toc` e stato aggiornato per caricare i moduli condivisi prima di `SettingsUI`.
