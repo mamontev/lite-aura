@@ -97,6 +97,18 @@ local function normalizeProduceTriggers(value, fallbackCSV, fallbackStackAmount)
   return out
 end
 
+local function cloneProduceTriggers(value, fallbackCSV, fallbackStackAmount)
+  local triggers = normalizeProduceTriggers(value, fallbackCSV, fallbackStackAmount)
+  local out = {}
+  for i = 1, #triggers do
+    out[#out + 1] = {
+      spellID = tonumber(triggers[i].spellID) or 0,
+      stackAmount = math.max(1, tonumber(triggers[i].stackAmount) or 1),
+    }
+  end
+  return out
+end
+
 local function normalizeTrackingMode(value, unit)
   local mode = tostring(value or ""):lower()
   unit = tostring(unit or "player")
@@ -195,9 +207,9 @@ function B:DraftFromEditableModel(model)
     requiredAuraSpellIDs = "",
     inCombatOnly = model.inCombatOnly == true,
     actionMode = "produce",
-    duration = tonumber(model.estimatedDuration) and math.max(1, tonumber(model.estimatedDuration)) or 8,
+    duration = tonumber(model.duration) and math.max(1, tonumber(model.duration)) or (tonumber(model.estimatedDuration) and math.max(1, tonumber(model.estimatedDuration)) or 8),
     estimatedDuration = tonumber(model.estimatedDuration) or 8,
-    timerBehavior = "reset",
+    timerBehavior = tostring(model.timerBehavior or "reset"),
     maxDuration = tonumber(model.maxDuration) or 0,
     stackBehavior = tostring(model.stackBehavior or "replace"),
     stackAmount = tonumber(model.stackAmount) or 1,
@@ -232,7 +244,7 @@ function B:DraftFromEditableModel(model)
     customTextAnchor = tostring(model.customTextAnchor or "TOP"),
     customTextOffsetX = tonumber(model.customTextOffsetX) or 0,
     customTextOffsetY = tonumber(model.customTextOffsetY) or 2,
-    produceTriggers = {},
+    produceTriggers = cloneProduceTriggers(model.produceTriggers, model.castSpellIDs, model.stackAmount),
     resourceConditionEnabled = model.resourceConditionEnabled == true,
     resourceMinPct = tonumber(model.resourceMinPct) or 0,
     resourceMaxPct = tonumber(model.resourceMaxPct) or 100,
@@ -316,6 +328,7 @@ function B:ToSettingsDataModel(draft)
     trackingMode = normalizeTrackingMode(draft.trackingMode, normalizedUnit),
     castSpellIDs = parseCSVNumbers(draft.castSpellIDs),
     estimatedDuration = tonumber(draft.estimatedDuration or draft.duration) or 8,
+    duration = tonumber(draft.duration or draft.estimatedDuration) or 8,
     groupID = trim(draft.groupID or draft.group),
     groupName = trim(draft.groupName),
     groupDirection = tostring(draft.groupDirection or "RIGHT"),
@@ -360,6 +373,9 @@ function B:ToSettingsDataModel(draft)
     stackAmount = tonumber(draft.stackAmount) or 1,
     maxStacks = tonumber(draft.maxStacks) or 1,
     consumeBehavior = tostring(draft.consumeBehavior or "hide"),
+    timerBehavior = tostring(draft.timerBehavior or "reset"),
+    maxDuration = tonumber(draft.maxDuration) or 0,
+    produceTriggers = cloneProduceTriggers(draft.produceTriggers, draft.castSpellIDs, draft.stackAmount),
   }
 end
 

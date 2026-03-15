@@ -94,9 +94,15 @@ local function produceTriggerLabel(draft)
       local name = resolveSpellName(spellID) or ("Spell " .. tostring(spellID))
       local amount = math.max(1, tonumber(type(row) == "table" and row.stackAmount or 1) or 1)
       if (tonumber(draft.maxStacks) or 1) > 1 or tostring(draft.stackBehavior or "replace") == "add" then
-        parts[#parts + 1] = string.format("%s (+%d)", name, amount)
+        if amount == 1 then
+          parts[#parts + 1] = string.format("%s gives 1 charge", name)
+        else
+          parts[#parts + 1] = string.format("%s gives %d charges", name, amount)
+        end
+      elseif tostring(draft.timerBehavior or "reset") == "extend" then
+        parts[#parts + 1] = string.format("%s refreshes the timer", name)
       else
-        parts[#parts + 1] = name
+        parts[#parts + 1] = string.format("%s gives the aura", name)
       end
     end
   end
@@ -119,7 +125,12 @@ local function ruleNarrative(draft)
   local mode = tostring(draft.actionMode or "produce")
   local cast = (mode == "consume") and spellListLabel(draft.consumeCastSpellIDs or draft.castSpellIDs) or produceTriggerLabel(draft)
   local auraName = auraLabel(draft.spellID)
-  local thenText = mode == "consume" and ("use a charge from " .. auraName) or ("show " .. auraName)
+  local thenText
+  if mode == "consume" then
+    thenText = ((tostring(draft.consumeBehavior or "hide") == "decrement") and ("spend one charge from " .. auraName) or ("consume " .. auraName))
+  else
+    thenText = ("show " .. auraName)
+  end
   if hasExtraConditions(draft) then
     local cond = (tostring(draft.conditionLogic or "all") == "any") and "any" or "all"
     return string.format("When %s, if %s extra conditions pass, %s.", cast, cond, thenText)
@@ -140,7 +151,9 @@ function RuleBuilder:SetDraft(draft)
   end
   if self.thenValue then
     local auraName = auraLabel(self.draft.spellID)
-    local text = (tostring(self.draft.actionMode or "produce") == "consume") and ("Spend from " .. auraName) or ("Show " .. auraName)
+    local text = (tostring(self.draft.actionMode or "produce") == "consume")
+      and (((tostring(self.draft.consumeBehavior or "hide") == "decrement") and "Spend 1 Charge") or "Consume Aura")
+      or ("Show " .. auraName)
     self.thenValue:SetText(text)
   end
   if self.whenBox and self.thenBox then

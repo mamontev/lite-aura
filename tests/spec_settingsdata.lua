@@ -109,6 +109,40 @@ suite:case("Stack metadata survives watch item roundtrip across reload-style reb
   T.equal(editable.consumeBehavior, "decrement")
 end)
 
+suite:case("Synthetic tracking roundtrip preserves duration and per-trigger stack amounts", function()
+  local env, ns = makeEnv()
+  local D = ns.SettingsData
+  local key = assert(D:AddEntry(env.makeModel({
+    spellInput = 260240,
+    displayName = "Precise Shots",
+    duration = 15,
+    estimatedDuration = 15,
+    timerBehavior = "reset",
+    maxDuration = 0,
+    stackBehavior = "add",
+    stackAmount = 2,
+    maxStacks = 2,
+    produceTriggers = {
+      { spellID = 19434, stackAmount = 2 },
+      { spellID = 257044, stackAmount = 1 },
+    },
+    castSpellIDs = { 19434, 257044 },
+  })))
+
+  ns:RebuildWatchIndex()
+
+  local editable = D:BuildEditableModel(assert(D:ResolveEntry(key)))
+  T.equal(editable.duration, 15)
+  T.equal(editable.estimatedDuration, 15)
+  T.equal(editable.timerBehavior, "reset")
+  T.equal(editable.maxDuration, 0)
+  T.equal(#(editable.produceTriggers or {}), 2)
+  T.equal(tonumber(editable.produceTriggers[1].spellID), 19434)
+  T.equal(tonumber(editable.produceTriggers[1].stackAmount), 2)
+  T.equal(tonumber(editable.produceTriggers[2].spellID), 257044)
+  T.equal(tonumber(editable.produceTriggers[2].stackAmount), 1)
+end)
+
 suite:case("DeleteGroup removes only the container and leaves children standalone", function()
   local env, ns = makeEnv()
   local D = ns.SettingsData

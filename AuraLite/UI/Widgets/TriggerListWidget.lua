@@ -68,6 +68,24 @@ local function getTriggerTimingLabel(spellID)
   return "On successful cast"
 end
 
+local function getTriggerBehaviorLabel(draft, row, stackable)
+  local amount = math.max(1, tonumber(row and row.stackAmount) or 1)
+  local timerBehavior = tostring(draft and draft.timerBehavior or "reset")
+  if stackable then
+    if amount == 1 then
+      return "This spell gives 1 charge."
+    end
+    return string.format("This spell gives %d charges.", amount)
+  end
+  if timerBehavior == "extend" then
+    return "This spell refreshes and extends the timer."
+  end
+  if timerBehavior == "keep" then
+    return "This spell refreshes the aura without shortening it."
+  end
+  return "This spell gives or refreshes the aura."
+end
+
 local function normalizeProduceTriggers(draft)
   if UI and UI.Bindings and UI.Bindings.GetProduceTriggers then
     return UI.Bindings:GetProduceTriggers(draft)
@@ -209,12 +227,7 @@ function TriggerList:Render()
       else
         timingText:SetText("Enter a SpellID or shift-click a spell.")
       end
-      if stackable then
-        local amount = math.max(1, tonumber(row.stackAmount) or 1)
-        summaryText:SetText(string.format("%s gives %d charge(s)", name, amount))
-      else
-        summaryText:SetText(string.format("%s shows or refreshes this aura", name))
-      end
+      summaryText:SetText(getTriggerBehaviorLabel(self.draft, row, stackable))
     end
 
     spellBox:SetScript("OnTextChanged", function(_, userInput)

@@ -294,6 +294,47 @@ local function setTabVisual(btn, active)
   end
 end
 
+local function createPresetButton(parent, width, xOffset, label, sublabel, active, onClick)
+  local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+  createCardBackdrop(btn)
+  btn:SetSize(width, 56)
+  btn:SetPoint("TOPLEFT", xOffset, -26)
+
+  btn.label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  btn.label:SetPoint("TOPLEFT", 10, -7)
+  btn.label:SetPoint("RIGHT", -8, 0)
+  btn.label:SetJustifyH("LEFT")
+  btn.label:SetJustifyV("TOP")
+  btn.label:SetText(label or "")
+
+  btn.sub = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  btn.sub:SetPoint("TOPLEFT", 10, -23)
+  btn.sub:SetPoint("RIGHT", -8, 0)
+  btn.sub:SetJustifyH("LEFT")
+  btn.sub:SetJustifyV("TOP")
+  btn.sub:SetWordWrap(true)
+  btn.sub:SetText(sublabel or "")
+
+  btn:SetScript("OnMouseDown", onClick)
+  if Skin and Skin.ApplyClickableRow then
+    Skin:ApplyClickableRow(btn, "row")
+    if Skin.SetClickableRowState then
+      Skin:SetClickableRowState(btn, active and "selected" or "normal")
+    end
+  end
+  btn:SetScript("OnEnter", function(selfBtn)
+    if Skin and Skin.SetClickableRowState then
+      Skin:SetClickableRowState(selfBtn, "hover")
+    end
+  end)
+  btn:SetScript("OnLeave", function(selfBtn)
+    if Skin and Skin.SetClickableRowState then
+      Skin:SetClickableRowState(selfBtn, active and "selected" or "normal")
+    end
+  end)
+  return btn
+end
+
 local LIVE_PREVIEW_FIELDS = {
   name = true,
   displayName = true,
@@ -1030,8 +1071,8 @@ function AuraEditorPanel:RenderConsumeBehaviorCard(y)
   local card = createCard(
     self.content,
     y,
-    "Spending Charges",
-    "Choose whether the spender clears the whole aura or uses one charge at a time.",
+    "Spender Trigger",
+    "Use this for the spell that should spend a charge or clear the aura.",
     94
   )
   self.fieldWidgets[#self.fieldWidgets + 1] = card
@@ -1065,7 +1106,7 @@ function AuraEditorPanel:RenderConsumeBehaviorCard(y)
   hint:SetPoint("TOPLEFT", 2, -24)
   hint:SetPoint("RIGHT", -2, 0)
   hint:SetJustifyH("LEFT")
-  hint:SetText(toggle:GetChecked() and "Best for buffs like Precise Shots, where each spender uses one charge." or "Use this for buffs that should disappear completely when consumed.")
+  hint:SetText(toggle:GetChecked() and "Preset: This spell spends one charge." or "Preset: This spell consumes the whole aura.")
   self.fieldWidgets[#self.fieldWidgets + 1] = hint
 
   card.content:SetHeight(46)
@@ -1224,101 +1265,112 @@ function AuraEditorPanel:RenderTab(tabKey)
 
   if tabKey == "Tracking" then
     local presetFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
-    createBackdrop(presetFrame)
-    presetFrame:SetHeight(64)
+    createCardBackdrop(presetFrame)
+    presetFrame:SetHeight(122)
     presetFrame:SetPoint("TOPLEFT", 12, y)
     presetFrame:SetPoint("RIGHT", -14, 0)
 
     local presetLabel = presetFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     presetLabel:SetPoint("TOPLEFT", 10, -8)
-    presetLabel:SetText("Choose the kind of aura you want to build")
+    presetLabel:SetText("Start From The Behavior")
+
+    local presetHint = presetFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    presetHint:SetPoint("TOPLEFT", 10, -26)
+    presetHint:SetPoint("RIGHT", -10, 0)
+    presetHint:SetJustifyH("LEFT")
+    presetHint:SetText("Pick where this aura lives first. Then choose what your spells do with it.")
 
     local activePreset = inferTrackingPreset(self.draft)
-    local btnPlayer = CreateFrame("Button", nil, presetFrame, "UIPanelButtonTemplate")
-    btnPlayer:SetSize(150, 24)
-    btnPlayer:SetPoint("BOTTOMLEFT", 10, 8)
-    btnPlayer:SetText("Buff / Proc On Me")
-    if Skin and Skin.ApplyButton then
-      Skin:SetButtonVariant(btnPlayer, "segment")
-    end
-    setTabVisual(btnPlayer, activePreset == "buff_player")
-    btnPlayer:SetScript("OnClick", function()
-      self:ApplyTrackingPreset("buff_player")
-    end)
+    local btnPlayer = createPresetButton(
+      presetFrame,
+      156,
+      10,
+      "Appears On Me",
+      "Buff / proc on your character",
+      activePreset == "buff_player",
+      function()
+        self:ApplyTrackingPreset("buff_player")
+      end
+    )
 
-    local btnDebuff = CreateFrame("Button", nil, presetFrame, "UIPanelButtonTemplate")
-    btnDebuff:SetSize(150, 24)
-    btnDebuff:SetPoint("LEFT", btnPlayer, "RIGHT", 8, 0)
-    btnDebuff:SetText("Debuff I Apply")
-    if Skin and Skin.ApplyButton then
-      Skin:SetButtonVariant(btnDebuff, "segment")
-    end
-    setTabVisual(btnDebuff, activePreset == "debuff_target")
-    btnDebuff:SetScript("OnClick", function()
-      self:ApplyTrackingPreset("debuff_target")
-    end)
+    local btnDebuff = createPresetButton(
+      presetFrame,
+      156,
+      174,
+      "Appears On Target",
+      "You create a timer with your casts",
+      activePreset == "debuff_target",
+      function()
+        self:ApplyTrackingPreset("debuff_target")
+      end
+    )
 
-    local btnTarget = CreateFrame("Button", nil, presetFrame, "UIPanelButtonTemplate")
-    btnTarget:SetSize(150, 24)
-    btnTarget:SetPoint("LEFT", btnDebuff, "RIGHT", 8, 0)
-    btnTarget:SetText("Aura On Target")
-    if Skin and Skin.ApplyButton then
-      Skin:SetButtonVariant(btnTarget, "segment")
-    end
-    setTabVisual(btnTarget, activePreset == "target_aura")
-    btnTarget:SetScript("OnClick", function()
-      self:ApplyTrackingPreset("target_aura")
-    end)
+    local btnTarget = createPresetButton(
+      presetFrame,
+      156,
+      338,
+      "Read From Target",
+      "Track the live aura directly",
+      activePreset == "target_aura",
+      function()
+        self:ApplyTrackingPreset("target_aura")
+      end
+    )
 
     self.fieldWidgets[#self.fieldWidgets + 1] = presetFrame
     self.fieldWidgets[#self.fieldWidgets + 1] = btnPlayer
     self.fieldWidgets[#self.fieldWidgets + 1] = btnDebuff
     self.fieldWidgets[#self.fieldWidgets + 1] = btnTarget
-    y = y - 72
+    y = y - 138
 
     if tostring(self.draft.unit or "player") == "target" then
       local modeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
-      createBackdrop(modeFrame)
-      modeFrame:SetHeight(60)
+      createCardBackdrop(modeFrame)
+      modeFrame:SetHeight(88)
       modeFrame:SetPoint("TOPLEFT", 12, y)
       modeFrame:SetPoint("RIGHT", -14, 0)
 
       local modeLabel = modeFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
       modeLabel:SetPoint("TOPLEFT", 10, -8)
-      modeLabel:SetText("How should AuraLite track this target aura?")
+      modeLabel:SetText("Choose How Target Tracking Works")
 
-      local btnConfirmed = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
-      btnConfirmed:SetSize(172, 24)
-      btnConfirmed:SetPoint("BOTTOMLEFT", 10, 8)
-      btnConfirmed:SetText("Read Live Aura")
-      if Skin and Skin.ApplyButton then
-        Skin:SetButtonVariant(btnConfirmed, "segment")
-      end
+      local btnConfirmed = createPresetButton(
+        modeFrame,
+        188,
+        10,
+        "Read The Live Aura",
+        "Best when Blizzard exposes it directly",
+        not isEstimatedTargetTracking(self.draft),
+        function()
+          self:OnFieldChanged("trackingMode", "confirmed")
+        end
+      )
 
-      local btnEstimated = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
-      btnEstimated:SetSize(200, 24)
-      btnEstimated:SetPoint("LEFT", btnConfirmed, "RIGHT", 8, 0)
-      btnEstimated:SetText("Estimate From My Cast")
-      if Skin and Skin.ApplyButton then
-        Skin:SetButtonVariant(btnEstimated, "segment")
-      end
+      local btnEstimated = createPresetButton(
+        modeFrame,
+        208,
+        206,
+        "Estimate From My Cast",
+        "Start a local timer when you apply it",
+        isEstimatedTargetTracking(self.draft),
+        function()
+          self:OnFieldChanged("trackingMode", "estimated")
+        end
+      )
 
       local function refreshTrackingButtons()
         local estimated = isEstimatedTargetTracking(self.draft)
-        setTabVisual(btnConfirmed, not estimated)
-        setTabVisual(btnEstimated, estimated)
+        if Skin and Skin.SetClickableRowState then
+          Skin:SetClickableRowState(btnConfirmed, (not estimated) and "selected" or "normal")
+          Skin:SetClickableRowState(btnEstimated, estimated and "selected" or "normal")
+        end
       end
-
-      btnConfirmed:SetScript("OnClick", function()
-        self:OnFieldChanged("trackingMode", "confirmed")
-      end)
-      btnEstimated:SetScript("OnClick", function()
-        self:OnFieldChanged("trackingMode", "estimated")
-      end)
       refreshTrackingButtons()
 
       self.fieldWidgets[#self.fieldWidgets + 1] = modeFrame
-      y = y - 68
+      self.fieldWidgets[#self.fieldWidgets + 1] = btnConfirmed
+      self.fieldWidgets[#self.fieldWidgets + 1] = btnEstimated
+      y = y - 104
     end
 
     if isEstimatedTargetTracking(self.draft) then
@@ -1342,6 +1394,54 @@ function AuraEditorPanel:RenderTab(tabKey)
       self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
       y = y - 102
     elseif Widgets.RuleBuilderWidget and Widgets.RuleBuilderWidget.Create then
+      local quickModeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
+      createCardBackdrop(quickModeFrame)
+      quickModeFrame:SetHeight(88)
+      quickModeFrame:SetPoint("TOPLEFT", 12, y)
+      quickModeFrame:SetPoint("RIGHT", -14, 0)
+
+      local quickModeLabel = quickModeFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+      quickModeLabel:SetPoint("TOPLEFT", 10, -8)
+      quickModeLabel:SetText("Choose What Your Spell Does")
+
+      local isConsumeMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "consume"
+      local btnGive = createPresetButton(
+        quickModeFrame,
+        188,
+        10,
+        "This Spell Gives The Aura",
+        "Use for procs, buffs and refreshes",
+        not isConsumeMode,
+        function()
+          self:ApplyRuleMode("produce")
+          if S and S.SetDirty then
+            S:SetDirty(true)
+          end
+          self:RenderTab("Tracking")
+        end
+      )
+      local btnSpend = createPresetButton(
+        quickModeFrame,
+        208,
+        206,
+        "This Spell Spends 1 Charge",
+        "Use for spenders like Arcane Shot",
+        isConsumeMode and tostring(self.draft.consumeBehavior or "hide") == "decrement",
+        function()
+          self:ApplyRuleMode("consume")
+          self.draft.consumeBehavior = "decrement"
+          if S and S.SetDirty then
+            S:SetDirty(true)
+          end
+          self:RenderTab("Tracking")
+        end
+      )
+
+      self.fieldWidgets[#self.fieldWidgets + 1] = quickModeFrame
+      self.fieldWidgets[#self.fieldWidgets + 1] = btnGive
+      self.fieldWidgets[#self.fieldWidgets + 1] = btnSpend
+      y = y - 104
+
       local modeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
       createBackdrop(modeFrame)
       modeFrame:SetHeight(34)
