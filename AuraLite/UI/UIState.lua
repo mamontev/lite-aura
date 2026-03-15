@@ -15,6 +15,7 @@ S._data = S._data or {
     search = "",
     unit = "all",
     group = "all",
+    listScope = "all",
   },
   preview = {
     playing = false,
@@ -114,6 +115,7 @@ function S:ResetFilters()
   self._data.filters.search = ""
   self._data.filters.unit = "all"
   self._data.filters.group = "all"
+  self._data.filters.listScope = "all"
   if E then
     E:Emit(E.Names.FILTER_CHANGED, { key = "*", value = nil, filters = shallowCopy(self._data.filters) })
     E:Emit(E.Names.STATE_CHANGED, self:Get())

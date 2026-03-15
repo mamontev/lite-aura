@@ -51,6 +51,52 @@ local function firstNumber(value)
   return tonumber(value)
 end
 
+local function normalizeProduceTriggers(value, fallbackCSV, fallbackStackAmount)
+  local out, seen = {}, {}
+  local hadExplicitRows = false
+
+  if type(value) == "table" then
+    hadExplicitRows = #value > 0
+    for i = 1, #value do
+      local row = value[i]
+      local spellID = tonumber(type(row) == "table" and (row.spellID or row.id) or row)
+      if spellID and spellID > 0 then
+        if not seen[spellID] then
+          seen[spellID] = true
+          out[#out + 1] = {
+            spellID = spellID,
+            stackAmount = math.max(1, tonumber(type(row) == "table" and row.stackAmount or fallbackStackAmount) or 1),
+          }
+        end
+      else
+        out[#out + 1] = {
+          spellID = 0,
+          stackAmount = math.max(1, tonumber(type(row) == "table" and row.stackAmount or fallbackStackAmount) or 1),
+        }
+      end
+    end
+  end
+
+  if hadExplicitRows then
+    return out
+  end
+
+  local fallbackIDs = parseCSVNumbers(fallbackCSV)
+  local defaultAmount = math.max(1, tonumber(fallbackStackAmount) or 1)
+  for i = 1, #fallbackIDs do
+    local spellID = tonumber(fallbackIDs[i])
+    if spellID and spellID > 0 and not seen[spellID] then
+      seen[spellID] = true
+      out[#out + 1] = {
+        spellID = spellID,
+        stackAmount = defaultAmount,
+      }
+    end
+  end
+
+  return out
+end
+
 local function normalizeTrackingMode(value, unit)
   local mode = tostring(value or ""):lower()
   unit = tostring(unit or "player")
@@ -149,14 +195,14 @@ function B:DraftFromEditableModel(model)
     requiredAuraSpellIDs = "",
     inCombatOnly = model.inCombatOnly == true,
     actionMode = "produce",
-    duration = tonumber(model.lowTimeThreshold) and math.max(1, tonumber(model.lowTimeThreshold)) or 8,
+    duration = tonumber(model.estimatedDuration) and math.max(1, tonumber(model.estimatedDuration)) or 8,
     estimatedDuration = tonumber(model.estimatedDuration) or 8,
     timerBehavior = "reset",
     maxDuration = tonumber(model.maxDuration) or 0,
-    stackBehavior = "replace",
-    stackAmount = 1,
-    maxStacks = 1,
-    consumeBehavior = "hide",
+    stackBehavior = tostring(model.stackBehavior or "replace"),
+    stackAmount = tonumber(model.stackAmount) or 1,
+    maxStacks = tonumber(model.maxStacks) or 1,
+    consumeBehavior = tostring(model.consumeBehavior or "hide"),
     displayMode = tostring(model.timerVisual or "icon"),
     lowTime = tonumber(model.lowTimeThreshold) or 0,
     soundOnShow = tostring(model.soundOnGain or "default"),
@@ -186,6 +232,7 @@ function B:DraftFromEditableModel(model)
     customTextAnchor = tostring(model.customTextAnchor or "TOP"),
     customTextOffsetX = tonumber(model.customTextOffsetX) or 0,
     customTextOffsetY = tonumber(model.customTextOffsetY) or 2,
+    produceTriggers = {},
     resourceConditionEnabled = model.resourceConditionEnabled == true,
     resourceMinPct = tonumber(model.resourceMinPct) or 0,
     resourceMaxPct = tonumber(model.resourceMaxPct) or 100,
@@ -240,9 +287,22 @@ function B:NewDraft(auraId)
     showTimerText = true,
     barColor = "",
     barSide = "right",
+    produceTriggers = {},
     notes = "",
     debug = false,
   }
+end
+
+function B:GetProduceTriggers(draft)
+  draft = draft or {}
+  local triggers = normalizeProduceTriggers(draft.produceTriggers, draft.castSpellIDs, draft.stackAmount)
+  draft.produceTriggers = triggers
+  local ids = {}
+  for i = 1, #triggers do
+    ids[#ids + 1] = triggers[i].spellID
+  end
+  draft.castSpellIDs = toCSV(ids)
+  return triggers
 end
 
 function B:ToSettingsDataModel(draft)
@@ -296,6 +356,10 @@ function B:ToSettingsDataModel(draft)
     soundOnLow = draft.soundOnLow or "default",
     soundOnExpire = draft.soundOnExpire or "none",
     groupOrder = tonumber(draft.groupOrder) or 0,
+    stackBehavior = tostring(draft.stackBehavior or "replace"),
+    stackAmount = tonumber(draft.stackAmount) or 1,
+    maxStacks = tonumber(draft.maxStacks) or 1,
+    consumeBehavior = tostring(draft.consumeBehavior or "hide"),
   }
 end
 
@@ -304,7 +368,9 @@ function B:ToRuleModel(draft, auraSpellID)
     return nil
   end
 
-  local castIDs = parseCSVNumbers(draft and draft.castSpellIDs)
+  local mode = (tostring(draft and draft.actionMode or "produce") == "consume") and "consume" or "produce"
+  local castSource = (mode == "consume") and (draft and draft.consumeCastSpellIDs or draft and draft.castSpellIDs) or (draft and draft.castSpellIDs)
+  local castIDs = parseCSVNumbers(castSource)
   if #castIDs == 0 then
     local n = firstNumber(draft and draft.spellID)
     if n and n > 0 then
@@ -317,7 +383,6 @@ function B:ToRuleModel(draft, auraSpellID)
     return nil
   end
 
-  local mode = (tostring(draft and draft.actionMode or "produce") == "consume") and "consume" or "produce"
   local baseID = trim((draft and draft.ruleID) or "")
   if baseID == "" then
     baseID = string.format("ui2_%d", auraID)
@@ -347,6 +412,60 @@ function B:ToRuleModel(draft, auraSpellID)
     actionMode = mode,
     idBase = baseID,
   }
+end
+
+function B:BuildProduceRuleModels(draft, auraSpellID)
+  if self:IsDirectAuraTracking(draft) or self:IsEstimatedTargetDebuffTracking(draft) then
+    return {}
+  end
+
+  local auraID = tonumber(auraSpellID) or firstNumber(draft and draft.spellID)
+  if not auraID or auraID <= 0 then
+    return {}
+  end
+
+  local baseID = trim((draft and draft.ruleID) or "")
+  if baseID == "" then
+    baseID = string.format("ui2_%d", auraID)
+  else
+    baseID = baseID:gsub("_produce$", ""):gsub("_consume$", ""):gsub("_produce_%d+$", "")
+  end
+
+  local triggers = self:GetProduceTriggers(draft)
+  if #triggers == 0 then
+    return {}
+  end
+
+  local models = {}
+  for i = 1, #triggers do
+    local trigger = triggers[i]
+    local spellID = tonumber(trigger.spellID)
+    if spellID and spellID > 0 then
+      models[#models + 1] = {
+        id = string.format("%s_produce_%d", baseID, spellID),
+        name = trim((draft and draft.ruleName) or (draft and draft.name) or ""),
+        castSpellIDs = { spellID },
+        auraSpellID = auraID,
+        duration = tonumber(draft and draft.duration) or 8,
+        timerBehavior = tostring(draft and draft.timerBehavior or "reset"),
+        maxDuration = tonumber(draft and draft.maxDuration) or 0,
+        stackBehavior = tostring(draft and draft.stackBehavior or "replace"),
+        stackAmount = math.max(1, tonumber(trigger.stackAmount) or tonumber(draft and draft.stackAmount) or 1),
+        maxStacks = tonumber(draft and draft.maxStacks) or 1,
+        consumeBehavior = tostring(draft and draft.consumeBehavior or "hide"),
+        conditionMode = (tostring(draft and draft.conditionLogic or "all") == "any") and "any" or "all",
+        loadClassToken = trim((draft and draft.loadClassToken) or ""):upper(),
+        loadSpecIDs = parseCSVNumbers(draft and draft.loadSpecID),
+        talentSpellIDs = parseCSVNumbers(draft and draft.talentSpellIDs),
+        requiredAuraSpellIDs = parseCSVNumbers(draft and draft.requiredAuraSpellIDs),
+        requireInCombat = draft and draft.inCombatOnly == true,
+        actionMode = "produce",
+        idBase = baseID,
+      }
+    end
+  end
+
+  return models
 end
 
 function B:ApplyRuleToDraft(draft, rule)
@@ -418,6 +537,74 @@ function B:ApplyRuleToDraft(draft, rule)
   draft.talentSpellIDs = toCSV(talents)
   draft.requiredAuraSpellIDs = toCSV(reqAuras)
   draft.inCombatOnly = requireCombat
+  return draft
+end
+
+function B:ApplyRulesToDraft(draft, rules)
+  if type(draft) ~= "table" then
+    return draft
+  end
+
+  rules = type(rules) == "table" and rules or {}
+  local produceRules, consumeRule = {}, nil
+  for i = 1, #rules do
+    local rule = rules[i]
+    local action = (type(rule.thenActions) == "table" and rule.thenActions[1] and tostring(rule.thenActions[1].type or ""):lower()) or ""
+    if action == "showaura" then
+      produceRules[#produceRules + 1] = rule
+    elseif (action == "hideaura" or action == "decrementaura") and not consumeRule then
+      consumeRule = rule
+    end
+  end
+
+  table.sort(produceRules, function(a, b)
+    return tostring(a.id or "") < tostring(b.id or "")
+  end)
+
+  if #produceRules > 0 then
+    self:ApplyRuleToDraft(draft, produceRules[1])
+    local triggers = {}
+    for i = 1, #produceRules do
+      local rule = produceRules[i]
+      local thenAction = type(rule.thenActions) == "table" and rule.thenActions[1] or nil
+      local spellIDs = rule.eventSpellIDs or {}
+      local spellID = tonumber(spellIDs[1] or rule.eventSpellID)
+      if spellID and spellID > 0 then
+        triggers[#triggers + 1] = {
+          spellID = spellID,
+          stackAmount = math.max(1, tonumber(thenAction and (thenAction.stackAmount or thenAction.stacks)) or 1),
+        }
+      end
+    end
+    draft.produceTriggers = triggers
+    local ids = {}
+    for i = 1, #triggers do
+      ids[#ids + 1] = triggers[i].spellID
+    end
+    draft.castSpellIDs = toCSV(ids)
+    draft.actionMode = "produce"
+  else
+    draft.produceTriggers = {}
+  end
+
+  if consumeRule then
+    local spellIDs = consumeRule.eventSpellIDs or {}
+    local consumeIDs = {}
+    for i = 1, #spellIDs do
+      local spellID = tonumber(spellIDs[i])
+      if spellID and spellID > 0 then
+        consumeIDs[#consumeIDs + 1] = tostring(spellID)
+      end
+    end
+    if #consumeIDs == 0 and tonumber(consumeRule.eventSpellID) then
+      consumeIDs[1] = tostring(tonumber(consumeRule.eventSpellID))
+    end
+    draft.consumeCastSpellIDs = toCSV(consumeIDs)
+    local action = type(consumeRule.thenActions) == "table" and consumeRule.thenActions[1] or nil
+    local actionType = tostring(action and action.type or ""):lower()
+    draft.consumeBehavior = (actionType == "decrementaura") and "decrement" or "hide"
+  end
+
   return draft
 end
 

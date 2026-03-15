@@ -1,7 +1,9 @@
 local specFiles = {
   "tests/spec_settingsdata.lua",
   "tests/spec_procrules.lua",
+  "tests/spec_eventrouter.lua",
   "tests/spec_importexport.lua",
+  "tests/spec_rule_repository.lua",
   "tests/spec_release_gate.lua",
 }
 

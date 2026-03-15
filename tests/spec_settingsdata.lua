@@ -81,6 +81,34 @@ suite:case("Registry rebuild preserves modern watch item fields", function()
   T.same(after.item.loadSpecIDs, { 73 })
 end)
 
+suite:case("Stack metadata survives watch item roundtrip across reload-style rebuild", function()
+  local env, ns = makeEnv()
+  local D = ns.SettingsData
+  local key = assert(D:AddEntry(env.makeModel({
+    spellInput = 260240,
+    displayName = "Precise Shots",
+    stackBehavior = "add",
+    stackAmount = 2,
+    maxStacks = 2,
+    consumeBehavior = "decrement",
+    castSpellIDs = { 19434, 257044 },
+  })))
+
+  local before = assert(D:ResolveEntry(key))
+  T.equal(before.item.stackBehavior, "add")
+  T.equal(before.item.stackAmount, 2)
+  T.equal(before.item.maxStacks, 2)
+  T.equal(before.item.consumeBehavior, "decrement")
+
+  ns:RebuildWatchIndex()
+
+  local editable = D:BuildEditableModel(assert(D:ResolveEntry(key)))
+  T.equal(editable.stackBehavior, "add")
+  T.equal(editable.stackAmount, 2)
+  T.equal(editable.maxStacks, 2)
+  T.equal(editable.consumeBehavior, "decrement")
+end)
+
 suite:case("DeleteGroup removes only the container and leaves children standalone", function()
   local env, ns = makeEnv()
   local D = ns.SettingsData

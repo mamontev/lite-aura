@@ -115,6 +115,66 @@ local function inferTrackingPreset(draft)
   return "buff_player"
 end
 
+local function shouldShowConsumeBehavior(draft)
+  draft = draft or {}
+  local maxStacks = tonumber(draft.maxStacks) or 1
+  local stackBehavior = tostring(draft.stackBehavior or "replace")
+  return maxStacks > 1 or stackBehavior == "add"
+end
+
+local function isStackingSyntheticAura(draft)
+  draft = draft or {}
+  local maxStacks = tonumber(draft.maxStacks) or 1
+  local stackBehavior = tostring(draft.stackBehavior or "replace")
+  return maxStacks > 1 or stackBehavior == "add"
+end
+
+local function shouldExpandStackOptions(draft, panel)
+  if panel and panel.stackOptionsExpanded ~= nil then
+    return panel.stackOptionsExpanded == true
+  end
+  return isStackingSyntheticAura(draft)
+end
+
+local function normalizeProduceTriggers(draft)
+  if UI and UI.Bindings and UI.Bindings.GetProduceTriggers then
+    return UI.Bindings:GetProduceTriggers(draft)
+  end
+  return {}
+end
+
+local function spellIDResolves(spellID)
+  spellID = tonumber(spellID)
+  if not spellID or spellID <= 0 then
+    return false
+  end
+  if ns.AuraAPI and ns.AuraAPI.GetSpellName then
+    local name = ns.AuraAPI:GetSpellName(spellID)
+    if type(name) == "string" and name ~= "" then
+      return true
+    end
+  end
+  return false
+end
+
+local function getSpellRowPreview(spellID)
+  spellID = tonumber(spellID)
+  if not spellID or spellID <= 0 then
+    return 134400, "Choose a spell"
+  end
+
+  local icon = (ns.AuraAPI and ns.AuraAPI.GetSpellTexture and ns.AuraAPI:GetSpellTexture(spellID)) or 134400
+  local name = (ns.AuraAPI and ns.AuraAPI.GetSpellName and ns.AuraAPI:GetSpellName(spellID)) or ("Spell " .. tostring(spellID))
+  return icon, name
+end
+
+local function syncProduceTriggersToDraft(draft)
+  if not draft then
+    return
+  end
+  normalizeProduceTriggers(draft)
+end
+
 local function isTabAvailable(draft, tabKey, showAdvanced)
   if not draft then
     return false
@@ -123,6 +183,45 @@ local function isTabAvailable(draft, tabKey, showAdvanced)
     return false
   end
   return true
+end
+
+local function getCurrentClassAndSpec()
+  local _, classToken = UnitClass and UnitClass("player") or nil
+  classToken = tostring(classToken or ""):upper()
+  local specID, specName = nil, ""
+  if GetSpecialization and GetSpecializationInfo then
+    local specIndex = GetSpecialization()
+    if specIndex then
+      local a, b, c, d = GetSpecializationInfo(specIndex)
+      if type(a) == "number" then
+        specID = tonumber(a)
+        specName = tostring(b or "")
+      else
+        specID = tonumber(d)
+        specName = tostring(a or "")
+      end
+    end
+  end
+  return classToken, specID, specName
+end
+
+local function lookupOptionLabel(options, wanted)
+  wanted = tostring(wanted or "")
+  for i = 1, #(options or {}) do
+    local row = options[i]
+    if tostring(row.value or "") == wanted then
+      return tostring(row.label or wanted)
+    end
+    if type(row.menuList) == "table" then
+      for j = 1, #row.menuList do
+        local child = row.menuList[j]
+        if tostring(child.value or "") == wanted then
+          return tostring(child.label or wanted)
+        end
+      end
+    end
+  end
+  return wanted
 end
 
 local function addInfoBox(parent, y, title, body, height)
@@ -225,6 +324,8 @@ local LIVE_PREVIEW_FIELDS = {
 }
 
 function AuraEditorPanel:RefreshLivePreview(forceRefresh)
+  self:CommitProduceTriggerWidgets()
+
   if not ns.state then
     return
   end
@@ -268,6 +369,17 @@ function AuraEditorPanel:RefreshLivePreview(forceRefresh)
   end
 end
 
+function AuraEditorPanel:CommitProduceTriggerWidgets()
+  if not self.draft then
+    return
+  end
+
+  if self.triggerListWidget and self.triggerListWidget.Commit then
+    self.triggerListWidget:Commit()
+    return
+  end
+end
+
 function AuraEditorPanel:ValidateDraft()
   local issues = {}
   if not self.draft then
@@ -296,6 +408,42 @@ function AuraEditorPanel:ValidateDraft()
   end
 
   if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) then
+    local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
+    if actionMode == "produce" then
+      local triggers = normalizeProduceTriggers(self.draft)
+      local validCount = 0
+      for i = 1, #triggers do
+        local trigger = triggers[i]
+        if spellIDResolves(trigger and trigger.spellID) then
+          validCount = validCount + 1
+        elseif tonumber(trigger and trigger.spellID) and tonumber(trigger.spellID) > 0 then
+          issues[#issues + 1] = {
+            severity = "warn",
+            path = "produceTriggers",
+            message = string.format("Trigger %d uses a SpellID that could not be resolved.", i),
+          }
+        end
+      end
+      if validCount == 0 then
+        issues[#issues + 1] = {
+          severity = "error",
+          path = "produceTriggers",
+          message = "Add at least one valid spell that can grant or refresh this aura.",
+        }
+      end
+    elseif actionMode == "consume" then
+      local consumeCSV = tostring(self.draft.consumeCastSpellIDs or self.draft.castSpellIDs or "")
+      if consumeCSV == "" then
+        issues[#issues + 1] = {
+          severity = "error",
+          path = "consumeCastSpellIDs",
+          message = "Add the spell that should spend or remove this aura.",
+        }
+      end
+    end
+  end
+
+  if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) then
     if tostring(self.draft.actionMode or "produce") == "produce" then
       if tostring(self.draft.timerBehavior or "reset") == "extend" then
         if (tonumber(self.draft.maxDuration) or 0) <= 0 then
@@ -308,6 +456,18 @@ function AuraEditorPanel:ValidateDraft()
         issues[#issues + 1] = { severity = "warn", path = "maxStacks", message = "Add-stack auras should usually allow at least 2 maximum stacks." }
       end
     end
+  end
+
+  local hasErrors = false
+  for i = 1, #issues do
+    if issues[i].severity == "error" then
+      hasErrors = true
+      break
+    end
+  end
+  self.hasValidationErrors = hasErrors
+  if self.btnSave then
+    self.btnSave:SetEnabled(not hasErrors)
   end
 
   if #issues == 0 then
@@ -359,6 +519,8 @@ function AuraEditorPanel:RefreshTabButtons()
 end
 
 function AuraEditorPanel:ApplyRuleMode(mode)
+  self:CommitProduceTriggerWidgets()
+
   if not self.draft or isDirectAuraTracking(self.draft) then
     return
   end
@@ -367,13 +529,28 @@ function AuraEditorPanel:ApplyRuleMode(mode)
   self.draft.actionMode = mode
 
   local auraSpellID = tonumber(self.draft.spellID)
-  local rule = nil
-  if RuleRepo and RuleRepo.GetRuleForAuraByMode and auraSpellID and auraSpellID > 0 then
-    rule = RuleRepo:GetRuleForAuraByMode(auraSpellID, mode)
+  local applied = false
+  local preserveDraftProduce = (mode == "produce") and self.draft._produceTriggersDirty == true
+  if (not preserveDraftProduce) and RuleRepo and RuleRepo.ApplyRulesForModeToDraft and auraSpellID and auraSpellID > 0 then
+    RuleRepo:ApplyRulesForModeToDraft(self.draft, mode)
+    applied = true
+  elseif not preserveDraftProduce then
+    local rule = nil
+    if RuleRepo and RuleRepo.GetRuleForAuraByMode and auraSpellID and auraSpellID > 0 then
+      rule = RuleRepo:GetRuleForAuraByMode(auraSpellID, mode)
+    end
+    if rule and UI and UI.Bindings and UI.Bindings.ApplyRuleToDraft then
+      UI.Bindings:ApplyRuleToDraft(self.draft, rule)
+      applied = true
+    end
   end
 
-  if rule and UI and UI.Bindings and UI.Bindings.ApplyRuleToDraft then
-    UI.Bindings:ApplyRuleToDraft(self.draft, rule)
+  if applied then
+    if mode == "produce" then
+      syncProduceTriggersToDraft(self.draft)
+    else
+      self.draft.consumeCastSpellIDs = tostring(self.draft.castSpellIDs or "")
+    end
   else
     local base = auraSpellID and ("aura" .. tostring(auraSpellID)) or "aura"
     self.draft.ruleID = base
@@ -388,7 +565,13 @@ function AuraEditorPanel:ApplyRuleMode(mode)
     self.draft.stackBehavior = tostring(self.draft.stackBehavior or "replace")
     self.draft.stackAmount = tonumber(self.draft.stackAmount) or 1
     self.draft.maxStacks = tonumber(self.draft.maxStacks) or 1
-    self.draft.consumeBehavior = tostring(self.draft.consumeBehavior or "hide")
+    local defaultConsume = (mode == "consume" and isStackingSyntheticAura(self.draft)) and "decrement" or "hide"
+    self.draft.consumeBehavior = tostring(self.draft.consumeBehavior or defaultConsume)
+    if mode == "produce" then
+      syncProduceTriggersToDraft(self.draft)
+    else
+      self.draft.consumeCastSpellIDs = tostring(self.draft.consumeCastSpellIDs or self.draft.castSpellIDs or "")
+    end
   end
 
   if self.ruleBuilder and self.ruleBuilder.SetDraft then
@@ -480,7 +663,11 @@ function AuraEditorPanel:ApplyLayoutPreset(presetKey)
 end
 function AuraEditorPanel:LoadAura(auraId)
   self.draft = Repo:GetAuraDraft(auraId)
-  self.triggerEditMode = self.triggerEditMode or "produce"
+  self.deleteArmedUntil = nil
+  self.triggerEditMode = tostring(self.draft and self.draft.actionMode or "produce")
+  if self.draft then
+    self.draft._produceTriggersDirty = false
+  end
   self.currentAuraId = self.draft and self.draft.id or auraId
   if S and S.SetDirty then
     S:SetDirty(false)
@@ -498,6 +685,9 @@ function AuraEditorPanel:LoadAura(auraId)
   self:RenderTab(tab)
   self:ValidateDraft()
   self:RefreshLivePreview(true)
+  if self.RefreshDeleteButton then
+    self:RefreshDeleteButton()
+  end
   if S and S.SetDirty then
     S:SetDirty(false)
   end
@@ -589,6 +779,14 @@ function AuraEditorPanel:OnFieldChanged(key, value)
 end
 
 function AuraEditorPanel:ClearTabContent()
+  self.produceTriggerWidgets = nil
+
+  if self.triggerListWidget and self.triggerListWidget.frame then
+    self.triggerListWidget.frame:Hide()
+    self.triggerListWidget.frame:SetParent(nil)
+  end
+  self.triggerListWidget = nil
+
   for i = 1, #(self.fieldWidgets or {}) do
     local w = self.fieldWidgets[i]
     if w then
@@ -717,7 +915,293 @@ function AuraEditorPanel:RenderDisplayCanvas(y)
   return y - 142
 end
 
+function AuraEditorPanel:SetStackingEnabled(enabled)
+  if not self.draft then
+    return
+  end
+  enabled = enabled == true
+  if enabled then
+    self.draft.stackBehavior = "add"
+    self.draft.stackAmount = math.max(1, tonumber(self.draft.stackAmount) or 1)
+    self.draft.maxStacks = math.max(2, tonumber(self.draft.maxStacks) or 2)
+    local triggers = normalizeProduceTriggers(self.draft)
+    for i = 1, #triggers do
+      triggers[i].stackAmount = math.max(1, tonumber(triggers[i].stackAmount) or 1)
+    end
+    self.stackOptionsExpanded = true
+  else
+    self.draft.stackBehavior = "replace"
+    self.draft.stackAmount = 1
+    self.draft.maxStacks = 1
+    local triggers = normalizeProduceTriggers(self.draft)
+    for i = 1, #triggers do
+      triggers[i].stackAmount = 1
+    end
+    if tostring(self.draft.consumeBehavior or "hide") == "decrement" then
+      self.draft.consumeBehavior = "hide"
+    end
+    self.stackOptionsExpanded = false
+  end
+  if S and S.SetDirty then
+    S:SetDirty(true)
+  end
+  self:ValidateDraft()
+  self:RefreshLivePreview(false)
+end
+
+function AuraEditorPanel:RenderTrackingStackCard(y, fieldsByKey)
+  local enabled = isStackingSyntheticAura(self.draft)
+  local expanded = enabled and shouldExpandStackOptions(self.draft, self)
+  local extraHeight = expanded and 128 or 0
+  local cardHeight = 88 + extraHeight
+
+  local card = createCard(
+    self.content,
+    y,
+    "Stacks",
+    "Turn this on only for buffs that can build charges or stacks instead of simply refreshing.",
+    cardHeight
+  )
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local toggle = CreateFrame("CheckButton", nil, card.content, "UICheckButtonTemplate")
+  toggle:SetPoint("TOPLEFT", 2, -2)
+  toggle:SetChecked(enabled)
+  if Skin and Skin.ApplyCheckbox then
+    Skin:ApplyCheckbox(toggle)
+  end
+  toggle:SetScript("OnClick", function(btn)
+    if Skin and Skin.RefreshCheckbox then
+      Skin:RefreshCheckbox(btn)
+    end
+    self:SetStackingEnabled(btn:GetChecked() == true)
+    self:RenderTab("Tracking")
+  end)
+  self.fieldWidgets[#self.fieldWidgets + 1] = toggle
+
+  local toggleLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  toggleLabel:SetPoint("LEFT", toggle, "RIGHT", 4, 0)
+  toggleLabel:SetText("Stackable")
+  self.fieldWidgets[#self.fieldWidgets + 1] = toggleLabel
+
+  local hint = card.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  hint:SetPoint("TOPLEFT", 2, -24)
+  hint:SetPoint("RIGHT", -40, 0)
+  hint:SetJustifyH("LEFT")
+  hint:SetText(enabled and "This aura can gain more than one charge. Expand below to set how many it can hold." or "Leave this off for simple buffs that only refresh.")
+  self.fieldWidgets[#self.fieldWidgets + 1] = hint
+
+  if enabled then
+    local collapseBtn = CreateFrame("Button", nil, card.content, "UIPanelButtonTemplate")
+    collapseBtn:SetSize(26, 20)
+    collapseBtn:SetPoint("TOPRIGHT", -2, 0)
+    collapseBtn:SetText(expanded and "-" or "+")
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(collapseBtn, "ghost")
+    end
+    collapseBtn:SetScript("OnClick", function()
+      self.stackOptionsExpanded = not expanded
+      self:RenderTab("Tracking")
+    end)
+    self.fieldWidgets[#self.fieldWidgets + 1] = collapseBtn
+
+    if expanded then
+      local stackFields = {
+        fieldsByKey.stackAmount,
+        fieldsByKey.maxStacks,
+      }
+      local nextY = self:RenderGenericFields(stackFields, -52, card.content, 2, -2)
+      card.content:SetHeight(math.max(24, -nextY + 8))
+    else
+      card.content:SetHeight(44)
+    end
+  else
+    card.content:SetHeight(44)
+  end
+
+  return y - cardHeight - 10
+end
+
+function AuraEditorPanel:RenderConsumeBehaviorCard(y)
+  if not shouldShowConsumeBehavior(self.draft) then
+    return y
+  end
+
+  local card = createCard(
+    self.content,
+    y,
+    "Spending Charges",
+    "Choose whether the spender clears the whole aura or uses one charge at a time.",
+    94
+  )
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local toggle = CreateFrame("CheckButton", nil, card.content, "UICheckButtonTemplate")
+  toggle:SetPoint("TOPLEFT", 2, -2)
+  toggle:SetChecked(tostring(self.draft.consumeBehavior or "hide") == "decrement")
+  if Skin and Skin.ApplyCheckbox then
+    Skin:ApplyCheckbox(toggle)
+  end
+  toggle:SetScript("OnClick", function(btn)
+    if Skin and Skin.RefreshCheckbox then
+      Skin:RefreshCheckbox(btn)
+    end
+    self.draft.consumeBehavior = btn:GetChecked() and "decrement" or "hide"
+    if S and S.SetDirty then
+      S:SetDirty(true)
+    end
+    self:ValidateDraft()
+    self:RefreshLivePreview(false)
+    self:RenderTab("Tracking")
+  end)
+  self.fieldWidgets[#self.fieldWidgets + 1] = toggle
+
+  local toggleLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  toggleLabel:SetPoint("LEFT", toggle, "RIGHT", 4, 0)
+  toggleLabel:SetText("Consume only 1 charge")
+  self.fieldWidgets[#self.fieldWidgets + 1] = toggleLabel
+
+  local hint = card.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  hint:SetPoint("TOPLEFT", 2, -24)
+  hint:SetPoint("RIGHT", -2, 0)
+  hint:SetJustifyH("LEFT")
+  hint:SetText(toggle:GetChecked() and "Best for buffs like Precise Shots, where each spender uses one charge." or "Use this for buffs that should disappear completely when consumed.")
+  self.fieldWidgets[#self.fieldWidgets + 1] = hint
+
+  card.content:SetHeight(46)
+  return y - 104
+end
+
+function AuraEditorPanel:RenderLoadConditionsCard(y, fieldsByKey)
+  local card = createCard(
+    self.content,
+    y,
+    "Load Conditions",
+    "Use this only when the aura should exist for one class or spec. Leave both blank to load it everywhere.",
+    176
+  )
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local currentClassToken, currentSpecID, currentSpecName = getCurrentClassAndSpec()
+  local loadClassToken = tostring(self.draft and self.draft.loadClassToken or ""):upper()
+  local loadSpecID = tostring(self.draft and self.draft.loadSpecID or "")
+
+  local classOptions = (ns.SettingsData and ns.SettingsData.GetLoadClassOptions and ns.SettingsData:GetLoadClassOptions()) or {}
+  local specOptions = (ns.SettingsData and ns.SettingsData.GetLoadSpecMenuOptions and ns.SettingsData:GetLoadSpecMenuOptions(loadClassToken)) or {}
+  local classLabel = (loadClassToken ~= "") and lookupOptionLabel(classOptions, loadClassToken) or "Any Class"
+  local specLabel = (loadSpecID ~= "") and lookupOptionLabel(specOptions, loadSpecID) or "Any Spec"
+
+  local status = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  status:SetPoint("TOPLEFT", 2, -2)
+  status:SetPoint("RIGHT", -2, 0)
+  status:SetJustifyH("LEFT")
+  self.fieldWidgets[#self.fieldWidgets + 1] = status
+
+  local detail = card.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  detail:SetPoint("TOPLEFT", 2, -20)
+  detail:SetPoint("RIGHT", -2, 0)
+  detail:SetJustifyH("LEFT")
+  self.fieldWidgets[#self.fieldWidgets + 1] = detail
+
+  local loaded = true
+  local reason = ""
+  if loadClassToken ~= "" and loadClassToken ~= currentClassToken then
+    loaded = false
+    reason = "Wrong Class"
+  elseif loadSpecID ~= "" and tostring(currentSpecID or "") ~= loadSpecID then
+    loaded = false
+    reason = "Wrong Spec"
+  end
+
+  if loaded then
+    status:SetText("|cff4dff88Loaded for your current character|r")
+  else
+    status:SetText("|cffff6b6bNot loaded for your current character|r")
+  end
+
+  local currentClassLabel = lookupOptionLabel(classOptions, currentClassToken)
+  local currentLabel = string.format("Current: %s%s", currentClassLabel ~= "" and currentClassLabel or currentClassToken, currentSpecName ~= "" and (" / " .. currentSpecName) or "")
+  local targetLabel = string.format("Aura setting: %s / %s", classLabel, specLabel)
+  if loaded then
+    detail:SetText(currentLabel .. "\n" .. targetLabel)
+  else
+    detail:SetText(currentLabel .. "\n" .. targetLabel .. "\nReason: " .. reason)
+  end
+
+  local quickLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  quickLabel:SetPoint("TOPLEFT", 2, -52)
+  quickLabel:SetText("Quick setup")
+  self.fieldWidgets[#self.fieldWidgets + 1] = quickLabel
+
+  local function makeQuickButton(text, x, onClick)
+    local btn = CreateFrame("Button", nil, card.content, "UIPanelButtonTemplate")
+    btn:SetSize(124, 20)
+    btn:SetPoint("TOPLEFT", x, -68)
+    btn:SetText(text)
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(btn, "segment")
+    end
+    btn:SetScript("OnClick", onClick)
+    self.fieldWidgets[#self.fieldWidgets + 1] = btn
+    return btn
+  end
+
+  makeQuickButton("Load Everywhere", 2, function()
+    self:OnFieldChanged("loadClassToken", "")
+    self:OnFieldChanged("loadSpecID", "")
+    self:RenderTab("Advanced")
+  end)
+  makeQuickButton("Only My Class", 132, function()
+    self:OnFieldChanged("loadClassToken", currentClassToken)
+    self:OnFieldChanged("loadSpecID", "")
+    self:RenderTab("Advanced")
+  end)
+  makeQuickButton("Only This Spec", 262, function()
+    self:OnFieldChanged("loadClassToken", currentClassToken)
+    self:OnFieldChanged("loadSpecID", tostring(currentSpecID or ""))
+    self:RenderTab("Advanced")
+  end)
+
+  local nextY = self:RenderGenericFields({
+    fieldsByKey.loadClassToken,
+    fieldsByKey.loadSpecID,
+  }, -96, card.content, 2, -2)
+
+  card.content:SetHeight(math.max(132, -nextY + 8))
+  return y - 224
+end
+
+function AuraEditorPanel:RenderProduceTriggersCard(y)
+  if Widgets.TriggerListWidget and Widgets.TriggerListWidget.Create then
+    self.triggerListWidget = Widgets.TriggerListWidget:Create(self.content, {
+      isStackable = isStackingSyntheticAura,
+      onChanged = function()
+        if S and S.SetDirty then
+          S:SetDirty(true)
+        end
+        self:ValidateDraft()
+      end,
+      onRequestRender = function()
+        self._skipProduceTriggerCommitOnce = true
+        self:RenderTab("Tracking")
+      end,
+    })
+    self.triggerListWidget.frame:SetPoint("TOPLEFT", 12, y)
+    self.triggerListWidget.frame:SetPoint("RIGHT", -14, 0)
+    self.triggerListWidget.frame:Show()
+    self.triggerListWidget:SetDraft(self.draft)
+    return y - self.triggerListWidget.frame:GetHeight() - 10
+  end
+
+  return y
+end
+
 function AuraEditorPanel:RenderTab(tabKey)
+  if self._skipProduceTriggerCommitOnce == true then
+    self._skipProduceTriggerCommitOnce = false
+  else
+    self:CommitProduceTriggerWidgets()
+  end
   self.currentTab = tabKey
   self:ClearTabContent()
 
@@ -885,9 +1369,7 @@ function AuraEditorPanel:RenderTab(tabKey)
       end
 
       local activeMode = (tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "consume") and "consume" or "produce"
-      if not self.ruleBuilder or not self.ruleBuilder.frame then
-        self:ApplyRuleMode(activeMode)
-      end
+      self.triggerEditMode = activeMode
 
       local function refreshModeButtons()
         local isConsume = tostring(self.triggerEditMode or "produce") == "consume"
@@ -926,6 +1408,29 @@ function AuraEditorPanel:RenderTab(tabKey)
       self.ruleBuilder.frame:Show()
       self.ruleBuilder:SetDraft(self.draft)
       y = y - self.ruleBuilder.frame:GetHeight() - 10
+
+      local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
+      if actionMode == "produce" then
+        local infoFrame = addInfoBox(
+          self.content,
+          y,
+          "Applied when the cast finishes",
+          "For cast-time spells like Aimed Shot, AuraLite grants the aura only when the cast really completes, not on the first key press.",
+          82
+        )
+        self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
+        y = y - 92
+      elseif actionMode == "consume" and shouldShowConsumeBehavior(self.draft) then
+        local infoFrame = addInfoBox(
+          self.content,
+          y,
+          "Spend one charge at a time",
+          "For stackable buffs like Precise Shots, choose 'Remove 1 Stack' so each spender removes only one charge instead of clearing the whole aura.",
+          82
+        )
+        self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
+        y = y - 92
+      end
     end
 
     local fields = tab.fields or {}
@@ -942,18 +1447,15 @@ function AuraEditorPanel:RenderTab(tabKey)
         end
       elseif not self.showAdvanced then
         local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
-        if key == "unit" or key == "spellID" or key == "castSpellIDs" then
+        if key == "unit" or key == "spellID" or (key == "castSpellIDs" and actionMode == "consume") then
           filtered[#filtered + 1] = fields[i]
-        elseif actionMode == "produce" and (
+      elseif actionMode == "produce" and (
           key == "duration"
           or key == "timerBehavior"
-          or key == "stackBehavior"
-          or key == "stackAmount"
-          or key == "maxStacks"
           or (key == "maxDuration" and tostring(self.draft.timerBehavior or "reset") == "extend")
         ) then
           filtered[#filtered + 1] = fields[i]
-        elseif actionMode == "consume" and (key == "requiredAuraSpellIDs" or key == "consumeBehavior" or key == "conditionLogic") then
+        elseif actionMode == "consume" and key ~= "consumeBehavior" then
           filtered[#filtered + 1] = fields[i]
         end
       else
@@ -961,6 +1463,21 @@ function AuraEditorPanel:RenderTab(tabKey)
       end
     end
     y = self:RenderGenericFields(filtered, y)
+    if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) and not self.showAdvanced then
+      local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
+      if actionMode == "produce" then
+        local byKey = {}
+        for i = 1, #fields do
+          if fields[i] then
+            byKey[fields[i].key] = fields[i]
+          end
+        end
+        y = self:RenderProduceTriggersCard(y)
+        y = self:RenderTrackingStackCard(y, byKey)
+      elseif actionMode == "consume" then
+        y = self:RenderConsumeBehaviorCard(y)
+      end
+    end
   elseif tabKey == "Appearance" then
     local allFields = tab.fields or {}
     local byKey = {}
@@ -1040,10 +1557,22 @@ function AuraEditorPanel:RenderTab(tabKey)
     end
 
     local fields = tab.fields or {}
+    local byKey = {}
+    for i = 1, #fields do
+      if fields[i] then
+        byKey[fields[i].key] = fields[i]
+      end
+    end
+
+    y = self:RenderLoadConditionsCard(y, byKey)
+
     local filtered = {}
     for i = 1, #fields do
       local key = fields[i].key
       local include = true
+      if key == "loadClassToken" or key == "loadSpecID" then
+        include = false
+      end
       if isDirectAuraTracking(self.draft) or isEstimatedTargetTracking(self.draft) then
         if key == "conditionLogic" or key == "talentSpellIDs" or key == "requiredAuraSpellIDs" or key == "duration" or key == "ruleName" or key == "ruleID" then
           include = false
@@ -1062,6 +1591,7 @@ function AuraEditorPanel:RenderTab(tabKey)
 end
 
 function AuraEditorPanel:SelectTab(tabKey)
+  self:CommitProduceTriggerWidgets()
   if not isTabAvailable(self.draft, tabKey, self.showAdvanced) then
     return
   end
@@ -1077,12 +1607,23 @@ function AuraEditorPanel:DeleteCurrent()
     return
   end
 
+  local now = GetTime and GetTime() or 0
+  if not self.deleteArmedUntil or self.deleteArmedUntil < now then
+    self.deleteArmedUntil = now + 4
+    if self.RefreshDeleteButton then
+      self:RefreshDeleteButton()
+    end
+    V:SetStatus("warn", "Press Delete again to permanently remove this aura.")
+    return
+  end
+
   local deleted, err = Repo and Repo.DeleteAura and Repo:DeleteAura(self.draft.id)
   if not deleted then
     V:SetStatus("error", tostring(err or "Delete failed"))
     return
   end
 
+  self.deleteArmedUntil = nil
   self.currentAuraId = nil
   self.draft = nil
   self:UpdateHeader()
@@ -1101,6 +1642,9 @@ function AuraEditorPanel:DeleteCurrent()
     S:SetSelectedAura(nil, "delete")
   end
   V:SetStatus("ok", "Aura deleted.")
+  if self.RefreshDeleteButton then
+    self:RefreshDeleteButton()
+  end
   if E then
     E:Emit(E.Names.FILTER_CHANGED, { key = "delete", value = true })
   end
@@ -1149,9 +1693,45 @@ function AuraEditorPanel:ExportCurrent()
   V:SetStatus("ok", "Aura export generated.")
 end
 
+function AuraEditorPanel:DiscardCurrent()
+  if not self.draft then
+    return
+  end
+
+  local currentId = tostring(self.currentAuraId or self.draft.id or "")
+  if currentId ~= "" then
+    self:LoadAura(currentId)
+  else
+    self.draft = Repo:CreateDraft()
+    self.currentAuraId = self.draft and self.draft.id or nil
+    self:UpdateHeader()
+    self:RefreshTabButtons()
+    self:RenderTab((S and S.Get and S:Get().activeTab) or "Tracking")
+    self:ValidateDraft()
+    self:RefreshLivePreview(true)
+  end
+
+  if S and S.SetDirty then
+    S:SetDirty(false)
+  end
+  self.deleteArmedUntil = nil
+  if self.RefreshDeleteButton then
+    self:RefreshDeleteButton()
+  end
+  V:SetStatus("ok", "Unsaved changes discarded.")
+end
+
 function AuraEditorPanel:SaveCurrent()
   if not self.draft then
     return
+  end
+
+  self:CommitProduceTriggerWidgets()
+
+  if tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "produce" then
+    syncProduceTriggersToDraft(self.draft)
+  elseif tostring(self.draft.castSpellIDs or "") ~= "" then
+    self.draft.consumeCastSpellIDs = tostring(self.draft.castSpellIDs or "")
   end
 
   if (not self.draft.id or tostring(self.draft.id) == "") and self.currentAuraId and tostring(self.currentAuraId) ~= "" then
@@ -1159,10 +1739,39 @@ function AuraEditorPanel:SaveCurrent()
     self.draft._sourceKey = tostring(self.currentAuraId)
   end
 
+  local ruleDraft = (ns.Utils and ns.Utils.DeepCopy and ns.Utils.DeepCopy(self.draft)) or nil
+  if type(ruleDraft) ~= "table" then
+    ruleDraft = {}
+    for key, value in pairs(self.draft) do
+      ruleDraft[key] = value
+    end
+  end
+
   local ok, savedId, err = Repo:SaveDraft(self.draft)
   if not ok then
     V:SetStatus("error", tostring(err or "Save failed"))
     return
+  end
+
+  if savedId and tostring(savedId) ~= "" then
+    ruleDraft.id = tostring(savedId)
+    ruleDraft._sourceKey = tostring(savedId)
+    if ns.SettingsData and ns.SettingsData.ResolveEntry then
+      local savedEntry = ns.SettingsData:ResolveEntry(savedId)
+      local savedUID = savedEntry and savedEntry.item and tostring(savedEntry.item.instanceUID or "") or ""
+      if savedUID ~= "" then
+        ruleDraft.instanceUID = savedUID
+      end
+    end
+  end
+
+  ruleDraft._produceTriggersDirty = false
+
+  if RuleRepo and RuleRepo.SaveRuleFromDraft then
+    local rok, rerr = RuleRepo:SaveRuleFromDraft(ruleDraft)
+    if rok ~= true and rerr then
+      V:Push("warn", "rule", tostring(rerr))
+    end
   end
 
   if savedId and tostring(savedId) ~= "" then
@@ -1184,13 +1793,7 @@ function AuraEditorPanel:SaveCurrent()
   else
     self.draft.id = savedId or self.draft.id
   end
-
-  if RuleRepo and RuleRepo.SaveRuleFromDraft then
-    local rok, rerr = RuleRepo:SaveRuleFromDraft(self.draft)
-    if rok ~= true and rerr then
-      V:Push("warn", "rule", tostring(rerr))
-    end
-  end
+  self.draft._produceTriggersDirty = false
 
   if S and S.SetDirty then
     S:SetDirty(false)
@@ -1199,6 +1802,10 @@ function AuraEditorPanel:SaveCurrent()
     S:SetSelectedAura(savedId, "save")
   end
 
+  self.deleteArmedUntil = nil
+  if self.RefreshDeleteButton then
+    self:RefreshDeleteButton()
+  end
   self:ValidateDraft()
   self:RefreshLivePreview(true)
   if E then
@@ -1304,6 +1911,15 @@ function AuraEditorPanel:Create(parent)
   o.status:SetJustifyH("LEFT")
   o.status:SetText("Ready")
 
+  function o:RefreshDeleteButton()
+    if not self.btnDelete then
+      return
+    end
+    local now = GetTime and GetTime() or 0
+    local armed = self.deleteArmedUntil and self.deleteArmedUntil >= now
+    self.btnDelete:SetText(armed and "Confirm Delete" or "Delete")
+  end
+
   o.btnSave = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
   o.btnSave:SetSize(110, 24)
   o.btnSave:SetPoint("BOTTOMLEFT", 10, 10)
@@ -1318,9 +1934,9 @@ function AuraEditorPanel:Create(parent)
   o.btnReset = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
   o.btnReset:SetSize(90, 24)
   o.btnReset:SetPoint("LEFT", o.btnSave, "RIGHT", 8, 0)
-  o.btnReset:SetText("Reset")
+  o.btnReset:SetText("Discard")
   o.btnReset:SetScript("OnClick", function()
-    o:LoadAura(o.currentAuraId)
+    o:DiscardCurrent()
   end)
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(o.btnReset, "ghost")
@@ -1336,6 +1952,7 @@ function AuraEditorPanel:Create(parent)
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(o.btnDelete, "danger")
   end
+  o:RefreshDeleteButton()
 
   o.btnDuplicate = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
   o.btnDuplicate:SetSize(90, 24)

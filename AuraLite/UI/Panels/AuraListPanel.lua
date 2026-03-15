@@ -30,14 +30,18 @@ local function displayGroupName(groupID)
   return groupID
 end
 
-local function isGroupCollapsed(self, groupID)
-  self.collapsedGroups = self.collapsedGroups or {}
-  return self.collapsedGroups[tostring(groupID or "")] == true
+local function makeCollapseKey(section, groupID)
+  return tostring(section or "loaded") .. "::" .. tostring(groupID or "")
 end
 
-local function setGroupCollapsed(self, groupID, collapsed)
+local function isGroupCollapsed(self, section, groupID)
   self.collapsedGroups = self.collapsedGroups or {}
-  self.collapsedGroups[tostring(groupID or "")] = collapsed == true
+  return self.collapsedGroups[makeCollapseKey(section, groupID)] == true
+end
+
+local function setGroupCollapsed(self, section, groupID, collapsed)
+  self.collapsedGroups = self.collapsedGroups or {}
+  self.collapsedGroups[makeCollapseKey(section, groupID)] = collapsed == true
 end
 
 local function createBackdrop(frame)
@@ -49,6 +53,24 @@ local function createBackdrop(frame)
   })
   frame:SetBackdropColor(0.03, 0.08, 0.16, 0.74)
   frame:SetBackdropBorderColor(0.1, 0.44, 0.76, 0.90)
+end
+
+local function matchesScope(scope, row)
+  scope = tostring(scope or "all")
+  row = row or {}
+  if scope == "loaded" then
+    return row.isLoaded ~= false
+  end
+  if scope == "not_loaded" then
+    return row.isLoaded == false
+  end
+  if scope == "groups" then
+    return tostring(row.group or "") ~= ""
+  end
+  if scope == "drafts" then
+    return row.isDraft == true
+  end
+  return true
 end
 
 function AuraListPanel:ExportGroup(groupID)
@@ -82,6 +104,7 @@ function AuraListPanel:BuildRows()
 
   local state = S and S.Get and S:Get() or {}
   local search = lowerSafe(state.filters and state.filters.search or "")
+  local scope = tostring(state.filters and state.filters.listScope or "all")
 
   if search ~= "" then
     local filtered = {}
@@ -95,7 +118,20 @@ function AuraListPanel:BuildRows()
     rows = filtered
   end
 
+  if scope ~= "all" then
+    local filtered = {}
+    for i = 1, #rows do
+      if matchesScope(scope, rows[i]) then
+        filtered[#filtered + 1] = rows[i]
+      end
+    end
+    rows = filtered
+  end
+
   table.sort(rows, function(a, b)
+    if (a.isLoaded ~= false) ~= (b.isLoaded ~= false) then
+      return a.isLoaded ~= false
+    end
     local ga, gb = tostring(a.group or ""), tostring(b.group or "")
     if ga ~= gb then
       return ga < gb
@@ -105,26 +141,43 @@ function AuraListPanel:BuildRows()
 
   local out = {}
   local currentGroup = nil
+  local currentSection = nil
   local groupCounts = {}
   for i = 1, #rows do
-    local grp = displayGroupName(rows[i].group)
+    local section = (rows[i].isLoaded == false) and "not_loaded" or "loaded"
+    local grp = section .. "::" .. displayGroupName(rows[i].group)
     groupCounts[grp] = (groupCounts[grp] or 0) + 1
   end
   for i = 1, #rows do
     local row = rows[i]
-    local grp = displayGroupName(row.group)
+    local section = (row.isLoaded == false) and "not_loaded" or "loaded"
+    if section ~= currentSection then
+      currentSection = section
+      currentGroup = nil
+      if section == "not_loaded" then
+        out[#out + 1] = {
+          isSection = true,
+          label = "Not Loaded",
+          reason = "These auras do not match your current class/spec.",
+        }
+      end
+    end
+    local grpLabel = displayGroupName(row.group)
+    local grp = section .. "::" .. grpLabel
     local groupID = tostring(row.group or "")
-    if grp ~= currentGroup then
-      currentGroup = grp
+    if grpLabel ~= currentGroup then
+      currentGroup = grpLabel
       out[#out + 1] = {
         isHeader = true,
-        group = grp,
+        group = grpLabel,
         groupID = groupID,
+        section = section,
         count = groupCounts[grp] or 0,
-        collapsed = isGroupCollapsed(self, groupID),
+        collapsed = isGroupCollapsed(self, section, groupID),
+        isLoaded = section == "loaded",
       }
     end
-    if not isGroupCollapsed(self, groupID) then
+    if not isGroupCollapsed(self, section, groupID) then
       out[#out + 1] = row
     end
   end
@@ -190,7 +243,7 @@ function AuraListPanel:AcquireRow(index, rowType)
       Skin:ApplyClickableRow(btn, "header")
     end
     btn:SetScript("OnClick", function(selfBtn)
-      setGroupCollapsed(self, selfBtn.groupID or "", not isGroupCollapsed(self, selfBtn.groupID or ""))
+      setGroupCollapsed(self, selfBtn.section or "loaded", selfBtn.groupID or "", not isGroupCollapsed(self, selfBtn.section or "loaded", selfBtn.groupID or ""))
       self:Render()
     end)
     btn:SetScript("OnReceiveDrag", function(selfBtn)
@@ -214,6 +267,29 @@ function AuraListPanel:AcquireRow(index, rowType)
     btn:SetScript("OnLeave", function(selfBtn)
       selfBtn.bg:SetColorTexture(0.08, 0.2, 0.34, 0.8)
     end)
+  elseif rowType == "section" then
+    btn:SetHeight(44)
+    btn.bg = btn:CreateTexture(nil, "BACKGROUND")
+    btn.bg:SetAllPoints()
+    btn.bg:SetColorTexture(0.12, 0.10, 0.05, 0.78)
+
+    btn.topLine = btn:CreateTexture(nil, "BORDER")
+    btn.topLine:SetColorTexture(0.95, 0.78, 0.12, 0.30)
+    btn.topLine:SetPoint("TOPLEFT", 6, -1)
+    btn.topLine:SetPoint("TOPRIGHT", -6, -1)
+    btn.topLine:SetHeight(1)
+
+    btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    btn.text:SetPoint("TOPLEFT", 8, -6)
+    btn.text:SetJustifyH("LEFT")
+    btn.text:SetTextColor(1.0, 0.86, 0.18)
+
+    btn.reason = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    btn.reason:SetPoint("TOPLEFT", 8, -22)
+    btn.reason:SetPoint("RIGHT", -8, 0)
+    btn.reason:SetJustifyH("LEFT")
+    btn.reason:SetJustifyV("TOP")
+    btn.reason:SetWordWrap(true)
   else
     btn:SetHeight(30)
     btn:RegisterForDrag("LeftButton")
@@ -302,17 +378,57 @@ function AuraListPanel:Render()
 
   local used = {}
 
+  if #rows == 0 then
+    self.emptyState = self.emptyState or self.scrollChild:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    self.emptyState:SetPoint("TOPLEFT", 10, -12)
+    self.emptyState:SetPoint("RIGHT", -10, 0)
+    self.emptyState:SetJustifyH("LEFT")
+    self.emptyState:SetJustifyV("TOP")
+
+    local state = S and S.Get and S:Get() or {}
+    local scope = tostring(state.filters and state.filters.listScope or "all")
+    local search = tostring(state.filters and state.filters.search or "")
+    local message = "No auras to show yet."
+    if search ~= "" then
+      message = string.format("No auras match \"%s\". Try a different search or clear the filter.", search)
+    elseif scope == "loaded" then
+      message = "No loaded auras match the current filters."
+    elseif scope == "not_loaded" then
+      message = "No hidden load-restricted auras right now."
+    elseif scope == "groups" then
+      message = "No grouped auras match the current filters."
+    elseif scope == "drafts" then
+      message = "No unsaved drafts right now."
+    end
+    self.emptyState:SetText(message)
+    self.emptyState:Show()
+  elseif self.emptyState then
+    self.emptyState:Hide()
+  end
+
   for i = 1, #rows do
     local row = rows[i]
-    local rowType = row.isHeader and "header" or "row"
+    local rowType = row.isSection and "section" or (row.isHeader and "header" or "row")
     local btn = self:AcquireRow(i, rowType)
     used[tostring(i) .. ":" .. rowType] = true
     btn:SetPoint("TOPLEFT", 2, y)
     btn:SetWidth(width)
     btn:Show()
 
-    if row.isHeader then
+    if row.isSection then
+      btn.text:SetText(tostring(row.label or "Section"))
+      btn.reason:SetText(tostring(row.reason or ""))
+      btn.text:SetWidth(math.max(1, width - 16))
+      btn.reason:SetWidth(math.max(1, width - 16))
+
+      local titleHeight = btn.text:GetStringHeight() or 14
+      local reasonHeight = btn.reason:GetStringHeight() or 12
+      local sectionHeight = math.max(44, math.floor(titleHeight + reasonHeight + 18))
+      btn:SetHeight(sectionHeight)
+      y = y - sectionHeight - 4
+    elseif row.isHeader then
       btn.groupID = tostring(row.groupID or "")
+      btn.section = tostring(row.section or "loaded")
       btn.group = tostring(row.group or "Group")
       btn.arrow:SetText(row.collapsed and ">" or "v")
       btn.text:SetText(tostring(row.group or "Group"))
@@ -328,7 +444,7 @@ function AuraListPanel:Render()
         auraName = "Aura " .. tostring(row.spellID or "?")
       end
       btn.nameText:SetText(auraName)
-      local meta = (tostring(row.group or "") ~= "") and "grouped" or ""
+      local meta = (row.isLoaded == false) and tostring(row.loadReason or "not loaded") or ((tostring(row.group or "") ~= "") and "In Group" or "")
       btn.metaText:SetText(meta)
 
       local status = tostring(row.status or "ok")
@@ -379,8 +495,42 @@ function AuraListPanel:Create(parent)
   createBackdrop(o.frame)
   o.collapsedGroups = {}
 
+  local function makeFilterButton(text, scope, x, width)
+    local btn = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
+    btn:SetSize(width or 56, 18)
+    btn:SetPoint("TOPLEFT", x, -6)
+    btn:SetText(text)
+    if Skin and Skin.ApplyButton then
+      Skin:SetButtonVariant(btn, "segment")
+    end
+    btn:SetScript("OnClick", function()
+      if S and S.SetFilter then
+        S:SetFilter("listScope", scope)
+      end
+    end)
+    return btn
+  end
+
+  o.scopeButtons = {
+    makeFilterButton("All", "all", 6, 42),
+    makeFilterButton("Loaded", "loaded", 52, 58),
+    makeFilterButton("Not Loaded", "not_loaded", 114, 86),
+    makeFilterButton("Groups", "groups", 204, 58),
+    makeFilterButton("Drafts", "drafts", 266, 58),
+  }
+
+  local function refreshScopeButtons()
+    local current = S and S.Get and S:Get().filters and S:Get().filters.listScope or "all"
+    for i = 1, #(o.scopeButtons or {}) do
+      local btn = o.scopeButtons[i]
+      if btn and Skin and Skin.SetButtonSelected then
+        Skin:SetButtonSelected(btn, current == ({ "all", "loaded", "not_loaded", "groups", "drafts" })[i])
+      end
+    end
+  end
+
   o.scroll = CreateFrame("ScrollFrame", nil, o.frame, "UIPanelScrollFrameTemplate")
-  o.scroll:SetPoint("TOPLEFT", 6, -6)
+  o.scroll:SetPoint("TOPLEFT", 6, -28)
   o.scroll:SetPoint("BOTTOMRIGHT", -28, 6)
 
   o.scrollChild = CreateFrame("Frame", nil, o.scroll)
@@ -400,10 +550,12 @@ function AuraListPanel:Create(parent)
     end)
 
     E:On(E.Names.FILTER_CHANGED, function()
+      refreshScopeButtons()
       o:Render()
     end)
   end
 
+  refreshScopeButtons()
   o:Render()
   return o
 end

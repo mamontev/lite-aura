@@ -81,6 +81,7 @@ end
 
 function GroupsPanel:LoadGroup(groupID)
   groupID = tostring(groupID or "")
+  self.deleteArmedUntil = nil
   self.selectedGroupID = groupID
   if groupID == "" or not ns.SettingsData or not ns.SettingsData.GetGroupConfig then
     self.model = nil
@@ -99,6 +100,9 @@ function GroupsPanel:LoadGroup(groupID)
   self:RenderList()
   self:RenderEditor()
   self:RenderMembers()
+  if self.RefreshDeleteButton then
+    self:RefreshDeleteButton()
+  end
 end
 
 function GroupsPanel:RenderList()
@@ -358,11 +362,23 @@ function GroupsPanel:DeleteCurrent()
   if not self.selectedGroupID or self.selectedGroupID == "" or not ns.SettingsData or not ns.SettingsData.DeleteGroup then
     return
   end
+  local now = GetTime and GetTime() or 0
+  if not self.deleteArmedUntil or self.deleteArmedUntil < now then
+    self.deleteArmedUntil = now + 4
+    if self.RefreshDeleteButton then
+      self:RefreshDeleteButton()
+    end
+    return
+  end
   ns.SettingsData:DeleteGroup(self.selectedGroupID)
+  self.deleteArmedUntil = nil
   self.selectedGroupID = nil
   self.model = nil
   self:RenderList()
   self:RenderEditor()
+  if self.RefreshDeleteButton then
+    self:RefreshDeleteButton()
+  end
   if E and E.Names and E.Names.FILTER_CHANGED then
     E:Emit(E.Names.FILTER_CHANGED, { key = "groups_delete", value = true })
   end
@@ -394,6 +410,15 @@ function GroupsPanel:Create(parent)
   o.frame:SetToplevel(true)
   createBackdrop(o.frame)
   o.frame:Hide()
+
+  function o:RefreshDeleteButton()
+    if not self.btnDelete then
+      return
+    end
+    local now = GetTime and GetTime() or 0
+    local armed = self.deleteArmedUntil and self.deleteArmedUntil >= now
+    self.btnDelete:SetText(armed and "Confirm Delete" or "Delete Group")
+  end
 
   local title = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   title:SetPoint("TOPLEFT", 10, -8)
@@ -482,6 +507,7 @@ function GroupsPanel:Create(parent)
   end)
   o.btnDelete:SetParent(o.footerTop)
   o.btnDelete:SetPoint("LEFT", o.btnSave, "RIGHT", 8, 0)
+  o:RefreshDeleteButton()
 
   o.btnAddSelected = makeButton(o.frame, "Add Selected Aura", 118, "default", function()
     o:AddSelectedAuraToCurrentGroup()

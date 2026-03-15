@@ -1,5 +1,8 @@
 local function makeSpellCatalog()
   local byID = {
+    [19434] = { name = "Aimed Shot", texture = "Interface\\Icons\\INV_Spear_07", castTimeMS = 2500 },
+    [257044] = { name = "Rapid Fire", texture = "Interface\\Icons\\Ability_Hunter_RapidRegeneration", castTimeMS = 0 },
+    [260240] = { name = "Precise Shots", texture = "Interface\\Icons\\Ability_Hunter_SniperShot", castTimeMS = 0 },
     [23922] = { name = "Shield Slam", texture = "Interface\\Icons\\INV_Shield_05" },
     [2565] = { name = "Shield Block", texture = "Interface\\Icons\\Ability_Defend" },
     [386030] = { name = "Brace for Impact", texture = "Interface\\Icons\\Ability_Warrior_ShieldBreak" },
@@ -52,6 +55,9 @@ return function()
     inCombat = false,
     knownSpells = {
       [23922] = true,
+      [19434] = true,
+      [257044] = true,
+      [260240] = true,
       [2565] = true,
       [386030] = true,
       [6343] = true,
@@ -66,6 +72,7 @@ return function()
     },
     auraByUnit = {},
     refreshCount = 0,
+    playerCastingSpellID = nil,
   }
 
   local spells = makeSpellCatalog()
@@ -77,6 +84,10 @@ return function()
   function env.setAura(unit, spellID, aura)
     env.auraByUnit[unit] = env.auraByUnit[unit] or {}
     env.auraByUnit[unit][tonumber(spellID)] = aura
+  end
+
+  function env.setPlayerCasting(spellID)
+    env.playerCastingSpellID = tonumber(spellID)
   end
 
   _G.GetTime = function()
@@ -109,6 +120,22 @@ return function()
     return env.knownSpells[tonumber(spellID)] == true
   end
 
+  _G.UnitCastingInfo = function(unit)
+    if unit ~= "player" or not env.playerCastingSpellID then
+      return nil
+    end
+    local spellID = env.playerCastingSpellID
+    local name = spells.byID[spellID] and spells.byID[spellID].name or ("Spell " .. tostring(spellID))
+    return name, name, nil, env.now * 1000, (env.now + 2) * 1000, false, 1, false, spellID
+  end
+
+  _G.UnitChannelInfo = function()
+    return nil
+  end
+
+  _G.hooksecurefunc = function()
+  end
+
   _G.C_ClassTalents = nil
   _G.C_Traits = nil
   _G.C_Spell = {
@@ -128,9 +155,25 @@ return function()
         spellID = spellID,
         name = info.name,
         iconID = info.texture,
+        castTime = tonumber(info.castTimeMS) or 0,
       }
     end,
   }
+
+  _G.GetSpellInfo = function(input)
+    local spellID = tonumber(input)
+    if not spellID then
+      spellID = spells.byName[tostring(input or ""):lower()]
+    end
+    if not spellID then
+      return nil
+    end
+    local info = spells.byID[spellID]
+    if not info then
+      return "Spell " .. tostring(spellID), nil, "Interface\\Icons\\INV_Misc_QuestionMark", 0, 0, 40, spellID
+    end
+    return info.name, nil, info.texture, tonumber(info.castTimeMS) or 0, 0, 40, spellID
+  end
 
   local ns = {
     name = "AuraLite",
@@ -191,6 +234,12 @@ return function()
     IsSecretCooldownsRestricted = function()
       return false
     end,
+    IsRestrictionActive = function()
+      return false
+    end,
+    GetSpellCooldownData = function()
+      return nil
+    end,
   }
 
   ns.SpellCatalog = {
@@ -208,6 +257,10 @@ return function()
   ns.GroupManager = {
     layoutSigByGroup = {},
     frames = {},
+    SetRestrictionState = function()
+    end,
+    Render = function()
+    end,
   }
 
   ns.Dragger = {
@@ -218,6 +271,7 @@ return function()
   loadAddonFile("AuraLite/AuraWatchlistRegistry.lua", ns)
   loadAddonFile("AuraLite/SettingsData.lua", ns)
   loadAddonFile("AuraLite/ProcRuleEngine.lua", ns)
+  loadAddonFile("AuraLite/EventRouter.lua", ns)
   loadAddonFile("AuraLite/ImportExport.lua", ns)
 
   function ns:RebuildWatchIndex()

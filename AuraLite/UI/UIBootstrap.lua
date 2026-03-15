@@ -65,6 +65,79 @@ function B:HandleSlash(msg)
     end
   end
 
+  if cmd == "debug" or cmd == "debug on" then
+    if ns.Debug and ns.Debug.SetEnabled then
+      ns.Debug:SetEnabled(true)
+      print("AuraLite: debug logging enabled.")
+      return
+    end
+  end
+
+  if cmd == "debug off" then
+    if ns.Debug and ns.Debug.SetEnabled then
+      ns.Debug:SetEnabled(false)
+      print("AuraLite: debug logging disabled.")
+      return
+    end
+  end
+
+  if cmd == "debug verbose" then
+    if ns.Debug and ns.Debug.SetEnabled and ns.Debug.SetVerbose then
+      ns.Debug:SetEnabled(true)
+      ns.Debug:SetVerbose(true)
+      print("AuraLite: verbose debug logging enabled.")
+      return
+    end
+  end
+
+  if cmd == "debug quiet" then
+    if ns.Debug and ns.Debug.SetVerbose then
+      ns.Debug:SetVerbose(false)
+      print("AuraLite: verbose debug logging disabled.")
+      return
+    end
+  end
+
+  if cmd == "debug saved on" then
+    if ns.Debug and ns.Debug.SetSavedOutput then
+      ns.Debug:SetSavedOutput(true)
+      print("AuraLite: saved debug log enabled.")
+      return
+    end
+  end
+
+  if cmd == "debug saved off" then
+    if ns.Debug and ns.Debug.SetSavedOutput then
+      ns.Debug:SetSavedOutput(false)
+      print("AuraLite: saved debug log disabled.")
+      return
+    end
+  end
+
+  if cmd == "debug chat on" then
+    if ns.Debug and ns.Debug.SetChatOutput then
+      ns.Debug:SetChatOutput(true)
+      print("AuraLite: chat debug output enabled.")
+      return
+    end
+  end
+
+  if cmd == "debug chat off" then
+    if ns.Debug and ns.Debug.SetChatOutput then
+      ns.Debug:SetChatOutput(false)
+      print("AuraLite: chat debug output disabled.")
+      return
+    end
+  end
+
+  if cmd == "debug clear" then
+    if ns.Debug and ns.Debug.ClearSavedLog then
+      local count = tonumber(ns.Debug:ClearSavedLog()) or 0
+      print(string.format("AuraLite: cleared %d saved debug lines.", count))
+      return
+    end
+  end
+
   self:FallbackCommand(msg)
 end
 

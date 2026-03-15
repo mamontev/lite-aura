@@ -15,6 +15,7 @@ E.lastRawAttempt = E.lastRawAttempt or nil
 E.lastRawAttempts = E.lastRawAttempts or {}
 E.lastRefreshSummary = E.lastRefreshSummary or { key = "", at = 0 }
 E.syntheticTargetAuras = E.syntheticTargetAuras or {}
+E.playerCastInFlight = E.playerCastInFlight or {}
 
 local function trimSafe(text)
   if U and type(U.Trim) == "function" then
@@ -485,6 +486,65 @@ local function getPendingAttemptByToken(self, spellID, attemptToken)
     end
   end
   return nil
+end
+
+local function getCurrentPlayerCastSpellID()
+  local castSpellID = nil
+  if type(UnitCastingInfo) == "function" then
+    castSpellID = normalizeQueuedSpellID(select(9, UnitCastingInfo("player")))
+    if castSpellID and castSpellID > 0 then
+      return castSpellID
+    end
+  end
+  if type(UnitChannelInfo) == "function" then
+    castSpellID = normalizeQueuedSpellID(select(9, UnitChannelInfo("player")))
+    if castSpellID and castSpellID > 0 then
+      return castSpellID
+    end
+  end
+  return nil
+end
+
+local function isPlayerCastingTrackedSpell(spellID)
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 then
+    return false
+  end
+  return getCurrentPlayerCastSpellID() == spellID
+end
+
+local function isRuntimeCastInFlight(self, spellID)
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 then
+    return false
+  end
+  self.playerCastInFlight = self.playerCastInFlight or {}
+  return self.playerCastInFlight[spellID] == true
+end
+
+local function spellHasCastTime(spellID)
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 then
+    return false
+  end
+
+  if C_Spell and type(C_Spell.GetSpellInfo) == "function" then
+    local ok, spellInfo = pcall(C_Spell.GetSpellInfo, spellID)
+    local castTimeMS = ok and type(spellInfo) == "table" and tonumber(spellInfo.castTime) or 0
+    if castTimeMS and castTimeMS > 0 then
+      return true
+    end
+  end
+
+  if type(GetSpellInfo) == "function" then
+    local _, _, _, castTimeMS = GetSpellInfo(spellID)
+    castTimeMS = tonumber(castTimeMS) or 0
+    if castTimeMS > 0 then
+      return true
+    end
+  end
+
+  return false
 end
 
 local function getLatestPendingAttempt(self, spellID, now, maxAge)
@@ -1330,14 +1390,6 @@ function E:PLAYER_LOGIN()
   self:EnsureFallbackPoller()
 
   self:RefreshAll()
-
-  if ns.ProfileManager:IsFirstRun() then
-    if ns.UIV2 and ns.UIV2.ConfigFrame and ns.UIV2.ConfigFrame.Open then
-      ns.UIV2.ConfigFrame:Open()
-    elseif ns.ConfigUI and ns.ConfigUI.ShowFirstRun then
-      ns.ConfigUI:ShowFirstRun()
-    end
-  end
 end
 
 function E:PLAYER_ENTERING_WORLD()
@@ -1551,10 +1603,11 @@ function E:PollRuleCastEdges()
         if type(state) ~= "table" or age > RESOLVER_MAX_AGE then
           expireResolverState(self, state, "timeout", now)
         elseif state.status == "attempted" then
+          local castTimeSpell = spellHasCastTime(spellID)
           local cd = ns.AuraAPI:GetSpellCooldownData(spellID)
           local cdStart = cd and tonumber(cd.startTime) or 0
           local cdNearAttempt = cdStart > 0 and cdStart >= ((state.attemptAt or 0) - 0.08) and cdStart <= (now + 0.05)
-          if cdNearAttempt and not isGlobalCooldownOnlyForSpell(cd, gcdData) then
+          if (not castTimeSpell) and (not isRuntimeCastInFlight(self, spellID)) and cdNearAttempt and not isGlobalCooldownOnlyForSpell(cd, gcdData) then
             if applyPositiveAttemptSignal(self, state, "cooldown_edge", RESOLVER_SCORE_CD_EDGE, "HOOK_CD_CONFIRM", now, cdStart) then
               triggered = true
             end
@@ -1562,7 +1615,7 @@ function E:PollRuleCastEdges()
             local gcdStart = gcdData and tonumber(gcdData.startTime) or 0
             local gcdNearAttempt = gcdStart > 0 and gcdStart >= ((state.attemptAt or 0) - 0.08) and gcdStart <= (now + 0.05)
             local blockedForAttempt = tonumber(state.lastErrorAt or 0) >= (state.attemptAt or 0)
-            if gcdNearAttempt and state.restricted ~= true and state.offGCD ~= true and not blockedForAttempt then
+            if (not castTimeSpell) and (not isRuntimeCastInFlight(self, spellID)) and gcdNearAttempt and state.restricted ~= true and state.offGCD ~= true and not blockedForAttempt then
               if applyPositiveAttemptSignal(self, state, "gcd_edge", RESOLVER_SCORE_GCD_EDGE, "HOOK_GCD_CONFIRM", now, gcdStart) then
                 triggered = true
               end
@@ -1601,8 +1654,12 @@ function E:ConfirmPendingCastAttempts()
         elseif state.status == "blocked" then
           expireResolverState(self, state, "blocked", now)
         elseif state.status == "attempted" then
+          local castInProgress = isPlayerCastingTrackedSpell(spellID)
+          local castTimeSpell = spellHasCastTime(spellID)
           local blockedForAttempt = tonumber(state.lastErrorAt or 0) >= (state.attemptAt or 0)
-          if state.restricted == true
+          if castInProgress or castTimeSpell then
+            -- Cast-time spells should only confirm on real cast success.
+          elseif state.restricted == true
             and state.restrictedFallbackUsed ~= true
             and age >= RESOLVER_RESTRICTED_MIN_AGE
             and age <= RESOLVER_RESTRICTED_MAX_AGE
@@ -1710,11 +1767,61 @@ function E:SPELL_UPDATE_USABLE()
   handleCooldownEvent(self)
 end
 
+function E:UNIT_SPELLCAST_START(unit, _, spellID)
+  if unit ~= "player" then
+    return
+  end
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 then
+    return
+  end
+  self.playerCastInFlight = self.playerCastInFlight or {}
+  self.playerCastInFlight[spellID] = true
+end
+
+function E:UNIT_SPELLCAST_STOP(unit, _, spellID)
+  if unit ~= "player" then
+    return
+  end
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 then
+    return
+  end
+  self.playerCastInFlight = self.playerCastInFlight or {}
+  self.playerCastInFlight[spellID] = nil
+end
+
+function E:UNIT_SPELLCAST_CHANNEL_START(unit, _, spellID)
+  if unit ~= "player" then
+    return
+  end
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 then
+    return
+  end
+  self.playerCastInFlight = self.playerCastInFlight or {}
+  self.playerCastInFlight[spellID] = true
+end
+
+function E:UNIT_SPELLCAST_CHANNEL_STOP(unit, _, spellID)
+  if unit ~= "player" then
+    return
+  end
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 then
+    return
+  end
+  self.playerCastInFlight = self.playerCastInFlight or {}
+  self.playerCastInFlight[spellID] = nil
+end
+
 function E:UNIT_SPELLCAST_SUCCEEDED(unit, _, spellID)
   ns.Debug:Verbosef("Event UNIT_SPELLCAST_SUCCEEDED unit=%s spellID=%s", tostring(unit), tostring(spellID))
   if unit == "player" then
     local now = GetTime()
     spellID = normalizeQueuedSpellID(spellID)
+    self.playerCastInFlight = self.playerCastInFlight or {}
+    self.playerCastInFlight[spellID] = nil
     local attempt = getLatestPendingAttempt(self, spellID, now, RESOLVER_MAX_AGE)
     if attempt and applyPositiveAttemptSignal(self, attempt, "runtime_success", RESOLVER_SCORE_RUNTIME_SUCCESS, "UNIT_SPELLCAST_SUCCEEDED", now, unit) then
       return
@@ -1730,6 +1837,10 @@ local function handleRuntimeCastFailure(self, eventName, unit, spellID)
   end
   local now = GetTime()
   spellID = normalizeQueuedSpellID(spellID)
+  self.playerCastInFlight = self.playerCastInFlight or {}
+  if spellID and spellID > 0 then
+    self.playerCastInFlight[spellID] = nil
+  end
   local attempt = getLatestPendingAttempt(self, spellID, now, RESOLVER_MAX_AGE)
   if attempt then
     blockResolverState(self, attempt, string.lower(tostring(eventName or "runtime_fail")), now)

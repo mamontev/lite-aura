@@ -13,17 +13,12 @@ R._draftMeta = R._draftMeta or {}
 R._newCounter = R._newCounter or 0
 
 local function cloneShallow(tbl)
+  if ns.Utils and ns.Utils.DeepCopy then
+    return ns.Utils.DeepCopy(tbl or {})
+  end
   local out = {}
   for k, v in pairs(tbl or {}) do
-    if type(v) == "table" then
-      local t = {}
-      for k2, v2 in pairs(v) do
-        t[k2] = v2
-      end
-      out[k] = t
-    else
-      out[k] = v
-    end
+    out[k] = v
   end
   return out
 end
@@ -36,10 +31,59 @@ local function hydrateDraftWithRule(draft)
   if type(draft) ~= "table" then
     return draft
   end
+  local auraSpellID = tonumber(draft.spellID)
+  if auraSpellID and auraSpellID > 0 and RuleRepo and RuleRepo.ListRulesForAura and B and B.ApplyRulesToDraft then
+    local rules = RuleRepo:ListRulesForAura(auraSpellID)
+    if type(rules) == "table" and #rules > 0 then
+      B:ApplyRulesToDraft(draft, rules)
+      return draft
+    end
+  end
   if RuleRepo and RuleRepo.ApplyPrimaryRuleToDraft then
     RuleRepo:ApplyPrimaryRuleToDraft(draft)
   end
   return draft
+end
+
+local function getCurrentLoadContext()
+  local _, classToken = UnitClass and UnitClass("player") or nil
+  classToken = tostring(classToken or ""):upper()
+
+  local specID = nil
+  if GetSpecialization and GetSpecializationInfo then
+    local specIndex = GetSpecialization()
+    if specIndex then
+      specID = tonumber((GetSpecializationInfo(specIndex)))
+    end
+  end
+
+  return classToken, specID
+end
+
+local function matchesLoad(item)
+  item = item or {}
+  local currentClass, currentSpecID = getCurrentLoadContext()
+  local loadClass = tostring(item.loadClassToken or ""):upper()
+  if loadClass ~= "" and loadClass ~= currentClass then
+    return false, "Wrong Class"
+  end
+
+  local specIDs = item.loadSpecIDs
+  local hasSpecs = type(specIDs) == "table" and #specIDs > 0
+  if hasSpecs then
+    local wanted = false
+    for i = 1, #specIDs do
+      if tonumber(specIDs[i]) == tonumber(currentSpecID) then
+        wanted = true
+        break
+      end
+    end
+    if not wanted then
+      return false, "Wrong Spec"
+    end
+  end
+
+  return true, ""
 end
 
 local function mapEntryRow(row)
@@ -49,12 +93,17 @@ local function mapEntryRow(row)
   if tostring(row.unit or "player") == "target" then
     triggerLabel = (trackingMode == "estimated") and "Estimated from your cast" or "Confirmed read"
   end
+  local isLoaded, loadReason = matchesLoad(item)
   return {
     id = tostring(row.key or ""),
     spellID = tonumber(item.spellID) or 0,
     name = (item.displayName and item.displayName ~= "") and tostring(item.displayName) or ((ns.AuraAPI and ns.AuraAPI.GetSpellName and ns.AuraAPI:GetSpellName(item.spellID)) or ("Spell " .. tostring(item.spellID or "?"))),
     unit = tostring(row.unit or "player"),
     group = tostring(item.groupID or ""),
+    isLoaded = isLoaded,
+    loadReason = loadReason,
+    isDraft = false,
+    isGrouped = tostring(item.groupID or "") ~= "",
     trigger = triggerLabel,
     status = (tonumber(item.spellID) or 0) > 0 and "ok" or "warn",
     icon = (ns.AuraAPI and ns.AuraAPI.GetSpellTexture and ns.AuraAPI:GetSpellTexture(item.spellID)) or 134400,
@@ -97,6 +146,10 @@ function R:ListAuras(state)
           name = tostring(d.name or "New Aura"),
           unit = tostring(d.unit or "player"),
           group = tostring(d.group or "custom"),
+          isLoaded = true,
+          loadReason = "",
+          isDraft = true,
+          isGrouped = tostring(d.group or "") ~= "",
           trigger = "Draft",
           status = "warn",
           icon = 134400,
@@ -105,6 +158,9 @@ function R:ListAuras(state)
     end
 
     table.sort(out, function(a, b)
+      if (a.isLoaded ~= false) ~= (b.isLoaded ~= false) then
+        return a.isLoaded ~= false
+      end
       return tostring(a.name) < tostring(b.name)
     end)
     return out

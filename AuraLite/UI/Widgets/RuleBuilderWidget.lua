@@ -79,6 +79,34 @@ local function spellListLabel(csv)
   return table.concat(parts, ", ")
 end
 
+local function produceTriggerLabel(draft)
+  draft = draft or {}
+  local triggers = draft.produceTriggers
+  if type(triggers) ~= "table" or #triggers == 0 then
+    return spellListLabel(draft.castSpellIDs)
+  end
+
+  local parts = {}
+  for i = 1, #triggers do
+    local row = triggers[i]
+    local spellID = tonumber(type(row) == "table" and row.spellID or row)
+    if spellID and spellID > 0 then
+      local name = resolveSpellName(spellID) or ("Spell " .. tostring(spellID))
+      local amount = math.max(1, tonumber(type(row) == "table" and row.stackAmount or 1) or 1)
+      if (tonumber(draft.maxStacks) or 1) > 1 or tostring(draft.stackBehavior or "replace") == "add" then
+        parts[#parts + 1] = string.format("%s (+%d)", name, amount)
+      else
+        parts[#parts + 1] = name
+      end
+    end
+  end
+
+  if #parts == 0 then
+    return spellListLabel(draft.castSpellIDs)
+  end
+  return table.concat(parts, ", ")
+end
+
 local function auraLabel(spellID)
   local sid = tonumber(spellID)
   if not sid or sid <= 0 then
@@ -88,30 +116,31 @@ local function auraLabel(spellID)
 end
 
 local function ruleNarrative(draft)
-  local cast = spellListLabel(draft.castSpellIDs)
   local mode = tostring(draft.actionMode or "produce")
+  local cast = (mode == "consume") and spellListLabel(draft.consumeCastSpellIDs or draft.castSpellIDs) or produceTriggerLabel(draft)
   local auraName = auraLabel(draft.spellID)
-  local thenText = mode == "consume" and ("Consume " .. auraName) or ("Show " .. auraName)
+  local thenText = mode == "consume" and ("use a charge from " .. auraName) or ("show " .. auraName)
   if hasExtraConditions(draft) then
-    local cond = (tostring(draft.conditionLogic or "all") == "any") and "OR" or "AND"
-    return string.format("WHEN %s  |  IF %s conditions  |  THEN %s", cast, cond, thenText)
+    local cond = (tostring(draft.conditionLogic or "all") == "any") and "any" or "all"
+    return string.format("When %s, if %s extra conditions pass, %s.", cast, cond, thenText)
   end
-  return string.format("WHEN %s  |  THEN %s", cast, thenText)
+  return string.format("When %s, %s.", cast, thenText)
 end
 
 function RuleBuilder:SetDraft(draft)
   self.draft = draft or {}
   local showIf = hasExtraConditions(self.draft)
   if self.whenValue then
-    self.whenValue:SetText(spellListLabel(self.draft.castSpellIDs))
+    local mode = tostring(self.draft.actionMode or "produce")
+    self.whenValue:SetText((mode == "consume") and spellListLabel(self.draft.consumeCastSpellIDs or self.draft.castSpellIDs) or produceTriggerLabel(self.draft))
   end
   if self.ifBox and self.ifValue then
-    self.ifValue:SetText((tostring(self.draft.conditionLogic or "all") == "any") and "OR (any)" or "AND (all)")
+    self.ifValue:SetText((tostring(self.draft.conditionLogic or "all") == "any") and "Any condition can pass" or "All conditions must pass")
     self.ifBox:SetShown(showIf)
   end
   if self.thenValue then
     local auraName = auraLabel(self.draft.spellID)
-    local text = (tostring(self.draft.actionMode or "produce") == "consume") and ("Consume " .. auraName) or ("Show " .. auraName)
+    local text = (tostring(self.draft.actionMode or "produce") == "consume") and ("Spend from " .. auraName) or ("Show " .. auraName)
     self.thenValue:SetText(text)
   end
   if self.whenBox and self.thenBox then
@@ -143,13 +172,13 @@ function RuleBuilder:Create(parent, onChanged)
 
   o.title = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   o.title:SetPoint("TOPLEFT", 10, -8)
-  o.title:SetText("Rule Builder")
+  o.title:SetText("How This Aura Works")
 
   o.narrative = o.frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   o.narrative:SetPoint("TOPLEFT", 10, -28)
   o.narrative:SetPoint("RIGHT", -10, 0)
   o.narrative:SetJustifyH("LEFT")
-  o.narrative:SetText("WHEN cast ?  |  IF AND conditions  |  THEN Produce Aura")
+  o.narrative:SetText("When one of your chosen spells happens, AuraLite decides whether to show or spend this aura.")
 
   local function buildColumn(label, x)
     local box = CreateFrame("Frame", nil, o.frame, "BackdropTemplate")
@@ -169,9 +198,9 @@ function RuleBuilder:Create(parent, onChanged)
     return box, val
   end
 
-  o.whenBox, o.whenValue = buildColumn("WHEN", 10)
-  o.ifBox, o.ifValue = buildColumn("IF", 190)
-  o.thenBox, o.thenValue = buildColumn("THEN", 370)
+  o.whenBox, o.whenValue = buildColumn("When This Happens", 10)
+  o.ifBox, o.ifValue = buildColumn("Only If", 190)
+  o.thenBox, o.thenValue = buildColumn("Aura Will", 370)
 
   return o
 end
