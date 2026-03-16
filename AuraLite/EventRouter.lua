@@ -29,6 +29,7 @@ local processPlayerCast
 local getActiveGlobalCooldownEndAt
 local isSpellOffGlobalCooldown
 local getResolverGateEndAt
+local getRawGlobalCooldownData
 
 local RESOLVER_ATTRIBUTION_WINDOW = 0.08
 local RESOLVER_MAX_AGE = 0.45
@@ -69,6 +70,9 @@ local SYNTHETIC_TARGET_SLOT = "__current_target__"
 
 local function normalizeTrackingMode(item, unit)
   local mode = tostring(item and item.trackingMode or ""):lower()
+  if tostring(unit or "") == "player" and mode == "cooldown" then
+    return "cooldown"
+  end
   if tostring(unit or "") == "target" and mode == "estimated" then
     return "estimated"
   end
@@ -513,6 +517,27 @@ local function isPlayerCastingTrackedSpell(spellID)
   return getCurrentPlayerCastSpellID() == spellID
 end
 
+local function isKnownPlayerSpell(spellID)
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 then
+    return false
+  end
+
+  if IsPlayerSpell then
+    local ok, known = pcall(IsPlayerSpell, spellID)
+    if ok and known == true then
+      return true
+    end
+  end
+
+  local talentSet = ns.ProcRules and ns.ProcRules.playerTalentSpellSet
+  if type(talentSet) == "table" and talentSet[spellID] == true then
+    return true
+  end
+
+  return false
+end
+
 local function isRuntimeCastInFlight(self, spellID)
   spellID = normalizeQueuedSpellID(spellID)
   if not spellID or spellID <= 0 then
@@ -545,6 +570,46 @@ local function spellHasCastTime(spellID)
   end
 
   return false
+end
+
+local function isLikelyProxyCooldown(self, spellID, cooldown)
+  spellID = normalizeQueuedSpellID(spellID)
+  if not spellID or spellID <= 0 or type(cooldown) ~= "table" then
+    return false
+  end
+  if isKnownPlayerSpell(spellID) then
+    return false
+  end
+  if isPlayerCastingTrackedSpell(spellID) or isRuntimeCastInFlight(self, spellID) then
+    return false
+  end
+
+  local now = GetTime()
+  local lastConfirmed = tonumber((E.lastProcessedCast or {})[spellID]) or 0
+  if lastConfirmed > 0 and (now - lastConfirmed) <= 0.35 then
+    return false
+  end
+
+  local cdStart = tonumber(cooldown.startTime) or 0
+  local cdDuration = tonumber(cooldown.duration) or 0
+  if cdStart <= 0 or cdDuration <= 0.05 then
+    return false
+  end
+
+  local gcdData = getRawGlobalCooldownData()
+  if type(gcdData) ~= "table" then
+    return false
+  end
+
+  local gcdStart = tonumber(gcdData.startTime) or 0
+  local gcdDuration = tonumber(gcdData.duration) or 0
+  if gcdStart <= 0 or gcdDuration <= 0.05 then
+    return false
+  end
+
+  local sameWindow = math.abs(cdStart - gcdStart) <= 0.20
+  local nearGCDDuration = math.abs(cdDuration - gcdDuration) <= 0.35
+  return sameWindow and nearGCDDuration
 end
 
 local function getLatestPendingAttempt(self, spellID, now, maxAge)
@@ -964,10 +1029,11 @@ logResolverOutcome = function(state, outcome, detail, now)
   )
 end
 
-local function getRawGlobalCooldownData()
+getRawGlobalCooldownData = function()
   if not GetSpellCooldown then
     return nil
   end
+  local isSafeNumber = ns.AuraAPI and ns.AuraAPI.IsSafeNumber
   local startTime, duration, enabled = GetSpellCooldown(61304)
   startTime = tonumber(startTime) or 0
   duration = tonumber(duration) or 0
@@ -975,7 +1041,11 @@ local function getRawGlobalCooldownData()
   if enabled == false or enabled == 0 then
     return nil
   end
-  if not ns.AuraAPI:IsSafeNumber(startTime) or not ns.AuraAPI:IsSafeNumber(duration) then
+  if type(isSafeNumber) == "function" then
+    if not isSafeNumber(ns.AuraAPI, startTime) or not isSafeNumber(ns.AuraAPI, duration) then
+      return nil
+    end
+  elseif type(startTime) ~= "number" or type(duration) ~= "number" then
     return nil
   end
   if startTime <= 0 or duration <= 0.05 then
@@ -1131,21 +1201,20 @@ function E:BuildRowsForUnit(unit)
   for _, item in ipairs(list) do
     if isAuraLoadAllowed(item, playerClassToken, playerSpecID, playerInCombat) then
       local trackingMode = normalizeTrackingMode(item, unit)
+      local cooldownMode = (trackingMode == "cooldown")
       local directAuraTracking = unit ~= "player" and trackingMode ~= "estimated"
       local selectedInUnlock = isSelectedAuraInUnlock(unit, item)
-      local previewItem = getSelectedAuraPreviewItem(unit, item)
-      local renderItem = previewItem or item
-      local selectedPreview = previewItem ~= nil
+      local renderItem = item
       local identityKey = buildIndependentGroupID(unit, item)
       local effectiveGroupID = resolveDisplayGroupID(unit, item)
       local renderGroupID = tostring(item and item.groupID or "")
       local groupedMoverPreview = (ns.db and ns.db.locked == false and sanitizeGroupToken(renderGroupID) ~= "")
-      local shouldIsolatePreview = (selectedInUnlock or selectedPreview) and sanitizeGroupToken(renderGroupID) == ""
+      local shouldIsolatePreview = selectedInUnlock and sanitizeGroupToken(renderGroupID) == ""
       if shouldIsolatePreview then
         effectiveGroupID = identityKey
       end
       local aura = nil
-      if directAuraTracking or trackingMode == "estimated" or not rulesOnlyMode then
+      if (not cooldownMode) and (directAuraTracking or trackingMode == "estimated" or not rulesOnlyMode) then
         if directAuraTracking then
           aura = ns.AuraAPI:GetAuraBySpellID(unit, renderItem.spellID)
         end
@@ -1181,7 +1250,7 @@ function E:BuildRowsForUnit(unit)
       end
       local cooldown = nil
       local cooldownRestricted = false
-      if (not directAuraTracking) and (not rulesOnlyMode) and (not aura) and unit == "player" then
+      if (not directAuraTracking) and cooldownMode and (not aura) and unit == "player" then
         cooldownRestricted = ns.AuraAPI:IsSecretCooldownsRestricted(item.spellID)
         if cooldownRestricted then
           cooldown = getEstimatedCooldown(item.spellID)
@@ -1193,10 +1262,15 @@ function E:BuildRowsForUnit(unit)
         else
           cooldown = ns.AuraAPI:GetSpellCooldownData(item.spellID)
           if cooldown then
-            learnCooldown(item.spellID, cooldown.duration)
-            clearEstimatedCooldown(item.spellID)
-            local remaining = math.max(0, (cooldown.expirationTime or 0) - GetTime())
-            ns.Debug:Throttled("cd-hit-" .. tostring(item.spellID), 1.5, "Cooldown row spellID=%d remaining=%.1f", tonumber(item.spellID) or 0, remaining)
+            if isLikelyProxyCooldown(self, item.spellID, cooldown) then
+              cooldown = nil
+              ns.Debug:Throttled("cd-proxy-" .. tostring(item.spellID), 4.0, "Ignoring proxy cooldown spellID=%d (likely GCD mirrored onto aura/proc ID).", tonumber(item.spellID) or 0)
+            else
+              learnCooldown(item.spellID, cooldown.duration)
+              clearEstimatedCooldown(item.spellID)
+              local remaining = math.max(0, (cooldown.expirationTime or 0) - GetTime())
+              ns.Debug:Throttled("cd-hit-" .. tostring(item.spellID), 1.5, "Cooldown row spellID=%d remaining=%.1f", tonumber(item.spellID) or 0, remaining)
+            end
           else
             ns.Debug:Throttled("cd-miss-" .. tostring(item.spellID), 4.0, "No cooldown data spellID=%d (possible aura/proc ID).", tonumber(item.spellID) or 0)
           end
@@ -1219,8 +1293,12 @@ function E:BuildRowsForUnit(unit)
         local expirationTime = auraExpirationTime or (cooldown and cooldown.expirationTime)
         local duration = auraDuration or (cooldown and cooldown.duration)
         local sourceLabel = aura and ns.AuraAPI:GetSourceLabel(aura) or ""
-        local stateKind = (aura and aura._alStateKind) or ((trackingMode == "estimated") and "estimated_target_debuff" or "confirmed_aura")
-        local stateLabel = (aura and aura._alStateLabel) or ((trackingMode == "estimated") and "Estimated from your cast" or "Direct aura read")
+        local stateKind = (aura and aura._alStateKind)
+          or (cooldown and "cooldown")
+          or ((trackingMode == "estimated") and "estimated_target_debuff" or "confirmed_aura")
+        local stateLabel = (aura and aura._alStateLabel)
+          or (cooldown and "Spell cooldown")
+          or ((trackingMode == "estimated") and "Estimated from your cast" or "Direct aura read")
         rowsByGroup[effectiveGroupID] = rowsByGroup[effectiveGroupID] or {}
         rowsByGroup[effectiveGroupID][#rowsByGroup[effectiveGroupID] + 1] = {
           entryKey = tostring(unit) .. ":" .. tostring(itemIndex),
@@ -1251,9 +1329,15 @@ function E:BuildRowsForUnit(unit)
           barWidth = tonumber(renderItem.barWidth) or 94,
           barHeight = tonumber(renderItem.barHeight) or 16,
           showTimerText = renderItem.showTimerText ~= false,
+          timerTextSize = tonumber(renderItem.timerTextSize) or 12,
+          timerTextFont = renderItem.timerTextFont or "friz",
           barColor = renderItem.barColor or "",
           barSide = renderItem.barSide or "right",
+          showCustomText = renderItem.showCustomText ~= false,
+          customTextSize = tonumber(renderItem.customTextSize) or 12,
+          customTextFont = renderItem.customTextFont or "friz",
           barTexture = renderItem.barTexture or "",
+          visualStates = (ns.VisualStyle and ns.VisualStyle:CloneStates(renderItem.visualStates)) or nil,
           timerAnchor = renderItem.timerAnchor or "BOTTOM",
           timerOffsetX = tonumber(renderItem.timerOffsetX) or 0,
           timerOffsetY = tonumber(renderItem.timerOffsetY) or -1,
@@ -1264,6 +1348,7 @@ function E:BuildRowsForUnit(unit)
           resourceMinPct = tonumber(renderItem.resourceMinPct) or 0,
           resourceMaxPct = tonumber(renderItem.resourceMaxPct) or 100,
           lowTimeThreshold = tonumber(renderItem.lowTimeThreshold) or 0,
+          maxStacks = tonumber(renderItem.maxStacks) or 1,
           soundOnGain = renderItem.soundOnGain or "default",
           soundOnLow = renderItem.soundOnLow or "default",
           soundOnExpire = renderItem.soundOnExpire or "default",
@@ -1276,43 +1361,56 @@ function E:BuildRowsForUnit(unit)
         or ns.TestMode:IsEnabled()
         or ((ns.db and ns.db.locked == false) and not configPreviewVisible)
       then
-        local fake = ns.TestMode:BuildPlaceholder(renderItem, unit)
+        local placeholderItem = item
+        local fake = ns.TestMode:BuildPlaceholder(placeholderItem, unit)
         fake.entryKey = tostring(unit) .. ":" .. tostring(itemIndex)
         fake.groupID = effectiveGroupID
         fake.identityKey = identityKey
         fake.sourceGroupID = sanitizeGroupToken(item and item.groupID)
-        fake.savedPosition = renderItem.savedPosition
-        fake.displayName = renderItem.displayName or ""
-        fake.groupOrder = tonumber(renderItem.groupOrder) or 0
-        fake.customText = renderItem.customText or ""
-        fake.timerVisual = renderItem.timerVisual or "icon"
-        fake.iconWidth = tonumber(renderItem.iconWidth) or 36
-        fake.iconHeight = tonumber(renderItem.iconHeight) or 36
-        fake.barWidth = tonumber(renderItem.barWidth) or 94
-        fake.barHeight = tonumber(renderItem.barHeight) or 16
-        fake.showTimerText = renderItem.showTimerText ~= false
-        fake.barColor = renderItem.barColor or ""
-        fake.barSide = renderItem.barSide or "right"
-        fake.barTexture = renderItem.barTexture or ""
-        fake.timerAnchor = renderItem.timerAnchor or "BOTTOM"
-        fake.timerOffsetX = tonumber(renderItem.timerOffsetX) or 0
-        fake.timerOffsetY = tonumber(renderItem.timerOffsetY) or -1
-        fake.customTextAnchor = renderItem.customTextAnchor or "TOP"
-        fake.customTextOffsetX = tonumber(renderItem.customTextOffsetX) or 0
-        fake.customTextOffsetY = tonumber(renderItem.customTextOffsetY) or 2
-        fake.resourceConditionEnabled = renderItem.resourceConditionEnabled == true
-        fake.resourceMinPct = tonumber(renderItem.resourceMinPct) or 0
-        fake.resourceMaxPct = tonumber(renderItem.resourceMaxPct) or 100
-        fake.lowTimeThreshold = tonumber(renderItem.lowTimeThreshold) or 0
-        fake.soundOnGain = renderItem.soundOnGain or "default"
-        fake.soundOnLow = renderItem.soundOnLow or "default"
-        fake.soundOnExpire = renderItem.soundOnExpire or "default"
+        fake.savedPosition = placeholderItem.savedPosition
+        fake.displayName = placeholderItem.displayName or ""
+        fake.groupOrder = tonumber(placeholderItem.groupOrder) or 0
+        fake.customText = placeholderItem.customText or ""
+        fake.timerVisual = placeholderItem.timerVisual or "icon"
+        fake.iconWidth = tonumber(placeholderItem.iconWidth) or 36
+        fake.iconHeight = tonumber(placeholderItem.iconHeight) or 36
+        fake.barWidth = tonumber(placeholderItem.barWidth) or 94
+        fake.barHeight = tonumber(placeholderItem.barHeight) or 16
+        fake.showTimerText = placeholderItem.showTimerText ~= false
+        fake.timerTextSize = tonumber(placeholderItem.timerTextSize) or 12
+        fake.timerTextFont = placeholderItem.timerTextFont or "friz"
+        fake.barColor = placeholderItem.barColor or ""
+        fake.barGradientEnabled = placeholderItem.barGradientEnabled == true
+        fake.barColor2 = placeholderItem.barColor2 or ""
+        fake.barSide = placeholderItem.barSide or "right"
+        fake.showNameText = placeholderItem.showNameText ~= false
+        fake.nameTextSize = tonumber(placeholderItem.nameTextSize) or 12
+        fake.nameTextFont = placeholderItem.nameTextFont or "friz"
+        fake.showCustomText = placeholderItem.showCustomText ~= false
+        fake.customTextSize = tonumber(placeholderItem.customTextSize) or 12
+        fake.customTextFont = placeholderItem.customTextFont or "friz"
+        fake.barTexture = placeholderItem.barTexture or ""
+        fake.visualStates = (ns.VisualStyle and ns.VisualStyle:CloneStates(placeholderItem.visualStates)) or nil
+        fake.timerAnchor = placeholderItem.timerAnchor or "BOTTOM"
+        fake.timerOffsetX = tonumber(placeholderItem.timerOffsetX) or 0
+        fake.timerOffsetY = tonumber(placeholderItem.timerOffsetY) or -1
+        fake.customTextAnchor = placeholderItem.customTextAnchor or "TOP"
+        fake.customTextOffsetX = tonumber(placeholderItem.customTextOffsetX) or 0
+        fake.customTextOffsetY = tonumber(placeholderItem.customTextOffsetY) or 2
+        fake.resourceConditionEnabled = placeholderItem.resourceConditionEnabled == true
+        fake.resourceMinPct = tonumber(placeholderItem.resourceMinPct) or 0
+        fake.resourceMaxPct = tonumber(placeholderItem.resourceMaxPct) or 100
+        fake.lowTimeThreshold = tonumber(placeholderItem.lowTimeThreshold) or 0
+        fake.maxStacks = tonumber(placeholderItem.maxStacks) or 1
+        fake.soundOnGain = placeholderItem.soundOnGain or "default"
+        fake.soundOnLow = placeholderItem.soundOnLow or "default"
+        fake.soundOnExpire = placeholderItem.soundOnExpire or "default"
         fake.sortIndex = _
         fake.unitOrder = unitOrderMap[unit] or 99
-        fake.iconMode = renderItem.iconMode or "spell"
-        fake.customTexture = renderItem.customTexture or ""
-        fake.icon = ns.AuraAPI:GetDisplayTextureForItem(renderItem, nil)
-        fake.fallbackIcon = ns.AuraAPI:SelectBestTexture(ns.AuraAPI:GetSpellTexture(renderItem.spellID), 136243)
+        fake.iconMode = placeholderItem.iconMode or "spell"
+        fake.customTexture = placeholderItem.customTexture or ""
+        fake.icon = ns.AuraAPI:GetDisplayTextureForItem(placeholderItem, nil)
+        fake.fallbackIcon = ns.AuraAPI:SelectBestTexture(ns.AuraAPI:GetSpellTexture(placeholderItem.spellID), 136243)
         fake.isPlaceholder = true
         rowsByGroup[effectiveGroupID] = rowsByGroup[effectiveGroupID] or {}
         rowsByGroup[effectiveGroupID][#rowsByGroup[effectiveGroupID] + 1] = fake
@@ -1592,6 +1690,7 @@ function E:PollRuleCastEdges()
   local now = GetTime()
   local triggered = false
   local gcdData = getRawGlobalCooldownData()
+  local playerInCombat = InCombatLockdown() == true
 
   for spellID, attempts in pairs(states) do
     if type(attempts) ~= "table" then
@@ -1615,7 +1714,7 @@ function E:PollRuleCastEdges()
             local gcdStart = gcdData and tonumber(gcdData.startTime) or 0
             local gcdNearAttempt = gcdStart > 0 and gcdStart >= ((state.attemptAt or 0) - 0.08) and gcdStart <= (now + 0.05)
             local blockedForAttempt = tonumber(state.lastErrorAt or 0) >= (state.attemptAt or 0)
-            if (not castTimeSpell) and (not isRuntimeCastInFlight(self, spellID)) and gcdNearAttempt and state.restricted ~= true and state.offGCD ~= true and not blockedForAttempt then
+            if playerInCombat and (not castTimeSpell) and (not isRuntimeCastInFlight(self, spellID)) and gcdNearAttempt and state.restricted ~= true and state.offGCD ~= true and not blockedForAttempt then
               if applyPositiveAttemptSignal(self, state, "gcd_edge", RESOLVER_SCORE_GCD_EDGE, "HOOK_GCD_CONFIRM", now, gcdStart) then
                 triggered = true
               end
@@ -1641,6 +1740,7 @@ function E:ConfirmPendingCastAttempts()
 
   local now = GetTime()
   local confirmedAny = false
+  local playerInCombat = InCombatLockdown() == true
 
   for spellID, attempts in pairs(states) do
     if type(attempts) ~= "table" then
@@ -1659,7 +1759,8 @@ function E:ConfirmPendingCastAttempts()
           local blockedForAttempt = tonumber(state.lastErrorAt or 0) >= (state.attemptAt or 0)
           if castInProgress or castTimeSpell then
             -- Cast-time spells should only confirm on real cast success.
-          elseif state.restricted == true
+          elseif playerInCombat
+            and state.restricted == true
             and state.restrictedFallbackUsed ~= true
             and age >= RESOLVER_RESTRICTED_MIN_AGE
             and age <= RESOLVER_RESTRICTED_MAX_AGE

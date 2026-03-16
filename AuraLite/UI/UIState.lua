@@ -63,13 +63,27 @@ function S:ClearDraggingAura()
 end
 
 function S:SetSelectedAura(auraId, source)
-  if self._data.selectedAuraId == auraId then
+  local normalizedAuraId = tostring(auraId or "")
+  if normalizedAuraId == "" then
+    normalizedAuraId = nil
+  end
+
+  if self._data.selectedAuraId == normalizedAuraId then
     return
   end
-  self._data.selectedAuraId = auraId
+
+  if self._selectInFlight == true and self._selectingAuraId == normalizedAuraId then
+    return
+  end
+
+  self._data.selectedAuraId = normalizedAuraId
   if E then
-    E:Emit(E.Names.AURA_SELECTED, { auraId = auraId, source = source or "unknown" })
+    self._selectInFlight = true
+    self._selectingAuraId = normalizedAuraId
+    E:Emit(E.Names.AURA_SELECTED, { auraId = normalizedAuraId, source = source or "unknown" })
     E:Emit(E.Names.STATE_CHANGED, self:Get())
+    self._selectInFlight = false
+    self._selectingAuraId = nil
   end
 end
 

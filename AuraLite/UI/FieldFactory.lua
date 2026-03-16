@@ -8,76 +8,337 @@ local F = UI.FieldFactory
 
 local SpellInput = UI.SpellInput
 local Skin = ns.UISkin
+local Widgets = UI.Widgets or {}
 
 local function createInputBackground(parent)
   local bg = parent:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
-  bg:SetColorTexture(0.03, 0.09, 0.16, 0.65)
+  bg:SetColorTexture(0, 0, 0, 0)
   return bg
 end
 
-local function createDropdown(parent, width)
-  local drop = CreateFrame("Frame", nil, parent, "UIDropDownMenuTemplate")
-  UIDropDownMenu_SetWidth(drop, width or 260)
-  UIDropDownMenu_JustifyText(drop, "LEFT")
-  drop.options = {}
-  drop.value = nil
-  drop.onChanged = nil
+local function styleFieldShell(holder)
+  holder:SetBackdrop({
+    bgFile = "Interface\\Buttons\\WHITE8x8",
+    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    tile = true,
+    tileSize = 8,
+    edgeSize = 1,
+    insets = { left = 0, right = 0, top = 0, bottom = 0 },
+  })
+  holder:SetBackdropColor(0.10, 0.11, 0.13, 0.30)
+  holder:SetBackdropBorderColor(0.24, 0.25, 0.28, 0.18)
 
-  local function findLabel(value)
-    for i = 1, #(drop.options or {}) do
-      local row = drop.options[i]
-      if tostring(row.value) == tostring(value) then
-        return row.label
-      end
-    end
-    return "Choose..."
+  if not holder._alBottomShade then
+    holder._alBottomShade = holder:CreateTexture(nil, "BORDER")
+    holder._alBottomShade:SetPoint("BOTTOMLEFT", 1, 1)
+    holder._alBottomShade:SetPoint("BOTTOMRIGHT", -1, 1)
+    holder._alBottomShade:SetHeight(10)
+    holder._alBottomShade:SetTexture("Interface\\Buttons\\WHITE8x8")
+  end
+  holder._alBottomShade:SetColorTexture(0, 0, 0, 0.03)
+
+  if not holder._alTopLine then
+    holder._alTopLine = holder:CreateTexture(nil, "ARTWORK")
+    holder._alTopLine:SetPoint("TOPLEFT", 1, -1)
+    holder._alTopLine:SetPoint("TOPRIGHT", -1, -1)
+    holder._alTopLine:SetHeight(1)
+    holder._alTopLine:SetTexture("Interface\\Buttons\\WHITE8x8")
+  end
+  holder._alTopLine:SetColorTexture(1.0, 0.82, 0.18, 0.05)
+end
+
+local function createFieldShell(parent, field, multiline)
+  local holder = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+  local hasHelpText = tostring(field and field.help or "") ~= ""
+  local isWideWidget = multiline
+    or field.widget == "multiline"
+    or field.widget == "dropdown"
+    or field.widget == "bartexture"
+    or field.widget == "soundpicker"
+    or field.widget == "groupselect"
+  local baseHeight = isWideWidget and 58 or 30
+  holder:SetHeight(baseHeight)
+  styleFieldShell(holder)
+
+  local label = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  label:SetPoint("TOPLEFT", 12, -4)
+  label:SetPoint("RIGHT", -32, 0)
+  label:SetJustifyH("LEFT")
+  label:SetText(field.label or field.key or "Field")
+  label:SetTextColor(0.78, 0.82, 0.88)
+
+  local helpIcon = nil
+  if hasHelpText and Widgets.HelpIconWidget and Widgets.HelpIconWidget.Create then
+    helpIcon = Widgets.HelpIconWidget:Create(holder, {
+      title = field.label or field.key or "Field",
+      body = field.help,
+      size = 14,
+    })
+    helpIcon:SetPoint("TOPRIGHT", -10, -6)
   end
 
-  local function init(_, level)
-    if level ~= 1 then
-      return
+  local anchor = CreateFrame("Frame", nil, holder)
+  if isWideWidget then
+    anchor:SetPoint("TOPLEFT", 12, -18)
+    anchor:SetPoint("TOPRIGHT", -12, -18)
+    anchor:SetHeight(baseHeight - 22)
+  else
+    anchor:SetPoint("TOPRIGHT", -10, -3)
+    anchor:SetPoint("BOTTOMRIGHT", -10, 4)
+    anchor:SetWidth(math.max(180, tonumber(field.width) or 220))
+  end
+
+  holder.label = label
+  holder.desc = nil
+  holder.helpIcon = helpIcon
+  holder.anchor = anchor
+  holder.hasHelpText = hasHelpText
+  holder.isWideWidget = isWideWidget
+  return holder
+end
+
+local function flattenMenuOptions(options, prefix, rows)
+  rows = rows or {}
+  prefix = tostring(prefix or "")
+  for i = 1, #(options or {}) do
+    local opt = options[i]
+    local label = tostring(opt and opt.label or opt and opt.value or "")
+    if type(opt and opt.menuList) == "table" and #(opt.menuList or {}) > 0 then
+      local nextPrefix = prefix ~= "" and (prefix .. " / " .. label) or label
+      flattenMenuOptions(opt.menuList, nextPrefix, rows)
+    elseif opt and opt.value ~= nil then
+      rows[#rows + 1] = {
+        label = prefix ~= "" and (prefix .. " / " .. label) or label,
+        value = opt.value,
+      }
     end
-    for i = 1, #(drop.options or {}) do
-      local opt = drop.options[i]
-      local info = UIDropDownMenu_CreateInfo()
-      info.text = opt.label
-      info.checked = tostring(drop.value) == tostring(opt.value)
-      info.func = function()
-        drop:SetValue(opt.value, true)
+  end
+  return rows
+end
+
+local function findOptionLabel(options, wanted)
+  wanted = tostring(wanted or "")
+  for i = 1, #(options or {}) do
+    local opt = options[i]
+    if tostring(opt and opt.value or "") == wanted then
+      return tostring(opt.label or wanted)
+    end
+    if type(opt and opt.menuList) == "table" then
+      local nested = findOptionLabel(opt.menuList, wanted)
+      if nested then
+        local parent = tostring(opt.label or "")
+        if parent ~= "" and nested ~= parent then
+          return parent .. " / " .. nested
+        end
+        return nested
       end
-      UIDropDownMenu_AddButton(info, level)
+    end
+  end
+  return nil
+end
+
+local function createPickerControl(holder, field, model, config)
+  config = type(config) == "table" and config or {}
+  local helperText = tostring(config.helperText or "")
+  local hasPreview = config.previewAction ~= nil
+  local width = tonumber(field and field.width) or tonumber(config.width) or 320
+
+  if helperText ~= "" then
+    holder:SetHeight(holder.hasHelpText and 102 or 84)
+  else
+    holder:SetHeight(60)
+  end
+
+  local control = CreateFrame("Frame", nil, holder, "BackdropTemplate")
+  control:SetPoint("TOPLEFT", holder.anchor, "TOPLEFT", 0, 0)
+  control:SetPoint("TOPRIGHT", holder.anchor, "TOPRIGHT", 0, 0)
+  control:SetHeight(28)
+  control:SetBackdrop({
+    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+    edgeSize = 10,
+    insets = { left = 2, right = 2, top = 2, bottom = 2 },
+  })
+  control:SetBackdropColor(0.04, 0.08, 0.14, 0.88)
+  control:SetBackdropBorderColor(0.14, 0.42, 0.70, 0.88)
+  control.options = {}
+  control.value = nil
+  control.onChanged = nil
+
+  local rightInset = hasPreview and -58 or -30
+  local valueText = control:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  valueText:SetPoint("LEFT", 8, 0)
+  valueText:SetPoint("RIGHT", rightInset, 0)
+  valueText:SetJustifyH("LEFT")
+  valueText:SetWordWrap(false)
+
+  local previewBtn = nil
+  if hasPreview then
+    previewBtn = CreateFrame("Button", nil, control, "UIPanelButtonTemplate")
+    previewBtn:SetSize(22, 22)
+    previewBtn:SetPoint("RIGHT", -29, 0)
+    previewBtn:SetText(config.previewGlyph or ">")
+    if Skin and Skin.SetButtonVariant then
+      Skin:SetButtonVariant(previewBtn, "ghost")
     end
   end
 
-  UIDropDownMenu_Initialize(drop, init)
+  local trigger = CreateFrame("Button", nil, control, "UIPanelButtonTemplate")
+  trigger:SetSize(24, 22)
+  trigger:SetPoint("RIGHT", -3, 0)
+  trigger:SetText("v")
+  if Skin and Skin.SetButtonVariant then
+    Skin:SetButtonVariant(trigger, "ghost")
+  end
 
-  function drop:SetOptions(options)
+  local helper = nil
+  if helperText ~= "" then
+    helper = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    helper:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 0, -4)
+    helper:SetPoint("RIGHT", -4, 0)
+    helper:SetJustifyH("LEFT")
+    helper:SetText(helperText)
+  end
+
+  local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+  popup:SetFrameStrata("TOOLTIP")
+  popup:SetClampedToScreen(true)
+  popup:SetBackdrop({
+    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+    edgeSize = 10,
+    insets = { left = 2, right = 2, top = 2, bottom = 2 },
+  })
+  popup:SetBackdropColor(0.02, 0.05, 0.11, 0.97)
+  popup:SetBackdropBorderColor(0.14, 0.42, 0.70, 0.92)
+  popup:SetSize(width + 24, 228)
+  popup:Hide()
+
+  local popupHeader = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  popupHeader:SetPoint("TOPLEFT", 10, -10)
+  popupHeader:SetText(tostring(config.popupTitle or field.label or "Options"))
+
+  local scroll = CreateFrame("ScrollFrame", nil, popup, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 8, -28)
+  scroll:SetPoint("BOTTOMRIGHT", -28, 8)
+
+  local content = CreateFrame("Frame", nil, scroll)
+  content:SetSize(width, 1)
+  scroll:SetScrollChild(content)
+  popup.rows = popup.rows or {}
+
+  local function closePopup()
+    popup:Hide()
+  end
+
+  local function updateControl()
+    control.value = model[field.key]
+    local label = nil
+    if type(config.labelProvider) == "function" then
+      label = config.labelProvider(control.value, control.options)
+    end
+    if not label or label == "" then
+      label = findOptionLabel(control.options, control.value) or tostring(config.placeholder or "Choose...")
+    end
+    valueText:SetText(label)
+  end
+
+  local function selectValue(value, emit)
+    control.value = value
+    model[field.key] = value
+    updateControl()
+    if emit and control.onChanged then
+      control.onChanged(value)
+    end
+    closePopup()
+  end
+
+  function control:SetOptions(options)
     self.options = options or {}
-    UIDropDownMenu_Initialize(self, init)
-  end
-
-  function drop:SetValue(value, emit)
-    self.value = value
-    UIDropDownMenu_SetText(self, findLabel(value))
-    if emit and self.onChanged then
-      self.onChanged(value)
+    local flat = flattenMenuOptions(self.options)
+    local rowHeight = 24
+    for i = 1, #flat do
+      local row = popup.rows[i]
+      if not row then
+        row = CreateFrame("Button", nil, content)
+        if Skin and Skin.ApplyClickableRow then
+          Skin:ApplyClickableRow(row, "row")
+        end
+        if Skin and Skin.SetClickableRowState then
+          row:SetScript("OnEnter", function(selfRow)
+            Skin:SetClickableRowState(selfRow, "hover")
+          end)
+          row:SetScript("OnLeave", function(selfRow)
+            Skin:SetClickableRowState(selfRow, "normal")
+          end)
+        end
+        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.text:SetPoint("LEFT", 8, 0)
+        row.text:SetPoint("RIGHT", -12, 0)
+        row.text:SetJustifyH("LEFT")
+        popup.rows[i] = row
+      end
+      row:ClearAllPoints()
+      row:SetPoint("TOPLEFT", 0, -((i - 1) * rowHeight))
+      row:SetSize(width - 8, rowHeight)
+      row.value = flat[i].value
+      row.text:SetText(flat[i].label or tostring(flat[i].value or ""))
+      row:SetScript("OnClick", function(selfRow)
+        selectValue(selfRow.value, true)
+      end)
+      row:Show()
     end
+    for i = #flat + 1, #(popup.rows or {}) do
+      popup.rows[i]:Hide()
+    end
+    content:SetHeight(math.max(1, #flat * rowHeight))
+    updateControl()
   end
 
-  function drop:GetValue()
+  function control:SetValue(value, emit)
+    selectValue(value, emit == true)
+  end
+
+  function control:GetValue()
     return self.value
   end
 
-  function drop:SetOnValueChanged(fn)
+  function control:SetOnValueChanged(fn)
     self.onChanged = fn
   end
 
-  if Skin and Skin.ApplyDropdown then
-    Skin:ApplyDropdown(drop)
+  if previewBtn then
+    previewBtn:SetScript("OnClick", function()
+      config.previewAction(model[field.key])
+    end)
   end
 
-  return drop
+  trigger:SetScript("OnClick", function()
+    if popup:IsShown() then
+      closePopup()
+      return
+    end
+    popup:ClearAllPoints()
+    popup:SetPoint("TOPLEFT", control, "BOTTOMLEFT", -2, -4)
+    popup:Show()
+  end)
+
+  control:SetScript("OnHide", closePopup)
+  control.helper = helper
+  control.popup = popup
+  control.valueText = valueText
+  updateControl()
+  holder.control = control
+  holder.popup = popup
+  return control
+end
+
+local function createDropdown(holder, field, model)
+  return createPickerControl(holder, field, model, {
+    popupTitle = field and field.label or "Options",
+    placeholder = "Choose...",
+  })
 end
 
 local function parseColorCSV(text)
@@ -120,7 +381,8 @@ local function findStatusbarEntry(entries, value)
 end
 
 local function createStatusbarPicker(holder, field, model, onChange)
-  holder:SetHeight(132)
+  local compact = field and field.minimalHelp == true
+  holder:SetHeight(compact and 122 or (holder.hasHelpText and 150 or 132))
 
   local entries = {}
   if ns.Media and ns.Media.GetStatusbarEntries then
@@ -129,7 +391,7 @@ local function createStatusbarPicker(holder, field, model, onChange)
 
   local selectedValue = tostring(model[field.key] or "")
   local control = CreateFrame("Frame", nil, holder, "BackdropTemplate")
-  control:SetPoint("TOPLEFT", 0, -18)
+  control:SetPoint("TOPLEFT", holder.anchor, "TOPLEFT", 0, 0)
   control:SetSize(field.width or 320, 28)
   control:SetBackdrop({
     bgFile = "Interface/Tooltips/UI-Tooltip-Background",
@@ -168,9 +430,12 @@ local function createStatusbarPicker(holder, field, model, onChange)
   help:SetPoint("RIGHT", -4, 0)
   help:SetJustifyH("LEFT")
   help:SetText("SharedMedia packs add more textures here automatically.")
+  if compact then
+    help:Hide()
+  end
 
   local customLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  customLabel:SetPoint("TOPLEFT", help, "BOTTOMLEFT", 0, -8)
+  customLabel:SetPoint("TOPLEFT", compact and control or help, "BOTTOMLEFT", 0, -8)
   customLabel:SetText("Custom Path")
 
   local customBox = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
@@ -183,8 +448,13 @@ local function createStatusbarPicker(holder, field, model, onChange)
   customBg:SetPoint("TOPLEFT", customBox, -3, 3)
   customBg:SetPoint("BOTTOMRIGHT", customBox, 3, -3)
   customBg:SetFrameLevel(holder:GetFrameLevel())
-  createInputBackground(customBg)
+  if not (Skin and Skin.ApplyEditBox) then
+    createInputBackground(customBg)
+  end
   customBox:SetFrameLevel(customBg:GetFrameLevel() + 1)
+  if Skin and Skin.ApplyEditBox then
+    Skin:ApplyEditBox(customBox)
+  end
 
   local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
   popup:SetFrameStrata("TOOLTIP")
@@ -221,7 +491,7 @@ local function createStatusbarPicker(holder, field, model, onChange)
 
   local function updateControl()
     local currentValue = tostring(model[field.key] or "")
-    local custom = currentValue ~= "" and not currentValue:lower():find("^lsm:", 1, true)
+    local custom = currentValue ~= "" and not currentValue:lower():match("^lsm:")
     local selected = findStatusbarEntry(entries, currentValue)
     if custom then
       valueText:SetText("Custom Path")
@@ -348,8 +618,6 @@ local function createStatusbarPicker(holder, field, model, onChange)
 end
 
 local function createSoundPicker(holder, field, model, onChange)
-  holder:SetHeight(84)
-
   local options = {}
   if type(field.optionsProvider) == "function" then
     options = field.optionsProvider(model) or {}
@@ -357,148 +625,34 @@ local function createSoundPicker(holder, field, model, onChange)
     options = field.options
   end
 
-  local selectedValue = tostring(model[field.key] or "default")
-  local control = CreateFrame("Frame", nil, holder, "BackdropTemplate")
-  control:SetPoint("TOPLEFT", 0, -18)
-  control:SetSize(field.width or 320, 28)
-  control:SetBackdrop({
-    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-    edgeSize = 10,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
+  local control = createPickerControl(holder, field, model, {
+    popupTitle = "Aura Sounds",
+    helperText = "Pick a sound, then use > to hear a preview.",
+    previewGlyph = ">",
+    labelProvider = function(currentValue)
+      if ns.SoundManager and ns.SoundManager.GetTokenLabel then
+        return ns.SoundManager:GetTokenLabel(tostring(currentValue or "default"), field.soundState or "gain")
+      end
+      return tostring(currentValue or "default")
+    end,
+    previewAction = function(currentValue)
+      if ns.SoundManager and ns.SoundManager.Preview then
+        ns.SoundManager:Preview(currentValue or "default", field.soundState or "gain")
+      end
+    end,
   })
-  control:SetBackdropColor(0.04, 0.08, 0.14, 0.88)
-  control:SetBackdropBorderColor(0.14, 0.42, 0.70, 0.88)
-
-  local valueText = control:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  valueText:SetPoint("LEFT", 8, 0)
-  valueText:SetPoint("RIGHT", -58, 0)
-  valueText:SetJustifyH("LEFT")
-
-  local playBtn = CreateFrame("Button", nil, control, "UIPanelButtonTemplate")
-  playBtn:SetSize(22, 22)
-  playBtn:SetPoint("RIGHT", -29, 0)
-  playBtn:SetText(">")
-  if Skin and Skin.SetButtonVariant then
-    Skin:SetButtonVariant(playBtn, "ghost")
-  end
-
-  local trigger = CreateFrame("Button", nil, control, "UIPanelButtonTemplate")
-  trigger:SetSize(24, 22)
-  trigger:SetPoint("RIGHT", -3, 0)
-  trigger:SetText("v")
-  if Skin and Skin.SetButtonVariant then
-    Skin:SetButtonVariant(trigger, "ghost")
-  end
-
-  local help = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  help:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 0, -4)
-  help:SetPoint("RIGHT", -4, 0)
-  help:SetJustifyH("LEFT")
-  help:SetText("Pick a sound, then use > to hear a preview.")
-
-  local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-  popup:SetFrameStrata("TOOLTIP")
-  popup:SetClampedToScreen(true)
-  popup:SetBackdrop({
-    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-    edgeSize = 10,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
-  })
-  popup:SetBackdropColor(0.02, 0.05, 0.11, 0.97)
-  popup:SetBackdropBorderColor(0.14, 0.42, 0.70, 0.92)
-  popup:SetSize((field.width or 320) + 24, 228)
-  popup:Hide()
-
-  local popupHeader = popup:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  popupHeader:SetPoint("TOPLEFT", 10, -10)
-  popupHeader:SetText("Aura Sounds")
-
-  local scroll = CreateFrame("ScrollFrame", nil, popup, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", 8, -28)
-  scroll:SetPoint("BOTTOMRIGHT", -28, 8)
-
-  local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize((field.width or 320), 1)
-  scroll:SetScrollChild(content)
-  popup.rows = popup.rows or {}
-
-  local function updateControl()
-    selectedValue = tostring(model[field.key] or "default")
-    if ns.SoundManager and ns.SoundManager.GetTokenLabel then
-      valueText:SetText(ns.SoundManager:GetTokenLabel(selectedValue, field.soundState or "gain"))
-    else
-      valueText:SetText(selectedValue)
-    end
-  end
-
-  local function closePopup()
-    popup:Hide()
-  end
-
-  local function selectValue(value)
-    model[field.key] = tostring(value or "default")
-    updateControl()
-    onChange(field.key, model[field.key])
-    closePopup()
-  end
-
-  local rowHeight = 24
-  for i = 1, #(options or {}) do
-    local row = CreateFrame("Button", nil, content)
-    row:SetPoint("TOPLEFT", 0, -((i - 1) * rowHeight))
-    row:SetSize((field.width or 320) - 8, rowHeight)
-    if Skin and Skin.ApplyClickableRow then
-      Skin:ApplyClickableRow(row, "row")
-    end
-    if Skin and Skin.SetClickableRowState then
-      row:SetScript("OnEnter", function(selfRow)
-        Skin:SetClickableRowState(selfRow, "hover")
-      end)
-      row:SetScript("OnLeave", function(selfRow)
-        Skin:SetClickableRowState(selfRow, "normal")
-      end)
-    end
-
-    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.text:SetPoint("LEFT", 8, 0)
-    row.text:SetPoint("RIGHT", -30, 0)
-    row.text:SetJustifyH("LEFT")
-    row.text:SetText(options[i].label or tostring(options[i].value or ""))
-    row.value = tostring(options[i].value or "")
-    row:SetScript("OnClick", function(selfRow)
-      selectValue(selfRow.value)
-    end)
-    popup.rows[i] = row
-  end
-  content:SetHeight(#options * rowHeight)
-
-  playBtn:SetScript("OnClick", function()
-    if ns.SoundManager and ns.SoundManager.Preview then
-      ns.SoundManager:Preview(model[field.key] or "default", field.soundState or "gain")
-    end
+  control:SetOptions(options or {})
+  control:SetValue(tostring(model[field.key] or "default"))
+  control:SetOnValueChanged(function(value)
+    onChange(field.key, tostring(value or "default"))
   end)
 
-  trigger:SetScript("OnClick", function()
-    if popup:IsShown() then
-      closePopup()
-      return
-    end
-    popup:ClearAllPoints()
-    popup:SetPoint("TOPLEFT", control, "BOTTOMLEFT", -2, -4)
-    popup:Show()
-  end)
-
-  control:SetScript("OnHide", closePopup)
-  updateControl()
-  holder.control = control
-  holder.popup = popup
   return control
 end
 
 local function createGroupSelect(holder, field, model, onChange)
-  holder:SetHeight(114)
+  local compact = field and field.minimalHelp == true
+  holder:SetHeight(compact and 96 or (holder.hasHelpText and 132 or 114))
 
   local function buildOptions()
     local options = {}
@@ -510,17 +664,19 @@ local function createGroupSelect(holder, field, model, onChange)
     return options
   end
 
-  local control = createDropdown(holder, field.width or 300)
-  control:SetPoint("TOPLEFT", -16, -16)
+  local control = createDropdown(holder, field, model)
 
   local helper = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  helper:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 16, -2)
+  helper:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 0, -4)
   helper:SetPoint("RIGHT", -4, 0)
   helper:SetJustifyH("LEFT")
   helper:SetText("A group keeps related auras together so one mover can position them all.")
+  if compact then
+    helper:Hide()
+  end
 
   local newLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  newLabel:SetPoint("TOPLEFT", helper, "BOTTOMLEFT", 0, -8)
+  newLabel:SetPoint("TOPLEFT", compact and control or helper, "BOTTOMLEFT", 0, -8)
   newLabel:SetText("New Group Name")
 
   local newBox = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
@@ -533,8 +689,13 @@ local function createGroupSelect(holder, field, model, onChange)
   newBg:SetPoint("TOPLEFT", newBox, -3, 3)
   newBg:SetPoint("BOTTOMRIGHT", newBox, 3, -3)
   newBg:SetFrameLevel(holder:GetFrameLevel())
-  createInputBackground(newBg)
+  if not (Skin and Skin.ApplyEditBox) then
+    createInputBackground(newBg)
+  end
   newBox:SetFrameLevel(newBg:GetFrameLevel() + 1)
+  if Skin and Skin.ApplyEditBox then
+    Skin:ApplyEditBox(newBox)
+  end
 
   local createBtn = CreateFrame("Button", nil, holder, "UIPanelButtonTemplate")
   createBtn:SetSize(86, 22)
@@ -615,6 +776,9 @@ local function attachSpellResolver(holder, control, field, onChange)
   hint:SetPoint("RIGHT", -4, 0)
   hint:SetJustifyH("LEFT")
   hint:SetText("")
+  if field and field.compactHint == false then
+    hint:Hide()
+  end
 
   local auto = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
   auto:SetFrameStrata("TOOLTIP")
@@ -729,7 +893,9 @@ local function attachSpellResolver(holder, control, field, onChange)
 
   local function updateAutocomplete(userInput)
     if not isSpellWidget() then
-      hint:SetText("")
+      if hint:IsShown() then
+        hint:SetText("")
+      end
       hideAutocomplete()
       return
     end
@@ -754,21 +920,27 @@ local function attachSpellResolver(holder, control, field, onChange)
 
   local function updateHintAndMaybeNormalize(apply)
     if not isSpellWidget() then
-      hint:SetText("")
+      if hint:IsShown() then
+        hint:SetText("")
+      end
       hideAutocomplete()
       return
     end
     local raw = tostring(control:GetText() or "")
     if field.widget == "spellid" then
       local normalized, preview, ok = SpellInput:ResolveSpellIDInput(raw)
-      hint:SetText(preview or "")
+      if hint:IsShown() then
+        hint:SetText(preview or "")
+      end
       if apply and ok then
         control:SetText(normalized)
         onChange(field.key, normalized)
       end
     else
       local normalized, preview, ok = SpellInput:ResolveSpellCSVInput(raw)
-      hint:SetText(preview or "")
+      if hint:IsShown() then
+        hint:SetText(preview or "")
+      end
       if apply and ok then
         control:SetText(normalized)
         onChange(field.key, normalized)
@@ -817,19 +989,14 @@ end
 F.AttachSpellResolver = attachSpellResolver
 
 function F:CreateField(parent, field, model, onChange)
-  local holder = CreateFrame("Frame", nil, parent)
   local multiline = field.widget == "multiline"
-  holder:SetHeight(multiline and 92 or 52)
-
-  local label = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  label:SetPoint("TOPLEFT", 0, 0)
-  label:SetText(field.label or field.key or "Field")
+  local holder = createFieldShell(parent, field, multiline)
+  local label = holder.label
 
   local control = nil
 
   if field.widget == "dropdown" then
-    control = createDropdown(holder, field.width or 300)
-    control:SetPoint("TOPLEFT", -16, -16)
+    control = createDropdown(holder, field, model)
     local options = field.options
     if type(field.optionsProvider) == "function" then
       options = field.optionsProvider(model)
@@ -842,15 +1009,18 @@ function F:CreateField(parent, field, model, onChange)
   elseif field.widget == "groupselect" then
     control = createGroupSelect(holder, field, model, onChange)
   elseif field.widget == "checkbox" then
+    holder:SetHeight(34)
     control = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
-    control:SetPoint("TOPLEFT", 0, -18)
+    control:SetPoint("TOPLEFT", 8, -8)
     control:SetChecked(model[field.key] == true)
     if Skin and Skin.ApplyCheckbox then
       Skin:ApplyCheckbox(control)
     end
 
-    local cbLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    local cbLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     cbLabel:SetPoint("LEFT", control, "RIGHT", 4, 0)
+    cbLabel:SetPoint("RIGHT", -10, 0)
+    cbLabel:SetJustifyH("LEFT")
     cbLabel:SetText(field.label or field.key or "Enabled")
     label:SetText(" ")
 
@@ -861,13 +1031,16 @@ function F:CreateField(parent, field, model, onChange)
       onChange(field.key, btn:GetChecked() == true)
     end)
   elseif field.widget == "spinner" then
-    holder:SetHeight(52)
+    holder:SetHeight(40)
     control = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
     control:SetAutoFocus(false)
-    control:SetPoint("TOPLEFT", 26, -18)
-    control:SetSize(72, 24)
+    control:SetPoint("TOPRIGHT", holder.anchor, "TOPRIGHT", -26, -1)
+    control:SetSize(64, 22)
     control:SetNumeric(true)
     control:SetNumber(tonumber(model[field.key]) or tonumber(field.default) or 0)
+    if Skin and Skin.ApplyEditBox then
+      Skin:ApplyEditBox(control)
+    end
 
     local function clampValue(value)
       value = tonumber(value) or tonumber(field.default) or 0
@@ -887,8 +1060,8 @@ function F:CreateField(parent, field, model, onChange)
     end
 
     local minus = CreateFrame("Button", nil, holder, "UIPanelButtonTemplate")
-    minus:SetSize(22, 22)
-    minus:SetPoint("LEFT", control, "LEFT", -24, 0)
+    minus:SetSize(18, 18)
+    minus:SetPoint("RIGHT", control, "LEFT", -4, 0)
     minus:SetText("-")
     if Skin and Skin.ApplyButton then
       Skin:SetButtonVariant(minus, "ghost")
@@ -898,7 +1071,7 @@ function F:CreateField(parent, field, model, onChange)
     end)
 
     local plus = CreateFrame("Button", nil, holder, "UIPanelButtonTemplate")
-    plus:SetSize(22, 22)
+    plus:SetSize(18, 18)
     plus:SetPoint("LEFT", control, "RIGHT", 4, 0)
     plus:SetText("+")
     if Skin and Skin.ApplyButton then
@@ -907,10 +1080,6 @@ function F:CreateField(parent, field, model, onChange)
     plus:SetScript("OnClick", function()
       commit((tonumber(control:GetNumber()) or 0) + (tonumber(field.step) or 1))
     end)
-
-    local hint = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("LEFT", plus, "RIGHT", 8, 0)
-    hint:SetText(field.help or "")
 
     control:SetScript("OnEnterPressed", function(edit)
       commit(edit:GetNumber())
@@ -921,8 +1090,8 @@ function F:CreateField(parent, field, model, onChange)
     end)
   elseif field.widget == "color" then
     local frame = CreateFrame("Frame", nil, holder)
-    frame:SetPoint("TOPLEFT", 0, -18)
-    frame:SetSize(220, 24)
+    frame:SetPoint("TOPRIGHT", holder.anchor, "TOPRIGHT", 0, 0)
+    frame:SetSize(math.max(220, tonumber(field.width) or 220), 24)
     control = frame
 
     local swatch = CreateFrame("Button", nil, frame, "BackdropTemplate")
@@ -1032,13 +1201,16 @@ function F:CreateField(parent, field, model, onChange)
     end
     control = box
     control:SetAutoFocus(false)
-    control:SetPoint("TOPLEFT", 0, -18)
+    control:SetPoint("TOPLEFT", holder.anchor, "TOPLEFT", 0, 0)
     if multiline then
-      control:SetSize(field.width or 520, 66)
+      control:SetSize((field.width or 520), 66)
     else
-      control:SetSize(field.width or 320, 24)
+      control:SetSize(holder.anchor:GetWidth() > 0 and holder.anchor:GetWidth() or (field.width or 320), 24)
     end
     control:SetText(tostring(model[field.key] or ""))
+    if Skin and Skin.ApplyEditBox then
+      Skin:ApplyEditBox(control)
+    end
     control:SetScript("OnTextChanged", function(edit)
       local value = edit:GetText() or ""
       if field.widget == "number" then
@@ -1051,7 +1223,9 @@ function F:CreateField(parent, field, model, onChange)
     bgHolder:SetPoint("TOPLEFT", control, -3, 3)
     bgHolder:SetPoint("BOTTOMRIGHT", control, 3, -3)
     bgHolder:SetFrameLevel(holder:GetFrameLevel())
-    createInputBackground(bgHolder)
+    if not (Skin and Skin.ApplyEditBox) then
+      createInputBackground(bgHolder)
+    end
     control:SetFrameLevel(bgHolder:GetFrameLevel() + 1)
 
     if multiline then

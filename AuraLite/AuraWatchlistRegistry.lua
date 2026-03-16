@@ -116,6 +116,27 @@ local function normalizeSize(value, fallback, minValue, maxValue)
   return n
 end
 
+local validCustomFonts = {
+  friz = true,
+  arial = true,
+  morpheus = true,
+  skurri = true,
+  blei = true,
+  arhei = true,
+  font2002 = true,
+}
+
+local function normalizeCustomFont(value)
+  value = tostring(value or "friz"):lower()
+  if value:match("^lsm:") then
+    return value
+  end
+  if validCustomFonts[value] then
+    return value
+  end
+  return "friz"
+end
+
 local function normalizeColorCSV(value)
   local text = trim(tostring(value or ""))
   if text == "" then
@@ -190,6 +211,9 @@ end
 
 local function normalizeTrackingMode(value, unit)
   local mode = tostring(value or ""):lower()
+  if tostring(unit or "") == "player" and mode == "cooldown" then
+    return "cooldown"
+  end
   if tostring(unit or "") == "target" and mode == "estimated" then
     return "estimated"
   end
@@ -254,6 +278,8 @@ function R:NormalizeWatchItem(item, unit)
     alert = item.alert ~= false,
     displayName = trim(item.displayName),
     customText = trim(item.customText),
+    stylePreset = trim(item.stylePreset),
+    visualStates = (ns.VisualStyle and ns.VisualStyle:NormalizeStates(item.visualStates)) or nil,
     groupOrder = tonumber(item.groupOrder) or 0,
     timerVisual = normalizeTimerVisual(item.timerVisual),
     iconWidth = normalizeSize(item.iconWidth, 36, 12, 256),
@@ -261,8 +287,18 @@ function R:NormalizeWatchItem(item, unit)
     barWidth = normalizeSize(item.barWidth, 94, 60, 512),
     barHeight = normalizeSize(item.barHeight, 16, 6, 128),
     showTimerText = item.showTimerText ~= false,
+    timerTextSize = normalizeSize(item.timerTextSize, 12, 8, 32),
+    timerTextFont = normalizeCustomFont(item.timerTextFont),
     barColor = normalizeColorCSV(item.barColor),
+    barGradientEnabled = item.barGradientEnabled == true,
+    barColor2 = normalizeColorCSV(item.barColor2),
     barSide = normalizeBarSide(item.barSide),
+    showNameText = item.showNameText ~= false,
+    nameTextSize = normalizeSize(item.nameTextSize, 12, 8, 32),
+    nameTextFont = normalizeCustomFont(item.nameTextFont),
+    showCustomText = item.showCustomText ~= false,
+    customTextSize = normalizeSize(item.customTextSize, 12, 8, 32),
+    customTextFont = normalizeCustomFont(item.customTextFont),
     timerAnchor = normalizeAnchor(item.timerAnchor, "BOTTOM"),
     timerOffsetX = normalizeOffset(item.timerOffsetX, 0),
     timerOffsetY = normalizeOffset(item.timerOffsetY, -1),
@@ -277,8 +313,8 @@ function R:NormalizeWatchItem(item, unit)
     soundOnLow = ns.SoundManager and ns.SoundManager:NormalizeToken(item.soundOnLow) or "default",
     soundOnExpire = ns.SoundManager and ns.SoundManager:NormalizeToken(item.soundOnExpire) or "default",
     iconMode = (item.iconMode == "custom") and "custom" or "spell",
-    customTexture = ns.AuraAPI and ns.AuraAPI:ResolveCustomTexturePath(trim(item.customTexture)) or trim(item.customTexture),
-    barTexture = ns.AuraAPI and ns.AuraAPI:ResolveBarTexturePath(trim(item.barTexture)) or trim(item.barTexture),
+    customTexture = ns.AuraAPI and ns.AuraAPI.NormalizeTexturePath and ns.AuraAPI:NormalizeTexturePath(trim(item.customTexture)) or trim(item.customTexture),
+    barTexture = ns.AuraAPI and ns.AuraAPI.NormalizeTexturePath and ns.AuraAPI:NormalizeTexturePath(trim(item.barTexture)) or trim(item.barTexture),
     savedPosition = cloneSavedPosition(item.savedPosition),
   }
 end

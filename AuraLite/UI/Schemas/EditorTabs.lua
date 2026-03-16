@@ -75,6 +75,50 @@ local function groupSortOptions()
   }
 end
 
+local function fontOptions()
+  local out = {
+    { value = "friz", label = "Friz Quadrata" },
+    { value = "arial", label = "Arial Narrow" },
+    { value = "blei", label = "Blei" },
+    { value = "font2002", label = "2002" },
+    { value = "arhei", label = "AR Hei" },
+    { value = "morpheus", label = "Morpheus" },
+    { value = "skurri", label = "Skurri" },
+  }
+  if ns.Media and ns.Media.List then
+    local seen = {}
+    for i = 1, #out do
+      seen[out[i].value] = true
+    end
+    local fonts = ns.Media:List("font")
+    for i = 1, #(fonts or {}) do
+      local name = tostring(fonts[i] or "")
+      local value = "lsm:" .. name
+      if name ~= "" and not seen[value] then
+        out[#out + 1] = { value = value, label = "LSM: " .. name }
+        seen[value] = true
+      end
+    end
+  end
+  table.sort(out, function(a, b)
+    if a.value == "friz" then
+      return true
+    end
+    if b.value == "friz" then
+      return false
+    end
+    return tostring(a.label) < tostring(b.label)
+  end)
+  return out
+end
+
+local function iconModeOptions()
+  return {
+    { value = "spell", label = "Spell Icon" },
+    { value = "custom", label = "Custom Texture" },
+  }
+end
+
 local function timerBehaviorOptions()
   return {
     { value = "reset", label = "Reset Timer" },
@@ -129,6 +173,8 @@ Schemas.EditorTabs = {
       { value = "bar", label = "Bar" },
       { value = "iconbar", label = "Icon + Bar" },
     } },
+    { key = "iconMode", label = "Icon Source", widget = "dropdown", optionsProvider = iconModeOptions },
+    { key = "customTexture", label = "Custom Texture", widget = "text" },
     { key = "iconWidth", label = "Icon Width", widget = "spinner", min = 12, max = 256, step = 2, default = 36, help = "Default: 36" },
     { key = "iconHeight", label = "Icon Height", widget = "spinner", min = 12, max = 256, step = 2, default = 36, help = "Default: 36" },
     { key = "barWidth", label = "Bar Width", widget = "spinner", min = 60, max = 512, step = 4, default = 94, help = "Default: 94" },
@@ -138,9 +184,22 @@ Schemas.EditorTabs = {
       { value = "left", label = "Bar Left" },
     } },
     { key = "showTimerText", label = "Show Time Text", widget = "checkbox" },
+    { key = "timerTextSize", label = "Timer Size", widget = "spinner", min = 8, max = 32, step = 1, default = 12, help = "Default: 12" },
+    { key = "timerTextFont", label = "Timer Font", widget = "dropdown", optionsProvider = fontOptions },
     { key = "barColor", label = "Bar Color", widget = "color" },
+    { key = "barGradientEnabled", label = "Use Gradient", widget = "checkbox" },
+    { key = "barColor2", label = "Bar End Color", widget = "color" },
     { key = "barTexture", label = "Bar Texture", widget = "bartexture" },
+    { key = "showNameText", label = "Show Aura Name", widget = "checkbox" },
+    { key = "nameTextSize", label = "Aura Name Size", widget = "spinner", min = 8, max = 32, step = 1, default = 12, help = "Default: 12" },
+    { key = "nameTextFont", label = "Aura Name Font", widget = "dropdown", optionsProvider = fontOptions },
+    { key = "showCustomText", label = "Show Extra Text", widget = "checkbox" },
     { key = "customText", label = "Extra Text", widget = "text" },
+    { key = "customTextSize", label = "Extra Text Size", widget = "spinner", min = 8, max = 32, step = 1, default = 12, help = "Default: 12" },
+    { key = "customTextFont", label = "Extra Text Font", widget = "dropdown", optionsProvider = fontOptions },
+    { key = "soundOnShow", label = "Sound When Shown", widget = "soundpicker", optionsProvider = soundOptions, soundState = "gain" },
+    { key = "soundOnLow", label = "Sound When Low", widget = "soundpicker", optionsProvider = soundOptions, soundState = "low" },
+    { key = "soundOnExpire", label = "Sound When It Ends", widget = "soundpicker", optionsProvider = soundOptions, soundState = "expire" },
     { key = "lowTime", label = "Low Time Warning (sec)", widget = "number", min = 0, max = 60 },
   } },
   { key = "Advanced", label = "Advanced", fields = {
@@ -154,11 +213,11 @@ Schemas.EditorTabs = {
     { key = "duration", label = "Manual Duration (sec)", widget = "number", min = 1, max = 120 },
     { key = "ruleName", label = "Internal Rule Name", widget = "text", required = false },
     { key = "ruleID", label = "Internal Rule ID", widget = "text", required = false },
-    { key = "soundOnShow", label = "Sound When Shown", widget = "soundpicker", optionsProvider = soundOptions, soundState = "gain" },
-    { key = "soundOnLow", label = "Sound When Low", widget = "soundpicker", optionsProvider = soundOptions, soundState = "low" },
-    { key = "soundOnExpire", label = "Sound When It Ends", widget = "soundpicker", optionsProvider = soundOptions, soundState = "expire" },
     { key = "loadClassToken", label = "Only Load For Class", widget = "dropdown", optionsProvider = loadClassOptions },
     { key = "loadSpecID", label = "Only Load For Spec", widget = "dropdown", optionsProvider = loadSpecOptions },
+    { key = "resourceConditionEnabled", label = "Gate By Primary Resource", widget = "checkbox" },
+    { key = "resourceMinPct", label = "Primary Resource Min %", widget = "spinner", min = 0, max = 100, step = 1, default = 0, help = "Default: 0" },
+    { key = "resourceMaxPct", label = "Primary Resource Max %", widget = "spinner", min = 0, max = 100, step = 1, default = 100, help = "Default: 100" },
     { key = "debug", label = "Enable Debug For This Aura", widget = "checkbox" },
     { key = "notes", label = "Notes", widget = "multiline" },
   } },

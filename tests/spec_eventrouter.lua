@@ -168,4 +168,107 @@ suite:case("PLAYER_LOGIN does not auto-open config on first run", function()
   T.equal(env.refreshCount, 1)
 end)
 
+suite:case("Explicit cooldown tracking rows render even with rules-only mode enabled", function()
+  local env, ns = makeEnv()
+  local E = ns.EventRouter
+
+  ns.db.options.rulesOnlyMode = true
+  env.setCooldown(23922, {
+    startTime = env.now - 1,
+    duration = 12,
+    expirationTime = env.now + 11,
+    canCompute = true,
+  })
+
+  table.insert(ns.db.watchlist.player, {
+    spellID = 23922,
+    displayName = "Shield Slam",
+    unit = "player",
+    trackingMode = "cooldown",
+    timerVisual = "icon",
+    iconWidth = 36,
+    iconHeight = 36,
+    barWidth = 94,
+    barHeight = 16,
+    showTimerText = true,
+  })
+
+  local rowsByGroup = E:BuildRowsForUnit("player")
+  local found = nil
+  for _, rows in pairs(rowsByGroup or {}) do
+    for i = 1, #rows do
+      if tonumber(rows[i].spellID) == 23922 then
+        found = rows[i]
+        break
+      end
+    end
+  end
+
+  T.truthy(found ~= nil)
+  T.equal(found.stateKind, "cooldown")
+  T.equal(found.stateLabel, "Spell cooldown")
+end)
+
+suite:case("Unknown proc aura IDs do not render proxy GCD cooldown rows", function()
+  local env, ns = makeEnv()
+  local E = ns.EventRouter
+
+  local spellID = 46968
+  ns.TestMode = {
+    IsEnabled = function()
+      return false
+    end,
+    BuildPlaceholder = function(_, item)
+      return {
+        spellID = item.spellID,
+      }
+    end,
+  }
+  _G.GetSpellCooldown = function(queriedSpellID)
+    queriedSpellID = tonumber(queriedSpellID)
+    if queriedSpellID == 61304 or queriedSpellID == spellID then
+      return env.now - 0.1, 1.5, 1
+    end
+    return 0, 0, 1
+  end
+
+  ns.AuraAPI.GetSpellCooldownData = function(_, queriedSpellID)
+    if tonumber(queriedSpellID) == spellID then
+      return {
+        startTime = env.now - 0.1,
+        duration = 1.5,
+        expirationTime = env.now + 1.4,
+        canCompute = true,
+      }
+    end
+    return nil
+  end
+
+  table.insert(ns.db.watchlist.player, {
+    spellID = spellID,
+    displayName = "Shockwave Proc",
+    unit = "player",
+    trackingMode = "cooldown",
+    timerVisual = "icon",
+    iconWidth = 36,
+    iconHeight = 36,
+    barWidth = 94,
+    barHeight = 16,
+    showTimerText = true,
+  })
+
+  local rowsByGroup = E:BuildRowsForUnit("player")
+  local found = false
+  for _, rows in pairs(rowsByGroup or {}) do
+    for i = 1, #rows do
+      if tonumber(rows[i].spellID) == spellID then
+        found = true
+        break
+      end
+    end
+  end
+
+  T.falsy(found)
+end)
+
 return suite

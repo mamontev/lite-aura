@@ -14,27 +14,45 @@ local RuleRepo = UI.RuleRepository
 local FieldFactory = UI.FieldFactory
 local Widgets = UI.Widgets or {}
 local Skin = ns.UISkin
+local AceGUI = LibStub and LibStub("AceGUI-3.0", true)
 
 local AuraEditorPanel = {}
 AuraEditorPanel.__index = AuraEditorPanel
 
+local function ensureBackdropHost(frame)
+  if not frame then
+    return nil
+  end
+  if type(frame.SetBackdrop) == "function" then
+    return frame
+  end
+  if not frame._alBackdropHost then
+    local host = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    host:SetPoint("TOPLEFT", 0, 0)
+    host:SetPoint("BOTTOMRIGHT", 0, 0)
+    host:SetFrameLevel(math.max(0, (frame:GetFrameLevel() or 1) - 1))
+    frame._alBackdropHost = host
+  end
+  return frame._alBackdropHost
+end
+
 local function createBackdrop(frame)
-  frame:SetBackdrop({
-    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-    edgeSize = 12,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
-  })
-  frame:SetBackdropColor(0.03, 0.08, 0.18, 0.72)
-  frame:SetBackdropBorderColor(0.12, 0.50, 0.82, 0.90)
+  if not frame then
+    return
+  end
+  local target = ensureBackdropHost(frame)
+  if target and type(target.SetBackdrop) == "function" then
+    target:SetBackdrop(nil)
+  end
 end
 
 local function createCardBackdrop(frame)
-  if Skin and Skin.ApplySection then
-    Skin:ApplySection(frame)
+  local target = ensureBackdropHost(frame)
+  if not target then
     return
   end
-  frame:SetBackdrop({
+
+  target:SetBackdrop({
     bgFile = "Interface\\Buttons\\WHITE8x8",
     edgeFile = "Interface\\Buttons\\WHITE8x8",
     tile = true,
@@ -42,8 +60,34 @@ local function createCardBackdrop(frame)
     edgeSize = 1,
     insets = { left = 1, right = 1, top = 1, bottom = 1 },
   })
-  frame:SetBackdropColor(0.04, 0.08, 0.16, 0.72)
-  frame:SetBackdropBorderColor(0.22, 0.34, 0.48, 0.74)
+  target:SetBackdropColor(0.075, 0.082, 0.095, 0.36)
+  target:SetBackdropBorderColor(0.20, 0.23, 0.28, 0.42)
+
+  if not target._alCardShade then
+    target._alCardShade = target:CreateTexture(nil, "BACKGROUND")
+    target._alCardShade:SetPoint("TOPLEFT", 1, -1)
+    target._alCardShade:SetPoint("BOTTOMRIGHT", -1, 1)
+    target._alCardShade:SetTexture("Interface\\Buttons\\WHITE8x8")
+    target._alCardShade:SetVertexColor(1, 1, 1, 0.018)
+  end
+
+  if not target._alCardAccent then
+    target._alCardAccent = target:CreateTexture(nil, "ARTWORK")
+    target._alCardAccent:SetPoint("TOPLEFT", 10, -10)
+    target._alCardAccent:SetPoint("TOPRIGHT", -10, -10)
+    target._alCardAccent:SetHeight(1)
+    target._alCardAccent:SetTexture("Interface\\Buttons\\WHITE8x8")
+  end
+  target._alCardAccent:SetColorTexture(0.90, 0.76, 0.24, 0.16)
+
+  if not target._alCardHeaderShade then
+    target._alCardHeaderShade = target:CreateTexture(nil, "BORDER")
+    target._alCardHeaderShade:SetPoint("TOPLEFT", 1, -1)
+    target._alCardHeaderShade:SetPoint("TOPRIGHT", -1, -1)
+    target._alCardHeaderShade:SetHeight(28)
+    target._alCardHeaderShade:SetTexture("Interface\\Buttons\\WHITE8x8")
+  end
+  target._alCardHeaderShade:SetColorTexture(0.13, 0.14, 0.17, 0.28)
 end
 
 local function isDirectAuraTracking(draft)
@@ -60,8 +104,19 @@ local function isEstimatedTargetTracking(draft)
   return false
 end
 
+local function isCooldownTracking(draft)
+  if UI and UI.Bindings and UI.Bindings.IsCooldownTracking then
+    return UI.Bindings:IsCooldownTracking(draft)
+  end
+  return tostring(draft and draft.unit or "player") == "player"
+    and tostring(draft and draft.trackingMode or "") == "cooldown"
+end
+
 local function getTrackingSummary(draft)
   draft = draft or {}
+  if isCooldownTracking(draft) then
+    return "Player cooldown"
+  end
   local unit = tostring(draft.unit or "player")
   if unit == "target" then
     if isEstimatedTargetTracking(draft) then
@@ -105,12 +160,12 @@ end
 
 local function inferTrackingPreset(draft)
   draft = draft or {}
-  local unit = tostring(draft.unit or "player")
-  if unit == "target" and isEstimatedTargetTracking(draft) then
-    return "debuff_target"
+  if isCooldownTracking(draft) then
+    return "cooldown_player"
   end
+  local unit = tostring(draft.unit or "player")
   if unit == "target" then
-    return "target_aura"
+    return "debuff_target"
   end
   return "buff_player"
 end
@@ -205,6 +260,15 @@ local function getCurrentClassAndSpec()
   return classToken, specID, specName
 end
 
+local function normalizeSectionKey(text)
+  text = tostring(text or ""):lower()
+  text = text:gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+  if text == "" then
+    text = "section"
+  end
+  return text
+end
+
 local function lookupOptionLabel(options, wanted)
   wanted = tostring(wanted or "")
   for i = 1, #(options or {}) do
@@ -224,49 +288,165 @@ local function lookupOptionLabel(options, wanted)
   return wanted
 end
 
-local function addInfoBox(parent, y, title, body, height)
+local function hasLoadSpecOption(options, wanted)
+  wanted = tostring(wanted or "")
+  if wanted == "" then
+    return true
+  end
+  for i = 1, #(options or {}) do
+    local row = options[i]
+    if tostring(row and row.value or "") == wanted then
+      return true
+    end
+    if type(row and row.menuList) == "table" and hasLoadSpecOption(row.menuList, wanted) then
+      return true
+    end
+  end
+  return false
+end
+
+local function addInfoBox(parent, y, title, body, height, options)
+  options = type(options) == "table" and options or {}
   local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
   createCardBackdrop(frame)
-  frame:SetHeight(height or 86)
+  frame:SetHeight(height or 70)
   frame:SetPoint("TOPLEFT", 12, y)
   frame:SetPoint("RIGHT", -14, 0)
 
-  local heading = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  heading:SetPoint("TOPLEFT", 10, -8)
-  heading:SetText(title or "")
+  local header = nil
+  if Widgets.SectionHeaderWidget and Widgets.SectionHeaderWidget.Create then
+    header = Widgets.SectionHeaderWidget:Create(frame, {
+      title = title or "",
+      compact = true,
+      collapsible = options.collapsible,
+      collapsed = options.collapsed,
+      onToggle = options.onToggle,
+    })
+    header:SetPoint("TOPLEFT", 10, -2)
+    header:SetPoint("TOPRIGHT", -10, -2)
+  end
 
-  local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  text:SetPoint("TOPLEFT", 10, -26)
+  local text = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  text:SetPoint("TOPLEFT", 10, -18)
   text:SetPoint("RIGHT", -10, 0)
   text:SetJustifyH("LEFT")
   text:SetText(body or "")
 
+  frame.header = header
+  frame.bodyText = text
   return frame
 end
 
-local function createCard(parent, y, title, body, height)
+local function addInlineNote(parent, y, text)
+  local frame = CreateFrame("Frame", nil, parent)
+  frame:SetPoint("TOPLEFT", 12, y)
+  frame:SetPoint("RIGHT", -14, 0)
+  frame:SetHeight(22)
+
+  frame.line = frame:CreateTexture(nil, "ARTWORK")
+  frame.line:SetPoint("TOPLEFT", 0, 0)
+  frame.line:SetPoint("TOPRIGHT", 0, 0)
+  frame.line:SetHeight(1)
+  frame.line:SetColorTexture(1.0, 0.82, 0.18, 0.12)
+
+  frame.text = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  frame.text:SetPoint("TOPLEFT", 0, -5)
+  frame.text:SetPoint("RIGHT", 0, 0)
+  frame.text:SetJustifyH("LEFT")
+  frame.text:SetText(text or "")
+  return frame
+end
+
+local function createCard(parent, y, title, body, height, options)
+  options = type(options) == "table" and options or {}
   local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
   createCardBackdrop(frame)
   frame:SetHeight(height or 96)
   frame:SetPoint("TOPLEFT", 12, y)
   frame:SetPoint("RIGHT", -14, 0)
+  frame._alCompactCard = options.compact == true
 
-  frame.heading = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  frame.heading:SetPoint("TOPLEFT", 12, -10)
-  frame.heading:SetText(title or "")
+  if Widgets.SectionHeaderWidget and Widgets.SectionHeaderWidget.Create then
+    frame.header = Widgets.SectionHeaderWidget:Create(frame, {
+      title = title or "",
+      subtitle = (options.compact == true) and "" or (body or ""),
+      compact = options.compact == true,
+      collapsible = options.collapsible,
+      collapsed = options.collapsed,
+      onToggle = options.onToggle,
+    })
+    frame.header:SetPoint("TOPLEFT", 12, -8)
+    frame.header:SetPoint("TOPRIGHT", -12, -8)
+    frame.heading = frame.header.title
+    frame.desc = frame.header.subtitle
+  else
+    frame.heading = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    frame.heading:SetPoint("TOPLEFT", 12, -10)
+    frame.heading:SetText(title or "")
 
-  frame.desc = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  frame.desc:SetPoint("TOPLEFT", 12, -28)
-  frame.desc:SetPoint("RIGHT", -12, 0)
-  frame.desc:SetJustifyH("LEFT")
-  frame.desc:SetText(body or "")
+    frame.desc = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    frame.desc:SetPoint("TOPLEFT", 12, -28)
+    frame.desc:SetPoint("RIGHT", -12, 0)
+    frame.desc:SetJustifyH("LEFT")
+    frame.desc:SetText(body or "")
+  end
 
   frame.content = CreateFrame("Frame", nil, frame)
-  frame.content:SetPoint("TOPLEFT", 10, -46)
-  frame.content:SetPoint("TOPRIGHT", -10, -46)
-  frame.content:SetHeight(math.max(24, (height or 96) - 56))
+  local contentTop = (options.compact == true) and -36 or -52
+  frame.content:SetPoint("TOPLEFT", 10, contentTop)
+  frame.content:SetPoint("TOPRIGHT", -10, contentTop)
+  frame.content:SetHeight(math.max(24, (height or 96) - ((options.compact == true) and 44 or 62)))
+
+  frame.contentChrome = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+  frame.contentChrome:SetPoint("TOPLEFT", frame.content, -6, 6)
+  frame.contentChrome:SetPoint("BOTTOMRIGHT", frame.content, 6, -6)
+  frame.contentChrome:SetBackdrop({
+    bgFile = "Interface\\Buttons\\WHITE8x8",
+    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    tile = true,
+    tileSize = 8,
+    edgeSize = 1,
+    insets = { left = 1, right = 1, top = 1, bottom = 1 },
+  })
+  frame.contentChrome:SetBackdropColor(0.11, 0.12, 0.14, 0.12)
+  frame.contentChrome:SetBackdropBorderColor(0.22, 0.25, 0.30, 0.10)
+  frame.contentChrome:SetFrameLevel(frame:GetFrameLevel())
+  frame.content:SetFrameLevel(frame.contentChrome:GetFrameLevel() + 1)
+  if options.collapsed then
+    frame.content:Hide()
+    frame.contentChrome:Hide()
+  end
 
   return frame
+end
+
+local function beginCollapsibleTrackingCard(panel, y, sectionKey, title, body, height)
+  local expanded = panel:IsSectionExpanded(sectionKey, true)
+  if not expanded then
+    local collapsedCard = createCard(panel.content, y, title, body, 56, {
+      compact = true,
+      collapsible = true,
+      collapsed = true,
+      onToggle = function(nextExpanded)
+        panel:SetSectionExpanded(sectionKey, nextExpanded)
+        panel:RenderTab("Tracking")
+      end,
+    })
+    panel.fieldWidgets[#panel.fieldWidgets + 1] = collapsedCard
+    return nil, y - 66
+  end
+
+  local card = createCard(panel.content, y, title, body, height, {
+    compact = true,
+    collapsible = true,
+    collapsed = false,
+    onToggle = function(nextExpanded)
+      panel:SetSectionExpanded(sectionKey, nextExpanded)
+      panel:RenderTab("Tracking")
+    end,
+  })
+  panel.fieldWidgets[#panel.fieldWidgets + 1] = card
+  return card, y
 end
 
 local function setTabVisual(btn, active)
@@ -296,26 +476,32 @@ end
 
 local function createPresetButton(parent, width, xOffset, label, sublabel, active, onClick)
   local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-  createCardBackdrop(btn)
-  btn:SetSize(width, 56)
-  btn:SetPoint("TOPLEFT", xOffset, -26)
+  local hasSub = tostring(sublabel or "") ~= ""
+  btn:SetSize(width, hasSub and 58 or 34)
 
   btn.label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  btn.label:SetPoint("TOPLEFT", 10, -7)
+  btn.label:SetPoint("TOPLEFT", 10, -5)
   btn.label:SetPoint("RIGHT", -8, 0)
   btn.label:SetJustifyH("LEFT")
   btn.label:SetJustifyV("TOP")
   btn.label:SetText(label or "")
+  btn.label:SetTextColor(0.95, 0.96, 0.98)
 
   btn.sub = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  btn.sub:SetPoint("TOPLEFT", 10, -23)
+  btn.sub:SetPoint("TOPLEFT", 10, -22)
   btn.sub:SetPoint("RIGHT", -8, 0)
   btn.sub:SetJustifyH("LEFT")
   btn.sub:SetJustifyV("TOP")
   btn.sub:SetWordWrap(true)
   btn.sub:SetText(sublabel or "")
+  btn.sub:SetTextColor(0.64, 0.68, 0.74)
+  if hasSub then
+    btn.sub:Show()
+  else
+    btn.sub:Hide()
+  end
 
-  btn:SetScript("OnMouseDown", onClick)
+  btn:SetScript("OnClick", onClick)
   if Skin and Skin.ApplyClickableRow then
     Skin:ApplyClickableRow(btn, "row")
     if Skin.SetClickableRowState then
@@ -335,6 +521,389 @@ local function createPresetButton(parent, width, xOffset, label, sublabel, activ
   return btn
 end
 
+local function createTrackingModeButton(parent, width, xOffset, label, sublabel, active, onClick)
+  local btn = createPresetButton(parent, width, xOffset, label, sublabel, active, onClick)
+  btn:SetHeight(54)
+  btn.sub:ClearAllPoints()
+  btn.sub:SetPoint("TOPLEFT", 10, -22)
+  btn.sub:SetPoint("RIGHT", -8, 0)
+  return btn
+end
+
+local function createCompactInput(parent, labelText, x, y, width, value, options)
+  options = type(options) == "table" and options or {}
+  local frame = CreateFrame("Frame", nil, parent)
+  frame:SetPoint("TOPLEFT", x or 0, y or 0)
+  frame:SetSize(width or 160, options.height or 42)
+
+  frame.label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  frame.label:SetPoint("TOPLEFT", 0, 0)
+  frame.label:SetText(labelText or "")
+
+  frame.edit = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+  frame.edit:SetAutoFocus(false)
+  frame.edit:SetPoint("TOPLEFT", 0, -16)
+  frame.edit:SetSize(width or 160, 20)
+  frame.edit:SetText(tostring(value or ""))
+  if options.numeric then
+    frame.edit:SetNumeric(true)
+    frame.edit:SetMaxLetters(options.maxLetters or 4)
+  end
+  if Skin and Skin.ApplyEditBox then
+    Skin:ApplyEditBox(frame.edit)
+  end
+
+  local function commit()
+    if type(options.onCommit) == "function" then
+      options.onCommit(frame.edit:GetText() or "")
+    end
+  end
+
+  frame.edit:SetScript("OnEnterPressed", function(selfEdit)
+    commit()
+    selfEdit:ClearFocus()
+  end)
+  frame.edit:SetScript("OnEditFocusLost", commit)
+
+  if options.spellWidget and FieldFactory and FieldFactory.AttachSpellResolver then
+    FieldFactory.AttachSpellResolver(frame, frame.edit, {
+      key = options.fieldKey or "spellID",
+      widget = options.spellWidget,
+      compactHint = options.compactHint ~= false and false or false,
+    }, function(_, nextValue)
+      if type(options.onCommit) == "function" then
+        options.onCommit(nextValue)
+      end
+    end)
+  end
+
+  return frame
+end
+
+local function createValueSlider(parent, labelText, x, y, width, value, options)
+  options = type(options) == "table" and options or {}
+  local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+  frame:SetPoint("TOPLEFT", x or 0, y or 0)
+  frame:SetSize(width or 240, 44)
+
+  frame.label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  frame.label:SetPoint("TOPLEFT", 0, 0)
+  frame.label:SetText(labelText or "")
+
+  frame.value = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  frame.value:SetPoint("TOPRIGHT", 0, 0)
+  frame.value:SetJustifyH("RIGHT")
+
+  frame.slider = CreateFrame("Slider", nil, frame, "OptionsSliderTemplate")
+  frame.slider:SetPoint("TOPLEFT", 0, -14)
+  frame.slider:SetPoint("TOPRIGHT", 0, -14)
+  frame.slider:SetHeight(18)
+  frame.slider:SetMinMaxValues(tonumber(options.min) or 0, tonumber(options.max) or 100)
+  frame.slider:SetValueStep(tonumber(options.step) or 1)
+  if frame.slider.SetObeyStepOnDrag then
+    frame.slider:SetObeyStepOnDrag(true)
+  end
+
+  if frame.slider.Low then
+    frame.slider.Low:SetText(tostring(options.minLabel or options.min or ""))
+    frame.slider.Low:SetTextColor(0.56, 0.60, 0.68)
+  end
+  if frame.slider.High then
+    frame.slider.High:SetText(tostring(options.maxLabel or options.max or ""))
+    frame.slider.High:SetTextColor(0.56, 0.60, 0.68)
+  end
+  if frame.slider.Text then
+    frame.slider.Text:SetText("")
+  end
+
+  local function normalize(nextValue)
+    local minValue = tonumber(options.min) or 0
+    local maxValue = tonumber(options.max) or 100
+    local stepValue = tonumber(options.step) or 1
+    nextValue = tonumber(nextValue) or minValue
+    nextValue = math.max(minValue, math.min(maxValue, nextValue))
+    if stepValue > 0 then
+      nextValue = minValue + (math.floor(((nextValue - minValue) / stepValue) + 0.5) * stepValue)
+    end
+    if options.integer ~= false then
+      nextValue = math.floor(nextValue + 0.5)
+    end
+    return nextValue
+  end
+
+  local function formatValue(nextValue)
+    if type(options.format) == "function" then
+      return tostring(options.format(nextValue))
+    end
+    return tostring(nextValue)
+  end
+
+  local initialValue = normalize(value)
+  frame._syncing = true
+  frame.slider:SetValue(initialValue)
+  frame._syncing = false
+  frame._lastValue = initialValue
+  frame.value:SetText(formatValue(initialValue))
+
+  frame.slider:SetScript("OnValueChanged", function(_, nextValue)
+    local normalizedValue = normalize(nextValue)
+    frame.value:SetText(formatValue(normalizedValue))
+    if frame._syncing then
+      frame._lastValue = normalizedValue
+      return
+    end
+    if frame._lastValue == normalizedValue then
+      return
+    end
+    frame._lastValue = normalizedValue
+    if type(options.onChanged) == "function" then
+      options.onChanged(normalizedValue)
+    end
+  end)
+
+  return frame
+end
+
+local function createLabeledDivider(parent, text, y)
+  if AceGUI then
+    local heading = AceGUI:Create("Heading")
+    heading:SetText(tostring(text or "Section"))
+    heading.frame:SetParent(parent)
+    heading.frame:ClearAllPoints()
+    heading.frame:SetPoint("TOPLEFT", 12, y)
+    heading.frame:SetPoint("RIGHT", -12, 0)
+    heading.frame:SetHeight(20)
+    if heading.label then
+      heading.label:SetFontObject("GameFontHighlightSmall")
+      heading.label:SetTextColor(0.94, 0.95, 0.98)
+    end
+    if heading.left then
+      heading.left:SetVertexColor(1.0, 0.82, 0.18, 0.95)
+      heading.left:SetHeight(7)
+    end
+    if heading.right then
+      heading.right:SetVertexColor(1.0, 0.82, 0.18, 0.95)
+      heading.right:SetHeight(7)
+    end
+    return heading
+  end
+
+  local frame = CreateFrame("Frame", nil, parent)
+  frame:SetPoint("TOPLEFT", 12, y)
+  frame:SetPoint("RIGHT", -12, 0)
+  frame:SetHeight(28)
+
+  frame.bg = frame:CreateTexture(nil, "BACKGROUND")
+  frame.bg:SetAllPoints()
+  frame.bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+  frame.bg:SetColorTexture(0.12, 0.13, 0.16, 0.68)
+
+  frame.line = frame:CreateTexture(nil, "ARTWORK")
+  frame.line:SetPoint("TOPLEFT", 0, 0)
+  frame.line:SetPoint("TOPRIGHT", 0, 0)
+  frame.line:SetHeight(1)
+  frame.line:SetColorTexture(1.0, 0.82, 0.18, 0.36)
+
+  frame.bottomLine = frame:CreateTexture(nil, "ARTWORK")
+  frame.bottomLine:SetPoint("BOTTOMLEFT", 0, 0)
+  frame.bottomLine:SetPoint("BOTTOMRIGHT", 0, 0)
+  frame.bottomLine:SetHeight(1)
+  frame.bottomLine:SetColorTexture(1.0, 0.82, 0.18, 0.22)
+
+  frame.label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  frame.label:SetPoint("LEFT", 10, 0)
+  frame.label:SetText(tostring(text or "Section"))
+  frame.label:SetTextColor(0.92, 0.95, 0.99)
+
+  frame.tail = frame:CreateTexture(nil, "ARTWORK")
+  frame.tail:SetPoint("LEFT", frame.label, "RIGHT", 10, 0)
+  frame.tail:SetPoint("RIGHT", -8, 0)
+  frame.tail:SetHeight(1)
+  frame.tail:SetColorTexture(1.0, 0.82, 0.18, 0.14)
+  return frame
+end
+
+local function trimText(text)
+  return tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function appendSpellToCSV(existing, spellID)
+  local out = {}
+  local seen = {}
+  for token in tostring(existing or ""):gmatch("[^,;%s]+") do
+    local n = tonumber(token)
+    if n and n > 0 and not seen[n] then
+      seen[n] = true
+      out[#out + 1] = tostring(n)
+    end
+  end
+  spellID = tonumber(spellID)
+  if spellID and spellID > 0 and not seen[spellID] then
+    out[#out + 1] = tostring(spellID)
+  end
+  return table.concat(out, ", ")
+end
+
+local function estimateFieldHeight(field)
+  if not field then
+    return 0
+  end
+  if field.widget == "multiline" then
+    return 92
+  end
+  if field.widget == "bartexture" then
+    return 132
+  end
+  if field.widget == "soundpicker" then
+    return 94
+  end
+  if field.widget == "groupselect" then
+    return 96
+  end
+  if field.widget == "dropdown" then
+    return 64
+  end
+  if field.widget == "checkbox" then
+    return 40
+  end
+  return 36
+end
+
+local function collectFieldsByKeys(fieldsByKey, keys)
+  local rows = {}
+  for i = 1, #(keys or {}) do
+    local field = fieldsByKey and fieldsByKey[keys[i]]
+    if field then
+      rows[#rows + 1] = field
+    end
+  end
+  return rows
+end
+
+local function createSegmentButton(parent, width, height, text, x, y, variant, onClick)
+  local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+  btn:SetSize(width or 92, height or 22)
+  btn:SetPoint("TOPLEFT", x or 0, y or 0)
+  btn:SetText(text or "")
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(btn, variant or "segment")
+  end
+  btn:SetScript("OnClick", onClick)
+  return btn
+end
+
+local STYLE_PRESETS = {
+  {
+    key = "minimal_proc",
+    label = "Minimal Proc",
+    sublabel = "Large icon with crisp timer focus.",
+    summary = "Built for proc popups and easy center-screen recognition.",
+    values = {
+      displayMode = "icon",
+      timerVisual = "icon",
+      iconWidth = 44,
+      iconHeight = 44,
+      showTimerText = true,
+      timerAnchor = "BOTTOM",
+      customTextAnchor = "TOP",
+      lowTime = 3,
+      barColor = "",
+      barTexture = "",
+    },
+  },
+  {
+    key = "clean_bar",
+    label = "Clean Bar",
+    sublabel = "Wide timer bar with strong readability.",
+    summary = "Great for longer buffs, maintenance effects, and utility tracking.",
+    values = {
+      displayMode = "bar",
+      timerVisual = "bar",
+      barWidth = 190,
+      barHeight = 18,
+      showTimerText = true,
+      timerAnchor = "BOTTOM",
+      customTextAnchor = "TOP",
+      lowTime = 4,
+      barColor = "0.18,0.68,1.00",
+      barTexture = "Interface\\AddOns\\AuraLite\\Media\\StatusBars\\aura_smooth",
+    },
+  },
+  {
+    key = "center_burst",
+    label = "Center Burst",
+    sublabel = "Hero-style icon plus accent bar.",
+    summary = "Best for burst windows and high-priority combat moments.",
+    values = {
+      displayMode = "iconbar",
+      timerVisual = "iconbar",
+      iconWidth = 44,
+      iconHeight = 44,
+      barWidth = 128,
+      barHeight = 14,
+      barSide = "right",
+      showTimerText = true,
+      timerAnchor = "TOP",
+      customTextAnchor = "BOTTOM",
+      lowTime = 3,
+      barColor = "0.95,0.72,0.18",
+      barTexture = "Interface\\AddOns\\AuraLite\\Media\\StatusBars\\aura_pulse",
+    },
+  },
+  {
+    key = "compact_tracker",
+    label = "Compact Tracker",
+    sublabel = "Tight footprint for dense HUDs.",
+    summary = "Keeps the aura small while preserving timing signal.",
+    values = {
+      displayMode = "iconbar",
+      timerVisual = "iconbar",
+      iconWidth = 30,
+      iconHeight = 30,
+      barWidth = 82,
+      barHeight = 12,
+      barSide = "right",
+      showTimerText = false,
+      timerAnchor = "BOTTOM",
+      customTextAnchor = "TOP",
+      lowTime = 2,
+      barColor = "0.36,0.82,0.96",
+      barTexture = "Interface\\AddOns\\AuraLite\\Media\\StatusBars\\aura_carbon",
+    },
+  },
+}
+
+local function findStylePreset(presetKey)
+  presetKey = tostring(presetKey or "")
+  for i = 1, #STYLE_PRESETS do
+    if STYLE_PRESETS[i].key == presetKey then
+      return STYLE_PRESETS[i]
+    end
+  end
+  return nil
+end
+
+local STYLE_PRESET_FIELDS = {
+  displayMode = true,
+  timerVisual = true,
+  iconWidth = true,
+  iconHeight = true,
+  barWidth = true,
+  barHeight = true,
+  barSide = true,
+  showTimerText = true,
+  barColor = true,
+  barGradientEnabled = true,
+  barColor2 = true,
+  barTexture = true,
+  lowTime = true,
+  showNameText = true,
+  nameTextSize = true,
+  nameTextFont = true,
+  timerAnchor = true,
+  customTextAnchor = true,
+}
+
 local LIVE_PREVIEW_FIELDS = {
   name = true,
   displayName = true,
@@ -352,8 +921,19 @@ local LIVE_PREVIEW_FIELDS = {
   barWidth = true,
   barHeight = true,
   showTimerText = true,
+  timerTextSize = true,
+  timerTextFont = true,
   barColor = true,
+  barGradientEnabled = true,
+  barColor2 = true,
   barSide = true,
+  showNameText = true,
+  nameTextSize = true,
+  nameTextFont = true,
+  showCustomText = true,
+  customTextSize = true,
+  customTextFont = true,
+  visualStates = true,
   timerAnchor = true,
   timerOffsetX = true,
   timerOffsetY = true,
@@ -362,6 +942,10 @@ local LIVE_PREVIEW_FIELDS = {
   customTextOffsetY = true,
   lowTime = true,
   estimatedDuration = true,
+  duration = true,
+  soundOnShow = true,
+  soundOnLow = true,
+  soundOnExpire = true,
 }
 
 function AuraEditorPanel:RefreshLivePreview(forceRefresh)
@@ -405,6 +989,14 @@ function AuraEditorPanel:RefreshLivePreview(forceRefresh)
   end
   ns.state.selectedAuraPreviewItem = previewItem
 
+  if E and E.Names and E.Names.SIMULATE_TRIGGER and previewItem then
+    E:Emit(E.Names.SIMULATE_TRIGGER, {
+      draft = previewItem,
+      duration = tonumber(previewItem.duration or previewItem.estimatedDuration) or tonumber(self.draft.duration or self.draft.estimatedDuration) or 8,
+      kind = "produce",
+    })
+  end
+
   if ns.EventRouter and ns.EventRouter.RefreshAll then
     ns.EventRouter:RefreshAll()
   end
@@ -437,6 +1029,20 @@ function AuraEditorPanel:ValidateDraft()
     issues[#issues + 1] = { severity = "error", path = "spellID", message = "Aura SpellID is required." }
   end
 
+  if isCooldownTracking(self.draft) then
+    self.draft.triggerType = "cooldown"
+    self.draft.actionMode = "produce"
+    if S and S.SetDirty then
+      S:SetDirty(true)
+    end
+    self:UpdateHeader()
+    self:ValidateDraft()
+    self:RefreshTabButtons()
+    self:RenderTab(self.currentTab or "Tracking")
+    self:RefreshLivePreview(true)
+    return
+  end
+
   if isEstimatedTargetTracking(self.draft) then
     if tostring(self.draft.castSpellIDs or "") == "" then
       issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "Add at least one spell you cast to start this debuff timer." }
@@ -444,11 +1050,14 @@ function AuraEditorPanel:ValidateDraft()
     if tonumber(self.draft.estimatedDuration) == nil or tonumber(self.draft.estimatedDuration) <= 0 then
       issues[#issues + 1] = { severity = "error", path = "estimatedDuration", message = "Set the expected debuff duration in seconds." }
     end
-  elseif not isDirectAuraTracking(self.draft) and tostring(self.draft.triggerType or "cast") == "cast" and tostring(self.draft.castSpellIDs or "") == "" then
+  elseif not isCooldownTracking(self.draft)
+    and not isDirectAuraTracking(self.draft)
+    and tostring(self.draft.triggerType or "cast") == "cast"
+    and tostring(self.draft.castSpellIDs or "") == "" then
     issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "Add at least one trigger spell to drive this aura." }
   end
 
-  if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) then
+  if not isCooldownTracking(self.draft) and not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) then
     local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
     if actionMode == "produce" then
       local triggers = normalizeProduceTriggers(self.draft)
@@ -484,7 +1093,7 @@ function AuraEditorPanel:ValidateDraft()
     end
   end
 
-  if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) then
+  if not isCooldownTracking(self.draft) and not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) then
     if tostring(self.draft.actionMode or "produce") == "produce" then
       if tostring(self.draft.timerBehavior or "reset") == "extend" then
         if (tonumber(self.draft.maxDuration) or 0) <= 0 then
@@ -520,29 +1129,33 @@ end
 
 function AuraEditorPanel:UpdateHeader()
   if not self.draft then
-    self.titleText:SetText("")
-    self.subtitle:SetText("Select an aura from the list or create a new one.")
+    self.titleText:SetText("Inspector")
+    self.subtitle:SetText("")
     if self.previewBannerText then
       self.previewBannerText:SetText("No aura selected")
     end
     if self.previewBannerHint then
       self.previewBannerHint:SetText("")
+      self.previewBannerHint:Hide()
     end
     return
   end
-  self.titleText:SetText("")
-  self.subtitle:SetText(string.format("Unit: %s | Tracking: %s", tostring(self.draft.unit or "player"), getTrackingSummary(self.draft)))
+  self.titleText:SetText(tostring(self.draft.name or self.draft.displayName or "Selected Aura"))
+  self.subtitle:SetText("")
   if self.previewBannerText then
-    local auraName = tostring(self.draft.name or self.draft.displayName or "Selected Aura")
-    self.previewBannerText:SetText(auraName)
+    self.previewBannerText:SetText(string.format("Spell %s", tostring(self.draft.spellID or "?")))
   end
   if self.previewBannerHint then
     self.previewBannerHint:SetText("")
+    self.previewBannerHint:Hide()
   end
 end
 
 function AuraEditorPanel:RefreshTabButtons()
   local x = 0
+  if self.btnMode then
+    self.btnMode:SetText(self.showAdvanced and "Guided" or "Advanced")
+  end
   for i = 1, #(Schemas and Schemas.EditorTabs or {}) do
     local tab = Schemas.EditorTabs[i]
     local btn = self.tabs and self.tabs[tab.key]
@@ -551,7 +1164,7 @@ function AuraEditorPanel:RefreshTabButtons()
         btn:Show()
         btn:ClearAllPoints()
         btn:SetPoint("TOPLEFT", x, 0)
-        x = x + 100
+        x = x + 108
       else
         btn:Hide()
       end
@@ -634,10 +1247,10 @@ function AuraEditorPanel:ApplyTrackingPreset(presetKey)
     if not tonumber(self.draft.estimatedDuration) or tonumber(self.draft.estimatedDuration) <= 0 then
       self.draft.estimatedDuration = tonumber(self.draft.duration) or 8
     end
-  elseif presetKey == "target_aura" then
-    self.draft.unit = "target"
-    self.draft.trackingMode = "confirmed"
-    self.draft.triggerType = "aura"
+  elseif presetKey == "cooldown_player" then
+    self.draft.unit = "player"
+    self.draft.trackingMode = "cooldown"
+    self.draft.triggerType = "cooldown"
     self.draft.actionMode = "produce"
   else
     self.draft.unit = "player"
@@ -679,10 +1292,10 @@ function AuraEditorPanel:ApplyLayoutPreset(presetKey)
   elseif presetKey == "iconbar" then
     self.draft.displayMode = "iconbar"
     self.draft.timerVisual = "iconbar"
-    self.draft.iconWidth = 36
-    self.draft.iconHeight = 36
+    self.draft.iconWidth = 32
+    self.draft.iconHeight = 32
     self.draft.barWidth = 94
-    self.draft.barHeight = 16
+    self.draft.barHeight = 32
     self.draft.barSide = "right"
     self.draft.showTimerText = true
   elseif presetKey == "targetbar" then
@@ -694,6 +1307,7 @@ function AuraEditorPanel:ApplyLayoutPreset(presetKey)
     self.draft.timerAnchor = "BOTTOM"
     self.draft.customTextAnchor = "TOP"
   end
+  self.draft.stylePreset = ""
 
   if S and S.SetDirty then
     S:SetDirty(true)
@@ -702,9 +1316,85 @@ function AuraEditorPanel:ApplyLayoutPreset(presetKey)
   self:RefreshLivePreview(true)
   self:RenderTab("Appearance")
 end
+
+function AuraEditorPanel:ApplyStylePreset(presetKey)
+  if not self.draft then
+    return
+  end
+
+  local preset = findStylePreset(presetKey)
+  if not preset then
+    return
+  end
+
+  local values = preset.values or {}
+  for key, value in pairs(values) do
+    self.draft[key] = value
+  end
+  self.draft.stylePreset = preset.key
+
+  if S and S.SetDirty then
+    S:SetDirty(true)
+  end
+  self:ValidateDraft()
+  self:RefreshLivePreview(true)
+  self:RenderTab("Appearance")
+end
+
+function AuraEditorPanel:SetVisualStatePreset(kind, value)
+  if not self.draft then
+    return
+  end
+  if ns.VisualStyle and ns.VisualStyle.NormalizeStates then
+    self.draft.visualStates = ns.VisualStyle:NormalizeStates(self.draft.visualStates)
+  else
+    self.draft.visualStates = self.draft.visualStates or {}
+  end
+  self.draft.visualStates[kind] = tostring(value or "off")
+  if S and S.SetDirty then
+    S:SetDirty(true)
+  end
+  self:ValidateDraft()
+  self:RefreshLivePreview(true)
+  self:RenderTab("Appearance")
+end
+
+function AuraEditorPanel:SetVisualStateGlowSpeed(value)
+  if not self.draft then
+    return
+  end
+  if ns.VisualStyle and ns.VisualStyle.NormalizeStates then
+    self.draft.visualStates = ns.VisualStyle:NormalizeStates(self.draft.visualStates)
+  else
+    self.draft.visualStates = self.draft.visualStates or {}
+  end
+  self.draft.visualStates.glowSpeed = math.max(0.25, math.min(3.0, tonumber(value) or 1.0))
+  if S and S.SetDirty then
+    S:SetDirty(true)
+  end
+  self:ValidateDraft()
+  self:RefreshLivePreview(true)
+end
+
 function AuraEditorPanel:LoadAura(auraId)
+  auraId = (tostring(auraId or "") ~= "") and tostring(auraId) or nil
+  if self._loadAuraInProgress == true and self._loadingAuraId == auraId then
+    return
+  end
+  if self.currentAuraId == auraId and self.draft and self._forceAuraReload ~= true then
+    return
+  end
+
+  self._loadAuraInProgress = true
+  self._loadingAuraId = auraId
   self.draft = Repo:GetAuraDraft(auraId)
   self.deleteArmedUntil = nil
+  if self.draft and tostring(self.draft.unit or "player") == "target" and tostring(self.draft.trackingMode or "confirmed") == "confirmed" then
+    self.draft.trackingMode = "estimated"
+    self.draft.triggerType = "cast"
+    self.draft.actionMode = "produce"
+    self.draft.onlyMine = true
+  end
   self.triggerEditMode = tostring(self.draft and self.draft.actionMode or "produce")
   if self.draft then
     self.draft._produceTriggersDirty = false
@@ -732,6 +1422,31 @@ function AuraEditorPanel:LoadAura(auraId)
   if S and S.SetDirty then
     S:SetDirty(false)
   end
+  self._forceAuraReload = false
+  self._loadAuraInProgress = false
+  self._loadingAuraId = nil
+end
+
+function AuraEditorPanel:RefreshAdvancedLoadConditionWidgets()
+  if self.currentTab ~= "Advanced" then
+    return
+  end
+
+  local fieldWidgetByKey = self.fieldWidgetByKey or {}
+  local classWidget = fieldWidgetByKey.loadClassToken
+  local specWidget = fieldWidgetByKey.loadSpecID
+  local classControl = classWidget and classWidget.control
+  local specControl = specWidget and specWidget.control
+
+  if classControl and classControl.SetValue then
+    classControl:SetValue(tostring(self.draft and self.draft.loadClassToken or ""), false)
+  end
+
+  if specControl and specControl.SetOptions then
+    local specOptions = (ns.SettingsData and ns.SettingsData.GetLoadSpecMenuOptions and ns.SettingsData:GetLoadSpecMenuOptions(self.draft and self.draft.loadClassToken or "")) or {}
+    specControl:SetOptions(specOptions)
+    specControl:SetValue(tostring(self.draft and self.draft.loadSpecID or ""), false)
+  end
 end
 
 function AuraEditorPanel:OnFieldChanged(key, value)
@@ -747,6 +1462,10 @@ function AuraEditorPanel:OnFieldChanged(key, value)
   end
   if self.suspendFieldChanges == true then
     return
+  end
+
+  if key ~= "stylePreset" and STYLE_PRESET_FIELDS[key] then
+    self.draft.stylePreset = ""
   end
 
   if key == "unit" then
@@ -792,8 +1511,42 @@ function AuraEditorPanel:OnFieldChanged(key, value)
     return
   end
 
-  if key == "loadClassToken" and self.currentTab == "Advanced" then
+  if key == "loadClassToken" then
+    local specOptions = (ns.SettingsData and ns.SettingsData.GetLoadSpecMenuOptions and ns.SettingsData:GetLoadSpecMenuOptions(value)) or {}
+    if not hasLoadSpecOption(specOptions, self.draft.loadSpecID) then
+      self.draft.loadSpecID = ""
+    end
+    if self.currentTab == "Advanced" then
+      self:RefreshAdvancedLoadConditionWidgets()
+      if not self._pendingAdvancedLoadRefresh then
+        self._pendingAdvancedLoadRefresh = true
+        C_Timer.After(0, function()
+          if not self then
+            return
+          end
+          self._pendingAdvancedLoadRefresh = false
+          if self.currentTab == "Advanced" and self.draft then
+            self:RenderTab(self.currentTab)
+          end
+        end)
+      end
+    end
+  end
+
+  if self.currentTab == "Appearance" and (
+    key == "barGradientEnabled"
+    or key == "iconMode"
+    or key == "showNameText"
+    or key == "showCustomText"
+  ) then
+    if S and S.SetDirty then
+      S:SetDirty(true)
+    end
+    self:UpdateHeader()
+    self:ValidateDraft()
     self:RenderTab(self.currentTab)
+    self:RefreshLivePreview(false)
+    return
   end
 
   if S and S.SetDirty then
@@ -821,18 +1574,37 @@ end
 
 function AuraEditorPanel:ClearTabContent()
   self.produceTriggerWidgets = nil
+  self.fieldWidgetByKey = {}
 
-  if self.triggerListWidget and self.triggerListWidget.frame then
-    self.triggerListWidget.frame:Hide()
-    self.triggerListWidget.frame:SetParent(nil)
+  if self.triggerListWidget then
+    if type(self.triggerListWidget.Release) == "function" then
+      self.triggerListWidget:Release()
+    elseif self.triggerListWidget.frame then
+      self.triggerListWidget.frame:Hide()
+      self.triggerListWidget.frame:SetParent(nil)
+    end
   end
   self.triggerListWidget = nil
 
+  local releasedWidgets = {}
   for i = 1, #(self.fieldWidgets or {}) do
     local w = self.fieldWidgets[i]
     if w then
-      w:Hide()
-      w:SetParent(nil)
+      if type(w.Release) == "function" then
+        if not releasedWidgets[w] then
+          releasedWidgets[w] = true
+          w:Release()
+        end
+      elseif w._aceWidget and type(w._aceWidget.Release) == "function" then
+        if not releasedWidgets[w._aceWidget] then
+          releasedWidgets[w._aceWidget] = true
+          w._aceWidget:Release()
+        end
+      elseif w._alReleased ~= true then
+        w._alReleased = true
+        w:Hide()
+        w:SetParent(nil)
+      end
     end
   end
   self.fieldWidgets = {}
@@ -850,12 +1622,26 @@ function AuraEditorPanel:ClearTabContent()
   self.conditionTree = nil
 end
 
+function AuraEditorPanel:IsSectionExpanded(sectionKey, defaultExpanded)
+  self.sectionCollapsed = self.sectionCollapsed or {}
+  if self.sectionCollapsed[sectionKey] == nil then
+    return defaultExpanded ~= false
+  end
+  return self.sectionCollapsed[sectionKey] ~= true
+end
+
+function AuraEditorPanel:SetSectionExpanded(sectionKey, expanded)
+  self.sectionCollapsed = self.sectionCollapsed or {}
+  self.sectionCollapsed[sectionKey] = not (expanded == true)
+end
+
 function AuraEditorPanel:RenderGenericFields(tab, yStart, parent, leftInset, rightInset)
   local fields = tab.fields or tab or {}
   local y = yStart
   parent = parent or self.content
   leftInset = tonumber(leftInset) or 16
   rightInset = tonumber(rightInset) or -24
+  self.fieldWidgetByKey = self.fieldWidgetByKey or {}
   for i = 1, #fields do
     local field = fields[i]
     local widget = FieldFactory:CreateField(parent, field, self.draft, function(fKey, fValue)
@@ -866,66 +1652,85 @@ function AuraEditorPanel:RenderGenericFields(tab, yStart, parent, leftInset, rig
     widget:Show()
     y = y - widget:GetHeight() - 8
     self.fieldWidgets[#self.fieldWidgets + 1] = widget
+    if field and field.key then
+      self.fieldWidgetByKey[field.key] = widget
+    end
   end
   return y
 end
 
 function AuraEditorPanel:RenderAppearanceCard(y, title, body, fields)
-  local cardHeight = 72
+  local sectionKey = "appearance_" .. normalizeSectionKey(title)
+  body = ""
+  local expanded = self:IsSectionExpanded(sectionKey, true)
+  if not expanded then
+    local card = createCard(self.content, y, title, body, 56, {
+      compact = true,
+      collapsible = true,
+      collapsed = true,
+      onToggle = function(nextExpanded)
+        self:SetSectionExpanded(sectionKey, nextExpanded)
+        self:RenderTab(self.currentTab or "Appearance")
+      end,
+    })
+    self.fieldWidgets[#self.fieldWidgets + 1] = card
+    return y - 66
+  end
+  local cardHeight = 56
   for i = 1, #(fields or {}) do
     local field = fields[i]
-    cardHeight = cardHeight + ((field.widget == "multiline") and 100 or 60)
+    cardHeight = cardHeight + estimateFieldHeight(field) + 6
   end
-  local card = createCard(self.content, y, title, body, cardHeight)
+  local card = createCard(self.content, y, title, body, cardHeight, {
+    compact = true,
+    collapsible = true,
+    collapsed = false,
+    onToggle = function(nextExpanded)
+      self:SetSectionExpanded(sectionKey, nextExpanded)
+      self:RenderTab(self.currentTab or "Appearance")
+    end,
+  })
   self.fieldWidgets[#self.fieldWidgets + 1] = card
-  local nextY = self:RenderGenericFields(fields or {}, -2, card.content, 2, -2)
-  card.content:SetHeight(math.max(24, -nextY + 8))
-  return y - cardHeight - 10
+  local nextY = self:RenderGenericFields(fields or {}, -2, card.content, 12, -12)
+  card.content:SetHeight(math.max(24, -nextY + 10))
+  card:SetHeight(card.content:GetHeight() + 36)
+  return y - card:GetHeight() - 10
 end
 
 function AuraEditorPanel:RenderDisplayCanvas(y)
-  local card = createCard(self.content, y, "Visual Layout", "Use quick layout presets here, then check the Live Preview panel on the right for the real draft preview.", 132)
+  local mode = tostring(self.draft.displayMode or self.draft.timerVisual or "icon")
+  local hasIconBar = mode == "iconbar"
+  local cardHeight = hasIconBar and 128 or 112
+  local card = createCard(self.content, y, "Artifact", "", cardHeight, {
+    compact = true,
+    collapsible = true,
+    collapsed = false,
+    onToggle = function(nextExpanded)
+      self:SetSectionExpanded("appearance_visual_layout", nextExpanded)
+      self:RenderTab("Appearance")
+    end,
+  })
   self.fieldWidgets[#self.fieldWidgets + 1] = card
 
-  local presetLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  presetLabel:SetPoint("TOPLEFT", 2, -2)
-  presetLabel:SetText("Quick Layout Presets")
-
   local function makePreset(text, x, presetKey)
-    local btn = CreateFrame("Button", nil, card.content, "UIPanelButtonTemplate")
-    btn:SetSize(82, 20)
-    btn:SetPoint("TOPLEFT", 2 + x, -18)
-    btn:SetText(text)
-    if Skin and Skin.ApplyButton then
-      Skin:SetButtonVariant(btn, "segment")
-    end
-    btn:SetScript("OnClick", function()
+    local btn = createSegmentButton(card.content, 92, 22, text, 2 + x, -8, "segment", function()
       self:ApplyLayoutPreset(presetKey)
     end)
     self.fieldWidgets[#self.fieldWidgets + 1] = btn
   end
 
   makePreset("Icon", 0, "icon")
-  makePreset("Compact", 88, "compact")
-  makePreset("Icon + Bar", 176, "iconbar")
-  makePreset("Target Bar", 264, "targetbar")
-
-  local mode = tostring(self.draft.displayMode or self.draft.timerVisual or "icon")
+  makePreset("Compact", 102, "compact")
+  makePreset("Icon + Bar", 204, "iconbar")
+  makePreset("Target Bar", 336, "targetbar")
 
   local function makeMiniButton(text, x, onClick)
-    local btn = CreateFrame("Button", nil, card.content, "UIPanelButtonTemplate")
-    btn:SetSize(82, 20)
-    btn:SetPoint("TOPLEFT", 2 + x, -46)
-    btn:SetText(text)
-    if Skin and Skin.ApplyButton then
-      Skin:SetButtonVariant(btn, "segment")
-    end
-    btn:SetScript("OnClick", onClick)
+    local btn = createSegmentButton(card.content, 92, 22, text, 2 + x, hasIconBar and -56 or -48, "segment", onClick)
     self.fieldWidgets[#self.fieldWidgets + 1] = btn
     return btn
   end
 
-  if mode == "iconbar" then
+  if hasIconBar then
     makeMiniButton("Icon Left", 0, function()
       self:OnFieldChanged("barSide", "right")
       self:RenderTab("Appearance")
@@ -938,22 +1743,522 @@ function AuraEditorPanel:RenderDisplayCanvas(y)
   makeMiniButton("Timer Above", 0, function()
     self:OnFieldChanged("timerAnchor", "TOP")
     self:RenderTab("Appearance")
-  end):SetPoint("TOPLEFT", 2, -74)
-  makeMiniButton("Timer Below", 88, function()
+  end):SetPoint("TOPLEFT", 2, hasIconBar and -56 or -48)
+  makeMiniButton("Timer Below", 102, function()
     self:OnFieldChanged("timerAnchor", "BOTTOM")
     self:RenderTab("Appearance")
-  end):SetPoint("TOPLEFT", 90, -74)
-  makeMiniButton("Text Above", 176, function()
+  end):SetPoint("TOPLEFT", 106, hasIconBar and -56 or -48)
+  makeMiniButton("Text Above", 204, function()
     self:OnFieldChanged("customTextAnchor", "TOP")
     self:RenderTab("Appearance")
-  end):SetPoint("TOPLEFT", 178, -74)
-  makeMiniButton("Text Below", 266, function()
+  end):SetPoint("TOPLEFT", 210, hasIconBar and -56 or -48)
+  makeMiniButton("Text Below", 306, function()
     self:OnFieldChanged("customTextAnchor", "BOTTOM")
     self:RenderTab("Appearance")
-  end):SetPoint("TOPLEFT", 266, -74)
+  end):SetPoint("TOPLEFT", 314, hasIconBar and -56 or -48)
 
-  card.content:SetHeight(98)
-  return y - 142
+  card.content:SetHeight(hasIconBar and 96 or 72)
+  card:SetHeight(card.content:GetHeight() + 36)
+  return y - card:GetHeight() - 10
+end
+
+function AuraEditorPanel:RenderStyleStudio(y)
+  local sectionKey = "style_studio"
+  local expanded = self:IsSectionExpanded(sectionKey, true)
+  if not expanded then
+    local collapsedCard = createCard(
+      self.content,
+      y,
+      "Quick Starts",
+      "",
+      56,
+      {
+        compact = true,
+        collapsible = true,
+        collapsed = true,
+        onToggle = function(nextExpanded)
+          self:SetSectionExpanded(sectionKey, nextExpanded)
+          self:RenderTab(self.currentTab or "Appearance")
+        end,
+      }
+    )
+    self.fieldWidgets[#self.fieldWidgets + 1] = collapsedCard
+    return y - 66
+  end
+  local activePresetKey = tostring(self.draft and self.draft.stylePreset or "")
+  local card = createCard(
+    self.content,
+    y,
+    "Quick Starts",
+    "",
+    118,
+    {
+      compact = true,
+      collapsible = true,
+      collapsed = false,
+      onToggle = function(nextExpanded)
+        self:SetSectionExpanded(sectionKey, nextExpanded)
+        self:RenderTab(self.currentTab or "Appearance")
+      end,
+    }
+  )
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local colWidth = 178
+  local xPositions = { 2, 190 }
+  local yPositions = { -4, -42 }
+  for i = 1, #STYLE_PRESETS do
+    local preset = STYLE_PRESETS[i]
+    local col = ((i - 1) % 2) + 1
+    local row = math.floor((i - 1) / 2) + 1
+    local btn = createPresetButton(
+      card.content,
+      colWidth,
+      xPositions[col],
+      preset.label,
+      "",
+      preset.key == activePresetKey,
+      function()
+        self:ApplyStylePreset(preset.key)
+      end
+    )
+    btn:SetPoint("TOPLEFT", xPositions[col], yPositions[row])
+    self.fieldWidgets[#self.fieldWidgets + 1] = btn
+  end
+
+  card.content:SetHeight(82)
+  return y - 122
+end
+
+function AuraEditorPanel:RenderAppearanceFineTuneCard(y, mode)
+  local sectionKey = "appearance_fine_tune"
+  local expanded = self:IsSectionExpanded(sectionKey, true)
+  if not expanded then
+    local card = createCard(self.content, y, "Fine Tune", "", 56, {
+      compact = true,
+      collapsible = true,
+      collapsed = true,
+      onToggle = function(nextExpanded)
+        self:SetSectionExpanded(sectionKey, nextExpanded)
+        self:RenderTab(self.currentTab or "Appearance")
+      end,
+    })
+    self.fieldWidgets[#self.fieldWidgets + 1] = card
+    return y - 66
+  end
+
+  local hasIcon = mode == "icon" or mode == "iconbar"
+  local hasBar = mode == "bar" or mode == "iconbar"
+  local cardHeight = hasBar and 224 or 176
+  local card = createCard(self.content, y, "Fine Tune", "", cardHeight, {
+    compact = true,
+    collapsible = true,
+    collapsed = false,
+    onToggle = function(nextExpanded)
+      self:SetSectionExpanded(sectionKey, nextExpanded)
+      self:RenderTab(self.currentTab or "Appearance")
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local leftX = 12
+  local rightX = 266
+  local topY = -4
+
+  if hasIcon then
+    local iconSlider = createValueSlider(card.content, "Icon Size", leftX, topY, 224, tonumber(self.draft.iconWidth) or 36, {
+      min = 16,
+      max = 96,
+      step = 2,
+      onChanged = function(nextValue)
+        self:OnFieldChanged("iconWidth", nextValue)
+        self:OnFieldChanged("iconHeight", nextValue)
+      end,
+      format = function(nextValue)
+        return string.format("%d px", nextValue)
+      end,
+    })
+    self.fieldWidgets[#self.fieldWidgets + 1] = iconSlider
+  end
+
+  if hasBar then
+    local barWidthSlider = createValueSlider(card.content, "Bar Width", hasIcon and rightX or leftX, topY, 224, tonumber(self.draft.barWidth) or 94, {
+      min = 60,
+      max = 260,
+      step = 4,
+      onChanged = function(nextValue)
+        self:OnFieldChanged("barWidth", nextValue)
+      end,
+      format = function(nextValue)
+        return string.format("%d px", nextValue)
+      end,
+    })
+    self.fieldWidgets[#self.fieldWidgets + 1] = barWidthSlider
+
+    local barHeightSlider = createValueSlider(card.content, "Bar Height", leftX, -56, 224, tonumber(self.draft.barHeight) or 16, {
+      min = 8,
+      max = 32,
+      step = 2,
+      onChanged = function(nextValue)
+        self:OnFieldChanged("barHeight", nextValue)
+      end,
+      format = function(nextValue)
+        return string.format("%d px", nextValue)
+      end,
+    })
+    self.fieldWidgets[#self.fieldWidgets + 1] = barHeightSlider
+  end
+
+  local timerSliderY = hasBar and -56 or topY
+  local timerSliderX = rightX
+  local timerSlider = createValueSlider(card.content, "Timer Offset", timerSliderX, timerSliderY, 224, tonumber(self.draft.timerOffsetY) or -1, {
+    min = -24,
+    max = 24,
+    step = 1,
+    onChanged = function(nextValue)
+      self:OnFieldChanged("timerOffsetY", nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%+d px", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = timerSlider
+
+  local textSlider = createValueSlider(card.content, "Label Offset", leftX, hasBar and -108 or -56, 224, tonumber(self.draft.customTextOffsetY) or 2, {
+    min = -24,
+    max = 24,
+    step = 1,
+    onChanged = function(nextValue)
+      self:OnFieldChanged("customTextOffsetY", nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%+d px", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = textSlider
+
+  local timerXSlider = createValueSlider(card.content, "Timer X", rightX, hasBar and -108 or -56, 224, tonumber(self.draft.timerOffsetX) or 0, {
+    min = -48,
+    max = 48,
+    step = 1,
+    onChanged = function(nextValue)
+      self:OnFieldChanged("timerOffsetX", nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%+d px", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = timerXSlider
+
+  local textXSlider = createValueSlider(card.content, "Label X", leftX, hasBar and -160 or -108, 224, tonumber(self.draft.customTextOffsetX) or 0, {
+    min = -48,
+    max = 48,
+    step = 1,
+    onChanged = function(nextValue)
+      self:OnFieldChanged("customTextOffsetX", nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%+d px", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = textXSlider
+
+  local timerToggleLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  timerToggleLabel:SetPoint("TOPLEFT", rightX, hasBar and -160 or -108)
+  timerToggleLabel:SetText("Timer Text")
+  self.fieldWidgets[#self.fieldWidgets + 1] = timerToggleLabel
+
+  local btnTimerOn = createSegmentButton(card.content, 88, 20, "Show", rightX, hasBar and -178 or -126, "segment", function()
+    self:OnFieldChanged("showTimerText", true)
+    self:RenderTab("Appearance")
+  end)
+  local btnTimerOff = createSegmentButton(card.content, 88, 20, "Hide", rightX + 96, hasBar and -178 or -126, "segment", function()
+    self:OnFieldChanged("showTimerText", false)
+    self:RenderTab("Appearance")
+  end)
+  if Skin and Skin.SetButtonSelected then
+    Skin:SetButtonSelected(btnTimerOn, self.draft.showTimerText ~= false)
+    Skin:SetButtonSelected(btnTimerOff, self.draft.showTimerText == false)
+  end
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnTimerOn
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnTimerOff
+
+  card.content:SetHeight(hasBar and 204 or 156)
+  card:SetHeight(card.content:GetHeight() + 36)
+  return y - card:GetHeight() - 10
+end
+
+function AuraEditorPanel:RenderTextControlsCard(y, fields)
+  local sectionKey = "appearance_text_controls"
+  local expanded = self:IsSectionExpanded(sectionKey, true)
+  if not expanded then
+    local card = createCard(self.content, y, "Text", "", 56, {
+      compact = true,
+      collapsible = true,
+      collapsed = true,
+      onToggle = function(nextExpanded)
+        self:SetSectionExpanded(sectionKey, nextExpanded)
+        self:RenderTab(self.currentTab or "Appearance")
+      end,
+    })
+    self.fieldWidgets[#self.fieldWidgets + 1] = card
+    return y - 66
+  end
+
+  local card = createCard(self.content, y, "Text", "", 244, {
+    compact = true,
+    collapsible = true,
+    collapsed = false,
+    onToggle = function(nextExpanded)
+      self:SetSectionExpanded(sectionKey, nextExpanded)
+      self:RenderTab(self.currentTab or "Appearance")
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local toggleLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  toggleLabel:SetPoint("TOPLEFT", 12, -4)
+  toggleLabel:SetText("Aura Name")
+  self.fieldWidgets[#self.fieldWidgets + 1] = toggleLabel
+
+  local btnShow = createSegmentButton(card.content, 88, 20, "Show", 12, -22, "segment", function()
+    self:OnFieldChanged("showNameText", true)
+    self:RenderTab("Appearance")
+  end)
+  local btnHide = createSegmentButton(card.content, 88, 20, "Hide", 108, -22, "segment", function()
+    self:OnFieldChanged("showNameText", false)
+    self:RenderTab("Appearance")
+  end)
+  if Skin and Skin.SetButtonSelected then
+    Skin:SetButtonSelected(btnShow, self.draft.showNameText ~= false)
+    Skin:SetButtonSelected(btnHide, self.draft.showNameText == false)
+  end
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnShow
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnHide
+
+  local timerLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  timerLabel:SetPoint("TOPLEFT", 12, -56)
+  timerLabel:SetText("Timer Text")
+  self.fieldWidgets[#self.fieldWidgets + 1] = timerLabel
+
+  local btnTimerShow = createSegmentButton(card.content, 88, 20, "Show", 12, -74, "segment", function()
+    self:OnFieldChanged("showTimerText", true)
+    self:RenderTab("Appearance")
+  end)
+  local btnTimerHide = createSegmentButton(card.content, 88, 20, "Hide", 108, -74, "segment", function()
+    self:OnFieldChanged("showTimerText", false)
+    self:RenderTab("Appearance")
+  end)
+  if Skin and Skin.SetButtonSelected then
+    Skin:SetButtonSelected(btnTimerShow, self.draft.showTimerText ~= false)
+    Skin:SetButtonSelected(btnTimerHide, self.draft.showTimerText == false)
+  end
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnTimerShow
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnTimerHide
+
+  local extraToggleLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  extraToggleLabel:SetPoint("TOPLEFT", 12, -108)
+  extraToggleLabel:SetText("Extra Text")
+  self.fieldWidgets[#self.fieldWidgets + 1] = extraToggleLabel
+
+  local btnExtraShow = createSegmentButton(card.content, 88, 20, "Show", 12, -126, "segment", function()
+    self:OnFieldChanged("showCustomText", true)
+    self:RenderTab("Appearance")
+  end)
+  local btnExtraHide = createSegmentButton(card.content, 88, 20, "Hide", 108, -126, "segment", function()
+    self:OnFieldChanged("showCustomText", false)
+    self:RenderTab("Appearance")
+  end)
+  if Skin and Skin.SetButtonSelected then
+    Skin:SetButtonSelected(btnExtraShow, self.draft.showCustomText ~= false)
+    Skin:SetButtonSelected(btnExtraHide, self.draft.showCustomText == false)
+  end
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnExtraShow
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnExtraHide
+
+  local sizeSlider = createValueSlider(card.content, "Aura Name Size", 266, -4, 224, tonumber(self.draft.nameTextSize) or 12, {
+    min = 8,
+    max = 32,
+    step = 1,
+    onChanged = function(nextValue)
+      self:OnFieldChanged("nameTextSize", nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%d pt", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = sizeSlider
+
+  local timerSizeSlider = createValueSlider(card.content, "Timer Size", 266, -56, 224, tonumber(self.draft.timerTextSize) or 12, {
+    min = 8,
+    max = 32,
+    step = 1,
+    onChanged = function(nextValue)
+      self:OnFieldChanged("timerTextSize", nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%d pt", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = timerSizeSlider
+
+  local customSizeSlider = createValueSlider(card.content, "Extra Text Size", 266, -108, 224, tonumber(self.draft.customTextSize) or 12, {
+    min = 8,
+    max = 32,
+    step = 1,
+    onChanged = function(nextValue)
+      self:OnFieldChanged("customTextSize", nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%d pt", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = customSizeSlider
+
+  local offsetSlider = createValueSlider(card.content, "Extra Text Offset", 266, -160, 224, tonumber(self.draft.customTextOffsetY) or 2, {
+    min = -24,
+    max = 24,
+    step = 1,
+    onChanged = function(nextValue)
+      self:OnFieldChanged("customTextOffsetY", nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%+d px", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = offsetSlider
+
+  local extraLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  extraLabel:SetPoint("TOPLEFT", 12, -162)
+  extraLabel:SetText("Extra Text Content")
+  self.fieldWidgets[#self.fieldWidgets + 1] = extraLabel
+
+  local nextY = self:RenderGenericFields(fields or {}, -184, card.content, 12, -12)
+  card.content:SetHeight(math.max(284, -nextY + 8))
+  card:SetHeight(card.content:GetHeight() + 36)
+  return y - card:GetHeight() - 10
+end
+
+function AuraEditorPanel:RenderVisualStateStudio(y)
+  local sectionKey = "visual_state_studio"
+  local expanded = self:IsSectionExpanded(sectionKey, true)
+  if not expanded then
+    local collapsedCard = createCard(
+      self.content,
+      y,
+      "Glow & Emphasis",
+      "",
+      56,
+      {
+        compact = true,
+        collapsible = true,
+        collapsed = true,
+        onToggle = function(nextExpanded)
+          self:SetSectionExpanded(sectionKey, nextExpanded)
+          self:RenderTab(self.currentTab or "Appearance")
+        end,
+      }
+    )
+    self.fieldWidgets[#self.fieldWidgets + 1] = collapsedCard
+    return y - 66
+  end
+  local states = (ns.VisualStyle and ns.VisualStyle:NormalizeStates(self.draft and self.draft.visualStates)) or (self.draft and self.draft.visualStates) or {}
+  local card = createCard(
+    self.content,
+    y,
+    "Glow & Emphasis",
+    "",
+    182,
+    {
+      compact = true,
+      collapsible = true,
+      collapsed = false,
+      onToggle = function(nextExpanded)
+        self:SetSectionExpanded(sectionKey, nextExpanded)
+        self:RenderTab(self.currentTab or "Appearance")
+      end,
+    }
+  )
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local model = {
+    glowOnGain = tostring(states.onGain or "off"),
+    glowLowTime = tostring(states.lowTime or "warning"),
+    glowMaxStacks = tostring(states.maxStacks or "gold"),
+  }
+  local fields = {
+    { key = "glowOnGain", label = "On Show Glow", widget = "dropdown", options = {
+      { value = "off", label = "None" },
+      { value = "soft", label = "Soft Pulse" },
+      { value = "burst", label = "Auto-Cast Pulse" },
+      { value = "button", label = "Button Glow" },
+      { value = "shine", label = "Shine" },
+    }, minimalHelp = true },
+    { key = "glowLowTime", label = "Low Time Glow", widget = "dropdown", options = {
+      { value = "off", label = "None" },
+      { value = "subtle", label = "Subtle" },
+      { value = "warning", label = "Warning" },
+      { value = "intense", label = "Intense" },
+      { value = "pixel", label = "Pixel" },
+    }, minimalHelp = true },
+    { key = "glowMaxStacks", label = "Full Charges Glow", widget = "dropdown", options = {
+      { value = "off", label = "None" },
+      { value = "gold", label = "Gold" },
+      { value = "heroic", label = "Heroic" },
+      { value = "button", label = "Button Glow" },
+    }, minimalHelp = true },
+  }
+
+  local nextY = -2
+  for i = 1, #fields do
+    local widget = FieldFactory:CreateField(card.content, fields[i], model, function(fKey, fValue)
+      if fKey == "glowOnGain" then
+        self:SetVisualStatePreset("onGain", fValue)
+      elseif fKey == "glowLowTime" then
+        self:SetVisualStatePreset("lowTime", fValue)
+      elseif fKey == "glowMaxStacks" then
+        self:SetVisualStatePreset("maxStacks", fValue)
+      end
+    end)
+    widget:SetPoint("TOPLEFT", 12, nextY)
+    widget:SetPoint("RIGHT", -12, 0)
+    widget:Show()
+    self.fieldWidgets[#self.fieldWidgets + 1] = widget
+    nextY = nextY - widget:GetHeight() - 6
+  end
+
+  local speedSlider = createValueSlider(card.content, "Glow Speed", 12, nextY, 224, tonumber(states.glowSpeed) or 1.0, {
+    min = 0.25,
+    max = 3.0,
+    step = 0.05,
+    onChanged = function(nextValue)
+      self:SetVisualStateGlowSpeed(nextValue)
+    end,
+    format = function(nextValue)
+      return string.format("%.2fx", nextValue)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = speedSlider
+
+  card.content:SetHeight(math.max(150, -nextY + 42))
+  card:SetHeight(card.content:GetHeight() + 36)
+  return y - card:GetHeight() - 10
+end
+
+function AuraEditorPanel:RenderAppearanceSoundCard(y, fields)
+  fields = fields or {}
+  if #fields == 0 then
+    return y
+  end
+  return self:RenderAppearanceCard(y, "Sound", "", fields)
+end
+
+function AuraEditorPanel:RenderAppearanceLookCard(y, fields)
+  fields = fields or {}
+  if #fields == 0 then
+    return y
+  end
+  return self:RenderAppearanceCard(y, "Style & Color", "", fields)
 end
 
 function AuraEditorPanel:SetStackingEnabled(enabled)
@@ -992,75 +2297,60 @@ end
 
 function AuraEditorPanel:RenderTrackingStackCard(y, fieldsByKey)
   local enabled = isStackingSyntheticAura(self.draft)
-  local expanded = enabled and shouldExpandStackOptions(self.draft, self)
-  local extraHeight = expanded and 128 or 0
-  local cardHeight = 88 + extraHeight
+  local optionFields = collectFieldsByKeys(fieldsByKey, { "stackAmount", "maxStacks" })
+  local cardHeight = 116
+  for i = 1, #optionFields do
+    cardHeight = cardHeight + estimateFieldHeight(optionFields[i])
+  end
 
-  local card = createCard(
-    self.content,
+  local card, nextY = beginCollapsibleTrackingCard(
+    self,
     y,
-    "Stacks",
-    "Turn this on only for buffs that can build charges or stacks instead of simply refreshing.",
+    "tracking_charge_model",
+    "Charge Model",
+    "Choose whether this aura behaves like a single buff or a stackable charge system.",
     cardHeight
   )
-  self.fieldWidgets[#self.fieldWidgets + 1] = card
-
-  local toggle = CreateFrame("CheckButton", nil, card.content, "UICheckButtonTemplate")
-  toggle:SetPoint("TOPLEFT", 2, -2)
-  toggle:SetChecked(enabled)
-  if Skin and Skin.ApplyCheckbox then
-    Skin:ApplyCheckbox(toggle)
+  if not card then
+    return nextY
   end
-  toggle:SetScript("OnClick", function(btn)
-    if Skin and Skin.RefreshCheckbox then
-      Skin:RefreshCheckbox(btn)
-    end
-    self:SetStackingEnabled(btn:GetChecked() == true)
-    self:RenderTab("Tracking")
-  end)
-  self.fieldWidgets[#self.fieldWidgets + 1] = toggle
-
-  local toggleLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  toggleLabel:SetPoint("LEFT", toggle, "RIGHT", 4, 0)
-  toggleLabel:SetText("Stackable")
-  self.fieldWidgets[#self.fieldWidgets + 1] = toggleLabel
 
   local hint = card.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  hint:SetPoint("TOPLEFT", 2, -24)
-  hint:SetPoint("RIGHT", -40, 0)
+  hint:SetPoint("TOPLEFT", 12, -4)
+  hint:SetPoint("RIGHT", -12, 0)
   hint:SetJustifyH("LEFT")
-  hint:SetText(enabled and "This aura can gain more than one charge. Expand below to set how many it can hold." or "Leave this off for simple buffs that only refresh.")
+  hint:SetJustifyV("TOP")
+  hint:SetWordWrap(true)
+  hint:SetText(enabled and "This aura can gain charges. Drag spells into the trigger area below and choose how many charges each spell grants." or "This aura acts like a single buff and simply refreshes when one of its trigger spells fires.")
   self.fieldWidgets[#self.fieldWidgets + 1] = hint
 
-  if enabled then
-    local collapseBtn = CreateFrame("Button", nil, card.content, "UIPanelButtonTemplate")
-    collapseBtn:SetSize(26, 20)
-    collapseBtn:SetPoint("TOPRIGHT", -2, 0)
-    collapseBtn:SetText(expanded and "-" or "+")
-    if Skin and Skin.ApplyButton then
-      Skin:SetButtonVariant(collapseBtn, "ghost")
-    end
-    collapseBtn:SetScript("OnClick", function()
-      self.stackOptionsExpanded = not expanded
-      self:RenderTab("Tracking")
-    end)
-    self.fieldWidgets[#self.fieldWidgets + 1] = collapseBtn
+  local btnSingle = createTrackingModeButton(card.content, 248, 12, "Single Aura", "Refresh or show the aura with each valid trigger.", not enabled, function()
+    self:SetStackingEnabled(false)
+    self:RenderTab("Tracking")
+  end)
+  btnSingle:SetPoint("TOPLEFT", 12, -46)
 
-    if expanded then
-      local stackFields = {
-        fieldsByKey.stackAmount,
-        fieldsByKey.maxStacks,
-      }
-      local nextY = self:RenderGenericFields(stackFields, -52, card.content, 2, -2)
-      card.content:SetHeight(math.max(24, -nextY + 8))
-    else
-      card.content:SetHeight(44)
-    end
+  local btnStackable = createTrackingModeButton(card.content, 248, 268, "Stackable Charges", "Each trigger can add one or more charges up to a maximum.", enabled, function()
+    self:SetStackingEnabled(true)
+    self.stackOptionsExpanded = true
+    self:RenderTab("Tracking")
+  end)
+  btnStackable:SetPoint("TOPLEFT", 268, -46)
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnSingle
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnStackable
+
+  if enabled and #optionFields > 0 then
+    local divider = createLabeledDivider(card.content, "Charge Limits", -112)
+    self.fieldWidgets[#self.fieldWidgets + 1] = divider
+    local contentBottomY = self:RenderGenericFields(optionFields, -148, card.content, 12, -12)
+    card.content:SetHeight(math.max(24, -contentBottomY + 8))
+    card:SetHeight(card.content:GetHeight() + 36)
   else
-    card.content:SetHeight(44)
+    card.content:SetHeight(114)
+    card:SetHeight(150)
   end
 
-  return y - cardHeight - 10
+  return y - card:GetHeight() - 10
 end
 
 function AuraEditorPanel:RenderConsumeBehaviorCard(y)
@@ -1068,26 +2358,21 @@ function AuraEditorPanel:RenderConsumeBehaviorCard(y)
     return y
   end
 
-  local card = createCard(
-    self.content,
+  local card, nextY = beginCollapsibleTrackingCard(
+    self,
     y,
-    "Spender Trigger",
-    "Use this for the spell that should spend a charge or clear the aura.",
-    94
+    "tracking_spend_behavior",
+    "Spend Behavior",
+    "Tell AuraLite whether each spender removes one charge or clears the whole aura.",
+    114
   )
-  self.fieldWidgets[#self.fieldWidgets + 1] = card
-
-  local toggle = CreateFrame("CheckButton", nil, card.content, "UICheckButtonTemplate")
-  toggle:SetPoint("TOPLEFT", 2, -2)
-  toggle:SetChecked(tostring(self.draft.consumeBehavior or "hide") == "decrement")
-  if Skin and Skin.ApplyCheckbox then
-    Skin:ApplyCheckbox(toggle)
+  if not card then
+    return nextY
   end
-  toggle:SetScript("OnClick", function(btn)
-    if Skin and Skin.RefreshCheckbox then
-      Skin:RefreshCheckbox(btn)
-    end
-    self.draft.consumeBehavior = btn:GetChecked() and "decrement" or "hide"
+
+  local consumeOne = tostring(self.draft.consumeBehavior or "hide") == "decrement"
+  local btnOne = createTrackingModeButton(card.content, 248, 12, "Spend One Charge", "Best for stackable buffs where each spender removes a single charge.", consumeOne, function()
+    self.draft.consumeBehavior = "decrement"
     if S and S.SetDirty then
       S:SetDirty(true)
     end
@@ -1095,31 +2380,305 @@ function AuraEditorPanel:RenderConsumeBehaviorCard(y)
     self:RefreshLivePreview(false)
     self:RenderTab("Tracking")
   end)
-  self.fieldWidgets[#self.fieldWidgets + 1] = toggle
+  btnOne:SetPoint("TOPLEFT", 12, -10)
 
-  local toggleLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  toggleLabel:SetPoint("LEFT", toggle, "RIGHT", 4, 0)
-  toggleLabel:SetText("Consume only 1 charge")
-  self.fieldWidgets[#self.fieldWidgets + 1] = toggleLabel
+  local btnAll = createTrackingModeButton(card.content, 248, 268, "Clear The Aura", "Use this when the spender should hide the aura entirely.", not consumeOne, function()
+    self.draft.consumeBehavior = "hide"
+    if S and S.SetDirty then
+      S:SetDirty(true)
+    end
+    self:ValidateDraft()
+    self:RefreshLivePreview(false)
+    self:RenderTab("Tracking")
+  end)
+  btnAll:SetPoint("TOPLEFT", 268, -10)
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnOne
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnAll
 
-  local hint = card.content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  hint:SetPoint("TOPLEFT", 2, -24)
-  hint:SetPoint("RIGHT", -2, 0)
-  hint:SetJustifyH("LEFT")
-  hint:SetText(toggle:GetChecked() and "Preset: This spell spends one charge." or "Preset: This spell consumes the whole aura.")
-  self.fieldWidgets[#self.fieldWidgets + 1] = hint
+  card.content:SetHeight(70)
+  card:SetHeight(106)
+  return y - 126
+end
 
-  card.content:SetHeight(46)
-  return y - 104
+function AuraEditorPanel:RenderTrackingDetailsCard(y, title, body, fields)
+  fields = fields or {}
+  if #fields == 0 then
+    return y
+  end
+
+  local cardHeight = 42
+  for i = 1, #fields do
+    cardHeight = cardHeight + estimateFieldHeight(fields[i])
+  end
+
+  local card = createCard(
+    self.content,
+    y,
+    title,
+    body,
+    cardHeight,
+    {
+      compact = true,
+      collapsible = false,
+      collapsed = false,
+    }
+  )
+  self.fieldWidgets[#self.fieldWidgets + 1] = card
+
+  local nextY = self:RenderGenericFields(fields, -4, card.content, 2, -2)
+  card.content:SetHeight(math.max(24, -nextY + 6))
+  return y - card:GetHeight() - 10
+end
+
+function AuraEditorPanel:RenderProduceDetailsCard(y)
+  local extendMode = tostring(self.draft.timerBehavior or "reset") == "extend"
+  local cardHeight = extendMode and 178 or 146
+  local card, nextY = beginCollapsibleTrackingCard(
+    self,
+    y,
+    "tracking_aura_definition",
+    "Aura Definition",
+    "Define where the aura lives, which aura ID should be shown, and how the timer reacts when triggers fire again.",
+    cardHeight
+  )
+  if not card then
+    return nextY
+  end
+
+  local ownershipDivider = createLabeledDivider(card.content, "Ownership", -2)
+  self.fieldWidgets[#self.fieldWidgets + 1] = ownershipDivider
+
+  local unitLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  unitLabel:SetPoint("TOPLEFT", 12, -34)
+  unitLabel:SetText("Track This On")
+  self.fieldWidgets[#self.fieldWidgets + 1] = unitLabel
+
+  local btnPlayer = createSegmentButton(card.content, 110, 20, "Player", 12, -50, "segment", function()
+    self:OnFieldChanged("unit", "player")
+    self:RenderTab("Tracking")
+  end)
+  local btnTarget = createSegmentButton(card.content, 110, 20, "Target", 128, -50, "segment", function()
+    self:OnFieldChanged("unit", "target")
+    self:RenderTab("Tracking")
+  end)
+  if Skin and Skin.SetButtonSelected then
+    Skin:SetButtonSelected(btnPlayer, tostring(self.draft.unit or "player") == "player")
+    Skin:SetButtonSelected(btnTarget, tostring(self.draft.unit or "player") == "target")
+  end
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnPlayer
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnTarget
+
+  local spellField = createCompactInput(card.content, "Aura To Show", 12, -82, 182, self.draft.spellID, {
+    spellWidget = "spellid",
+    fieldKey = "spellID",
+    onCommit = function(nextValue)
+      self:OnFieldChanged("spellID", trimText(nextValue))
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = spellField
+  local durationField = createCompactInput(card.content, "Base Duration (sec)", 218, -82, 126, self.draft.duration, {
+    numeric = true,
+    maxLetters = 4,
+    onCommit = function(nextValue)
+      self:OnFieldChanged("duration", tonumber(nextValue) or 0)
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = durationField
+
+  local dividerA = createLabeledDivider(card.content, "Timing", -126)
+  self.fieldWidgets[#self.fieldWidgets + 1] = dividerA
+
+  local behaviorLabel = card.content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  behaviorLabel:SetPoint("TOPLEFT", 12, -158)
+  behaviorLabel:SetText("If Triggered Again")
+  self.fieldWidgets[#self.fieldWidgets + 1] = behaviorLabel
+
+  local timerBehavior = tostring(self.draft.timerBehavior or "reset")
+  local btnReset = createSegmentButton(card.content, 104, 20, "Reset Timer", 12, -176, "segment", function()
+    self:OnFieldChanged("timerBehavior", "reset")
+    self:RenderTab("Tracking")
+  end)
+  local btnExtend = createSegmentButton(card.content, 104, 20, "Extend To Cap", 122, -176, "segment", function()
+    self:OnFieldChanged("timerBehavior", "extend")
+    if (tonumber(self.draft.maxDuration) or 0) <= 0 then
+      self:OnFieldChanged("maxDuration", math.max(tonumber(self.draft.duration) or 0, 1))
+    end
+    self:RenderTab("Tracking")
+  end)
+  local btnKeep = createSegmentButton(card.content, 104, 20, "Keep Current", 232, -176, "segment", function()
+    self:OnFieldChanged("timerBehavior", "keep")
+    self:RenderTab("Tracking")
+  end)
+  if Skin and Skin.SetButtonSelected then
+    Skin:SetButtonSelected(btnReset, timerBehavior == "reset")
+    Skin:SetButtonSelected(btnExtend, timerBehavior == "extend")
+    Skin:SetButtonSelected(btnKeep, timerBehavior == "keep")
+  end
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnReset
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnExtend
+  self.fieldWidgets[#self.fieldWidgets + 1] = btnKeep
+
+  if extendMode then
+    local maxField = createCompactInput(card.content, "Maximum Duration (sec)", 356, -82, 142, self.draft.maxDuration, {
+      numeric = true,
+      maxLetters = 4,
+      onCommit = function(nextValue)
+        self:OnFieldChanged("maxDuration", tonumber(nextValue) or 0)
+      end,
+    })
+    self.fieldWidgets[#self.fieldWidgets + 1] = maxField
+  end
+
+  card.content:SetHeight(extendMode and 202 or 194)
+  card:SetHeight(card.content:GetHeight() + 36)
+  return y - card:GetHeight() - 10
+end
+
+function AuraEditorPanel:RenderConsumeInputsCard(y)
+  local card, nextY = beginCollapsibleTrackingCard(
+    self,
+    y,
+    "tracking_spender_inputs",
+    "Spender Inputs",
+    "Define the aura being consumed, then drag or type the spells that should spend it.",
+    146
+  )
+  if not card then
+    return nextY
+  end
+
+  local definitionDivider = createLabeledDivider(card.content, "Consumed Aura", -2)
+  self.fieldWidgets[#self.fieldWidgets + 1] = definitionDivider
+
+  local spellField = createCompactInput(card.content, "Aura To Spend", 12, -34, 182, self.draft.spellID, {
+    spellWidget = "spellid",
+    fieldKey = "spellID",
+    onCommit = function(nextValue)
+      self:OnFieldChanged("spellID", trimText(nextValue))
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = spellField
+
+  local castField = createCompactInput(card.content, "Spender SpellIDs", 206, -34, 250, self.draft.consumeCastSpellIDs or self.draft.castSpellIDs, {
+    spellWidget = "spellcsv",
+    fieldKey = "castSpellIDs",
+    onCommit = function(nextValue)
+      self.draft.consumeCastSpellIDs = tostring(nextValue or "")
+      self.draft.castSpellIDs = tostring(nextValue or "")
+      if S and S.SetDirty then
+        S:SetDirty(true)
+      end
+      self:ValidateDraft()
+    end,
+  })
+  self.fieldWidgets[#self.fieldWidgets + 1] = castField
+
+  local dividerA = createLabeledDivider(card.content, "Drag A Spender", -84)
+  self.fieldWidgets[#self.fieldWidgets + 1] = dividerA
+
+  local dropBox = CreateFrame("Button", nil, card.content, "BackdropTemplate")
+  dropBox:SetPoint("TOPLEFT", 12, -116)
+  dropBox:SetPoint("RIGHT", -12, 0)
+  dropBox:SetHeight(34)
+  createCardBackdrop(dropBox)
+  dropBox:RegisterForDrag("LeftButton")
+  dropBox:EnableMouse(true)
+  dropBox.label = dropBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  dropBox.label:SetPoint("LEFT", 10, 0)
+  dropBox.label:SetPoint("RIGHT", -10, 0)
+  dropBox.label:SetJustifyH("LEFT")
+  dropBox.label:SetText("Drop a spender spell here to append it")
+  self.fieldWidgets[#self.fieldWidgets + 1] = dropBox
+
+  local function handleConsumeDrop()
+    local cursorType, cursorID, _, cursorSpellID = GetCursorInfo()
+    local spellID = nil
+    if cursorType == "spell" and cursorSpellID then
+      spellID = tonumber(cursorSpellID)
+    elseif cursorType == "item" and cursorID and C_Item and C_Item.GetItemSpell then
+      local _, itemSpellID = C_Item.GetItemSpell(cursorID)
+      spellID = tonumber(itemSpellID)
+    end
+    if spellID and spellID > 0 then
+      local nextCSV = appendSpellToCSV(self.draft.consumeCastSpellIDs or self.draft.castSpellIDs, spellID)
+      self.draft.consumeCastSpellIDs = nextCSV
+      self.draft.castSpellIDs = nextCSV
+      castField.edit:SetText(nextCSV)
+      if S and S.SetDirty then
+        S:SetDirty(true)
+      end
+      self:ValidateDraft()
+      ClearCursor()
+    end
+  end
+  dropBox:SetScript("OnReceiveDrag", handleConsumeDrop)
+  dropBox:SetScript("OnMouseUp", handleConsumeDrop)
+
+  card.content:SetHeight(160)
+  card:SetHeight(196)
+  return y - 206
+end
+
+function AuraEditorPanel:RenderTrackingWorkflowCard(y, tab)
+  local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
+  local fields = tab.fields or {}
+  local byKey = {}
+  for i = 1, #fields do
+    if fields[i] then
+      byKey[fields[i].key] = fields[i]
+    end
+  end
+
+  if actionMode == "produce" then
+    y = self:RenderProduceTriggersCard(y)
+    y = self:RenderTrackingStackCard(y, byKey)
+    y = self:RenderProduceDetailsCard(y)
+  else
+    y = self:RenderConsumeBehaviorCard(y)
+    y = self:RenderConsumeInputsCard(y)
+  end
+
+  return y
 end
 
 function AuraEditorPanel:RenderLoadConditionsCard(y, fieldsByKey)
+  local sectionKey = "advanced_load_conditions"
+  local expanded = self:IsSectionExpanded(sectionKey, true)
+  if not expanded then
+    local collapsedCard = createCard(
+      self.content,
+      y,
+      "Load Conditions",
+      "Restrict by class or spec.",
+      56,
+      {
+        compact = true,
+        collapsible = true,
+        collapsed = true,
+        onToggle = function(nextExpanded)
+          self:SetSectionExpanded(sectionKey, nextExpanded)
+          self:RenderTab("Advanced")
+        end,
+      }
+    )
+    self.fieldWidgets[#self.fieldWidgets + 1] = collapsedCard
+    return y - 66
+  end
   local card = createCard(
     self.content,
     y,
     "Load Conditions",
-    "Use this only when the aura should exist for one class or spec. Leave both blank to load it everywhere.",
-    176
+    "Restrict by class or spec.",
+    176,
+    {
+      compact = true,
+      collapsible = true,
+      collapsed = false,
+      onToggle = function(nextExpanded)
+        self:SetSectionExpanded(sectionKey, nextExpanded)
+        self:RenderTab("Advanced")
+      end,
+    }
   )
   self.fieldWidgets[#self.fieldWidgets + 1] = card
 
@@ -1175,14 +2734,7 @@ function AuraEditorPanel:RenderLoadConditionsCard(y, fieldsByKey)
   self.fieldWidgets[#self.fieldWidgets + 1] = quickLabel
 
   local function makeQuickButton(text, x, onClick)
-    local btn = CreateFrame("Button", nil, card.content, "UIPanelButtonTemplate")
-    btn:SetSize(124, 20)
-    btn:SetPoint("TOPLEFT", x, -68)
-    btn:SetText(text)
-    if Skin and Skin.ApplyButton then
-      Skin:SetButtonVariant(btn, "segment")
-    end
-    btn:SetScript("OnClick", onClick)
+    local btn = createSegmentButton(card.content, 124, 18, text, x, -68, "segment", onClick)
     self.fieldWidgets[#self.fieldWidgets + 1] = btn
     return btn
   end
@@ -1209,12 +2761,29 @@ function AuraEditorPanel:RenderLoadConditionsCard(y, fieldsByKey)
   }, -96, card.content, 2, -2)
 
   card.content:SetHeight(math.max(132, -nextY + 8))
-  return y - 224
+  card:SetHeight(card.content:GetHeight() + 36)
+  return y - card:GetHeight() - 10
 end
 
 function AuraEditorPanel:RenderProduceTriggersCard(y)
   if Widgets.TriggerListWidget and Widgets.TriggerListWidget.Create then
-    self.triggerListWidget = Widgets.TriggerListWidget:Create(self.content, {
+    local card, nextY = beginCollapsibleTrackingCard(
+      self,
+      y,
+      "tracking_produce_triggers",
+      "Produce Triggers",
+      "Drag spells in, reorder the trigger list, then refine what each spell does.",
+      248
+    )
+    if not card then
+      return nextY
+    end
+
+    local divider = createLabeledDivider(card.content, "Trigger Inputs", -2)
+    self.fieldWidgets[#self.fieldWidgets + 1] = divider
+
+    self.triggerListWidget = Widgets.TriggerListWidget:Create(card.content, {
+      embedded = true,
       isStackable = isStackingSyntheticAura,
       onChanged = function()
         if S and S.SetDirty then
@@ -1227,11 +2796,13 @@ function AuraEditorPanel:RenderProduceTriggersCard(y)
         self:RenderTab("Tracking")
       end,
     })
-    self.triggerListWidget.frame:SetPoint("TOPLEFT", 12, y)
+    self.triggerListWidget.frame:SetPoint("TOPLEFT", 12, -36)
     self.triggerListWidget.frame:SetPoint("RIGHT", -14, 0)
     self.triggerListWidget.frame:Show()
     self.triggerListWidget:SetDraft(self.draft)
-    return y - self.triggerListWidget.frame:GetHeight() - 10
+    card.content:SetHeight(self.triggerListWidget.frame:GetHeight() + 46)
+    card:SetHeight(card.content:GetHeight() + 36)
+    return y - card:GetHeight() - 10
   end
 
   return y
@@ -1264,272 +2835,175 @@ function AuraEditorPanel:RenderTab(tabKey)
   local y = -12
 
   if tabKey == "Tracking" then
-    local presetFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
-    createCardBackdrop(presetFrame)
-    presetFrame:SetHeight(122)
-    presetFrame:SetPoint("TOPLEFT", 12, y)
-    presetFrame:SetPoint("RIGHT", -14, 0)
-
-    local presetLabel = presetFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    presetLabel:SetPoint("TOPLEFT", 10, -8)
-    presetLabel:SetText("Start From The Behavior")
-
-    local presetHint = presetFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    presetHint:SetPoint("TOPLEFT", 10, -26)
-    presetHint:SetPoint("RIGHT", -10, 0)
-    presetHint:SetJustifyH("LEFT")
-    presetHint:SetText("Pick where this aura lives first. Then choose what your spells do with it.")
-
-    local activePreset = inferTrackingPreset(self.draft)
-    local btnPlayer = createPresetButton(
-      presetFrame,
-      156,
-      10,
-      "Appears On Me",
-      "Buff / proc on your character",
-      activePreset == "buff_player",
-      function()
-        self:ApplyTrackingPreset("buff_player")
-      end
+    local presetFrame, nextY = beginCollapsibleTrackingCard(
+      self,
+      y,
+      "tracking_behavior",
+      "Behavior",
+      "Choose where the aura should live and how AuraLite should observe it.",
+      188
     )
+    if not presetFrame then
+      y = nextY
+    else
+      local presetContent = presetFrame.content
 
-    local btnDebuff = createPresetButton(
-      presetFrame,
-      156,
-      174,
-      "Appears On Target",
-      "You create a timer with your casts",
-      activePreset == "debuff_target",
-      function()
-        self:ApplyTrackingPreset("debuff_target")
-      end
-    )
-
-    local btnTarget = createPresetButton(
-      presetFrame,
-      156,
-      338,
-      "Read From Target",
-      "Track the live aura directly",
-      activePreset == "target_aura",
-      function()
-        self:ApplyTrackingPreset("target_aura")
-      end
-    )
-
-    self.fieldWidgets[#self.fieldWidgets + 1] = presetFrame
-    self.fieldWidgets[#self.fieldWidgets + 1] = btnPlayer
-    self.fieldWidgets[#self.fieldWidgets + 1] = btnDebuff
-    self.fieldWidgets[#self.fieldWidgets + 1] = btnTarget
-    y = y - 138
-
-    if tostring(self.draft.unit or "player") == "target" then
-      local modeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
-      createCardBackdrop(modeFrame)
-      modeFrame:SetHeight(88)
-      modeFrame:SetPoint("TOPLEFT", 12, y)
-      modeFrame:SetPoint("RIGHT", -14, 0)
-
-      local modeLabel = modeFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-      modeLabel:SetPoint("TOPLEFT", 10, -8)
-      modeLabel:SetText("Choose How Target Tracking Works")
-
-      local btnConfirmed = createPresetButton(
-        modeFrame,
-        188,
-        10,
-        "Read The Live Aura",
-        "Best when Blizzard exposes it directly",
-        not isEstimatedTargetTracking(self.draft),
+      local activePreset = inferTrackingPreset(self.draft)
+      local btnCooldown = createPresetButton(
+        presetContent,
+        248,
+        12,
+        "Track My Cooldown",
+        "Use the spell cooldown itself as the tracked artifact.",
+        activePreset == "cooldown_player",
         function()
-          self:OnFieldChanged("trackingMode", "confirmed")
+          self:ApplyTrackingPreset("cooldown_player")
         end
       )
+      btnCooldown:SetPoint("TOPLEFT", 12, -8)
 
-      local btnEstimated = createPresetButton(
-        modeFrame,
-        208,
-        206,
-        "Estimate From My Cast",
-        "Start a local timer when you apply it",
-        isEstimatedTargetTracking(self.draft),
+      local btnPlayer = createPresetButton(
+        presetContent,
+        248,
+        12,
+        "Appears On Me",
+        "Use for buffs, procs, and effects on your character.",
+        activePreset == "buff_player",
         function()
-          self:OnFieldChanged("trackingMode", "estimated")
+          self:ApplyTrackingPreset("buff_player")
         end
       )
+      btnPlayer:SetPoint("TOPLEFT", 12, -74)
 
-      local function refreshTrackingButtons()
-        local estimated = isEstimatedTargetTracking(self.draft)
-        if Skin and Skin.SetClickableRowState then
-          Skin:SetClickableRowState(btnConfirmed, (not estimated) and "selected" or "normal")
-          Skin:SetClickableRowState(btnEstimated, estimated and "selected" or "normal")
+      local btnDebuff = createPresetButton(
+        presetContent,
+        248,
+        268,
+        "Appears On Target",
+        "Create a local timer from your casts for target debuffs.",
+        activePreset == "debuff_target",
+        function()
+          self:ApplyTrackingPreset("debuff_target")
         end
-      end
-      refreshTrackingButtons()
+      )
+      btnDebuff:SetPoint("TOPLEFT", 268, -74)
 
-      self.fieldWidgets[#self.fieldWidgets + 1] = modeFrame
-      self.fieldWidgets[#self.fieldWidgets + 1] = btnConfirmed
-      self.fieldWidgets[#self.fieldWidgets + 1] = btnEstimated
-      y = y - 104
+      self.fieldWidgets[#self.fieldWidgets + 1] = btnPlayer
+      self.fieldWidgets[#self.fieldWidgets + 1] = btnDebuff
+      self.fieldWidgets[#self.fieldWidgets + 1] = btnCooldown
+      y = y - 198
     end
 
-    if isEstimatedTargetTracking(self.draft) then
-      local infoFrame = addInfoBox(
+    if tostring(self.draft.unit or "player") == "target" then
+      local modeFrame, modeY = beginCollapsibleTrackingCard(
+        self,
+        y,
+        "tracking_target_mode",
+        "Target Mode",
+        "Target tracking is authored as a local timer from your casts, because direct target aura reads are not reliable enough.",
+        72
+      )
+      if not modeFrame then
+        y = modeY
+      else
+        local btnEstimated = createPresetButton(
+          modeFrame.content,
+          504,
+          12,
+          "Estimate From My Cast",
+          "Start a local timer when your spell applies the effect.",
+          true,
+          function()
+            self:OnFieldChanged("trackingMode", "estimated")
+          end
+        )
+        btnEstimated:SetPoint("TOPLEFT", 12, -8)
+
+        self.fieldWidgets[#self.fieldWidgets + 1] = btnEstimated
+        y = y - 82
+      end
+    end
+
+    if isCooldownTracking(self.draft) then
+      local infoFrame = addInlineNote(
         self.content,
         y,
-        "Best for your own debuffs",
-        "AuraLite watches the SpellIDs you cast, then starts a local timer on your current target using the duration you enter below.",
-        92
+        "Reads the spell cooldown directly and styles it like the rest of your setup."
       )
       self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
-      y = y - 102
+      y = y - 30
+    elseif isEstimatedTargetTracking(self.draft) then
+      local infoFrame = addInlineNote(
+        self.content,
+        y,
+        "Starts a local timer on your target from the spells you cast."
+      )
+      self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
+      y = y - 30
     elseif isDirectAuraTracking(self.draft) then
-      local infoFrame = addInfoBox(
+      local infoFrame = addInlineNote(
         self.content,
         y,
-        "Live aura read",
-        "AuraLite reads the selected target directly when Blizzard allows it. This is the most literal mode, but target aura data can still be restricted in combat.",
-        92
+        "Reads the selected target directly when Blizzard exposes the aura."
       )
       self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
-      y = y - 102
+      y = y - 30
     elseif Widgets.RuleBuilderWidget and Widgets.RuleBuilderWidget.Create then
-      local quickModeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
-      createCardBackdrop(quickModeFrame)
-      quickModeFrame:SetHeight(88)
-      quickModeFrame:SetPoint("TOPLEFT", 12, y)
-      quickModeFrame:SetPoint("RIGHT", -14, 0)
-
-      local quickModeLabel = quickModeFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-      quickModeLabel:SetPoint("TOPLEFT", 10, -8)
-      quickModeLabel:SetText("Choose What Your Spell Does")
-
-      local isConsumeMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "consume"
-      local btnGive = createPresetButton(
-        quickModeFrame,
-        188,
-        10,
-        "This Spell Gives The Aura",
-        "Use for procs, buffs and refreshes",
-        not isConsumeMode,
-        function()
-          self:ApplyRuleMode("produce")
-          if S and S.SetDirty then
-            S:SetDirty(true)
-          end
-          self:RenderTab("Tracking")
-        end
+      local quickModeFrame, modeY = beginCollapsibleTrackingCard(
+        self,
+        y,
+        "tracking_spell_action",
+        "Spell Action",
+        "Tell AuraLite whether this spell grants the aura or spends one of its charges.",
+        118
       )
-      local btnSpend = createPresetButton(
-        quickModeFrame,
-        208,
-        206,
-        "This Spell Spends 1 Charge",
-        "Use for spenders like Arcane Shot",
-        isConsumeMode and tostring(self.draft.consumeBehavior or "hide") == "decrement",
-        function()
-          self:ApplyRuleMode("consume")
-          self.draft.consumeBehavior = "decrement"
-          if S and S.SetDirty then
-            S:SetDirty(true)
+      if not quickModeFrame then
+        y = modeY
+      else
+
+        local isConsumeMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "consume"
+        local btnGive = createPresetButton(
+          quickModeFrame.content,
+          248,
+          12,
+          "This Spell Gives The Aura",
+          "Use for procs, buffs, refreshes, and charge generation.",
+          not isConsumeMode,
+          function()
+            self:ApplyRuleMode("produce")
+            if S and S.SetDirty then
+              S:SetDirty(true)
+            end
+            self:RenderTab("Tracking")
           end
-          self:RenderTab("Tracking")
-        end
-      )
-
-      self.fieldWidgets[#self.fieldWidgets + 1] = quickModeFrame
-      self.fieldWidgets[#self.fieldWidgets + 1] = btnGive
-      self.fieldWidgets[#self.fieldWidgets + 1] = btnSpend
-      y = y - 104
-
-      local modeFrame = CreateFrame("Frame", nil, self.content, "BackdropTemplate")
-      createBackdrop(modeFrame)
-      modeFrame:SetHeight(34)
-      modeFrame:SetPoint("TOPLEFT", 12, y)
-      modeFrame:SetPoint("RIGHT", -14, 0)
-
-      local modeLabel = modeFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-      modeLabel:SetPoint("LEFT", 10, 0)
-      modeLabel:SetText("Rule behavior:")
-
-      local btnShow = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
-      btnShow:SetSize(128, 22)
-      btnShow:SetPoint("LEFT", modeLabel, "RIGHT", 8, 0)
-      btnShow:SetText("Show / Produce")
-      if Skin and Skin.ApplyButton then
-        Skin:SetButtonVariant(btnShow, "segment")
-      end
-
-      local btnConsume = CreateFrame("Button", nil, modeFrame, "UIPanelButtonTemplate")
-      btnConsume:SetSize(128, 22)
-      btnConsume:SetPoint("LEFT", btnShow, "RIGHT", 6, 0)
-      btnConsume:SetText("Consume / Hide")
-      if Skin and Skin.ApplyButton then
-        Skin:SetButtonVariant(btnConsume, "segment")
-      end
-
-      local activeMode = (tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "consume") and "consume" or "produce"
-      self.triggerEditMode = activeMode
-
-      local function refreshModeButtons()
-        local isConsume = tostring(self.triggerEditMode or "produce") == "consume"
-        setTabVisual(btnShow, not isConsume)
-        setTabVisual(btnConsume, isConsume)
-      end
-
-      btnShow:SetScript("OnClick", function()
-        self:ApplyRuleMode("produce")
-        if S and S.SetDirty then
-          S:SetDirty(true)
-        end
-        self:RenderTab("Tracking")
-      end)
-      btnConsume:SetScript("OnClick", function()
-        self:ApplyRuleMode("consume")
-        if S and S.SetDirty then
-          S:SetDirty(true)
-        end
-        self:RenderTab("Tracking")
-      end)
-      refreshModeButtons()
-
-      self.fieldWidgets[#self.fieldWidgets + 1] = modeFrame
-      y = y - 40
-
-      self.ruleBuilder = Widgets.RuleBuilderWidget:Create(self.content, function()
-        if S and S.SetDirty then
-          S:SetDirty(true)
-        end
-        self:ValidateDraft()
-        self:RenderTab("Tracking")
-      end)
-      self.ruleBuilder.frame:SetPoint("TOPLEFT", 12, y)
-      self.ruleBuilder.frame:SetPoint("RIGHT", -14, 0)
-      self.ruleBuilder.frame:Show()
-      self.ruleBuilder:SetDraft(self.draft)
-      y = y - self.ruleBuilder.frame:GetHeight() - 10
-
-      local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
-      if actionMode == "produce" then
-        local infoFrame = addInfoBox(
-          self.content,
-          y,
-          "Applied when the cast finishes",
-          "For cast-time spells like Aimed Shot, AuraLite grants the aura only when the cast really completes, not on the first key press.",
-          82
         )
-        self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
-        y = y - 92
-      elseif actionMode == "consume" and shouldShowConsumeBehavior(self.draft) then
-        local infoFrame = addInfoBox(
-          self.content,
-          y,
-          "Spend one charge at a time",
-          "For stackable buffs like Precise Shots, choose 'Remove 1 Stack' so each spender removes only one charge instead of clearing the whole aura.",
-          82
+        btnGive:SetPoint("TOPLEFT", 12, -8)
+
+        local btnSpend = createPresetButton(
+          quickModeFrame.content,
+          248,
+          268,
+          "This Spell Spends 1 Charge",
+          "Use for spender buttons like Arcane Shot or similar finishers.",
+          isConsumeMode and tostring(self.draft.consumeBehavior or "hide") == "decrement",
+          function()
+            self:ApplyRuleMode("consume")
+            self.draft.consumeBehavior = "decrement"
+            if S and S.SetDirty then
+              S:SetDirty(true)
+            end
+            self:RenderTab("Tracking")
+          end
         )
-        self.fieldWidgets[#self.fieldWidgets + 1] = infoFrame
-        y = y - 92
+        btnSpend:SetPoint("TOPLEFT", 268, -8)
+
+        self.fieldWidgets[#self.fieldWidgets + 1] = quickModeFrame
+        self.fieldWidgets[#self.fieldWidgets + 1] = btnGive
+        self.fieldWidgets[#self.fieldWidgets + 1] = btnSpend
+        y = y - 128
+
+        local activeMode = (tostring(self.triggerEditMode or self.draft.actionMode or "produce") == "consume") and "consume" or "produce"
+        self.triggerEditMode = activeMode
       end
     end
 
@@ -1537,7 +3011,11 @@ function AuraEditorPanel:RenderTab(tabKey)
     local filtered = {}
     for i = 1, #fields do
       local key = fields[i].key
-      if isDirectAuraTracking(self.draft) then
+      if isCooldownTracking(self.draft) then
+        if key == "unit" or key == "spellID" then
+          filtered[#filtered + 1] = fields[i]
+        end
+      elseif isDirectAuraTracking(self.draft) then
         if key == "unit" or key == "spellID" then
           filtered[#filtered + 1] = fields[i]
         end
@@ -1562,21 +3040,10 @@ function AuraEditorPanel:RenderTab(tabKey)
         filtered[#filtered + 1] = fields[i]
       end
     end
-    y = self:RenderGenericFields(filtered, y)
-    if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) and not self.showAdvanced then
-      local actionMode = tostring(self.triggerEditMode or self.draft.actionMode or "produce")
-      if actionMode == "produce" then
-        local byKey = {}
-        for i = 1, #fields do
-          if fields[i] then
-            byKey[fields[i].key] = fields[i]
-          end
-        end
-        y = self:RenderProduceTriggersCard(y)
-        y = self:RenderTrackingStackCard(y, byKey)
-      elseif actionMode == "consume" then
-        y = self:RenderConsumeBehaviorCard(y)
-      end
+    if not isCooldownTracking(self.draft) and not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) and not self.showAdvanced then
+      y = self:RenderTrackingWorkflowCard(y, tab)
+    else
+      y = self:RenderTrackingDetailsCard(y, "Tracking Details", "Fine-tune the selected tracking mode.", filtered)
     end
   elseif tabKey == "Appearance" then
     local allFields = tab.fields or {}
@@ -1586,11 +3053,29 @@ function AuraEditorPanel:RenderTab(tabKey)
         byKey[allFields[i].key] = allFields[i]
       end
     end
+    local advancedTab = Schemas and Schemas:GetTab("Advanced") or nil
+    if advancedTab and type(advancedTab.fields) == "table" then
+      for i = 1, #advancedTab.fields do
+        local field = advancedTab.fields[i]
+        if field and not byKey[field.key] then
+          byKey[field.key] = field
+        end
+      end
+    end
+    if byKey.group then
+      byKey.group.minimalHelp = true
+    end
+    if byKey.barTexture then
+      byKey.barTexture.minimalHelp = true
+    end
     local mode = tostring(self.draft.displayMode or self.draft.timerVisual or "icon")
 
     y = self:RenderDisplayCanvas(y)
+    y = self:RenderAppearanceFineTuneCard(y, mode)
+    y = self:RenderStyleStudio(y)
+    y = self:RenderVisualStateStudio(y)
 
-    y = self:RenderAppearanceCard(y, "Layout", "Define the overall shape and placement of this aura.", {
+    y = self:RenderAppearanceCard(y, "Structure", "Shape and placement.", {
       byKey.name,
       byKey.group,
       byKey.displayMode,
@@ -1598,7 +3083,7 @@ function AuraEditorPanel:RenderTab(tabKey)
     })
 
     if tostring(self.draft.groupID or self.draft.group or "") ~= "" then
-      y = self:RenderAppearanceCard(y, "Group Layout", "A grouped aura moves with its shared container. Use Movers to place the whole group.", {
+      y = self:RenderAppearanceCard(y, "Group", "Shared layout for grouped auras.", {
         byKey.groupName,
         byKey.groupDirection,
         byKey.groupSpacing,
@@ -1610,36 +3095,53 @@ function AuraEditorPanel:RenderTab(tabKey)
     end
 
     if mode == "icon" or mode == "iconbar" then
-      y = self:RenderAppearanceCard(y, "Icon", "Adjust icon size for quick recognition.", {
-        byKey.iconWidth,
-        byKey.iconHeight,
+      local iconFields = { byKey.iconMode }
+      if tostring(self.draft.iconMode or "spell") == "custom" and byKey.customTexture then
+        iconFields[#iconFields + 1] = byKey.customTexture
+      end
+      iconFields[#iconFields + 1] = byKey.iconWidth
+      iconFields[#iconFields + 1] = byKey.iconHeight
+      y = self:RenderAppearanceCard(y, "Icon", "Icon sizing.", {
+        unpack(iconFields),
       })
     end
 
     if mode == "bar" or mode == "iconbar" then
-      y = self:RenderAppearanceCard(y, "Bar", "Tune bar size, readability and timing feedback. Changes update live.", {
-        byKey.barWidth,
-        byKey.barHeight,
-        byKey.showTimerText,
+      local lookFields = {
         byKey.barColor,
-        byKey.barTexture,
-        byKey.lowTime,
+        byKey.barGradientEnabled,
+      }
+      if self.draft.barGradientEnabled == true and byKey.barColor2 then
+        lookFields[#lookFields + 1] = byKey.barColor2
+      end
+      lookFields[#lookFields + 1] = byKey.barTexture
+      lookFields[#lookFields + 1] = byKey.lowTime
+      y = self:RenderAppearanceLookCard(y, {
+        unpack(lookFields),
       })
     end
 
-    y = self:RenderAppearanceCard(y, "Text", "Optional helper text layered onto the aura.", {
+    y = self:RenderTextControlsCard(y, {
+      byKey.nameTextFont,
+      byKey.timerTextFont,
       byKey.customText,
+      byKey.customTextFont,
+    })
+    y = self:RenderAppearanceSoundCard(y, {
+      byKey.soundOnShow,
+      byKey.soundOnLow,
+      byKey.soundOnExpire,
     })
   elseif tabKey == "Advanced" then
     local intro = addInfoBox(
       self.content,
       y,
       "Advanced settings",
-      "Use this section for technical tuning, conditions, load restrictions and notes. Most auras do not need anything here.",
-      84
+      "Technical tuning, conditions, load rules and notes.",
+      64
     )
     self.fieldWidgets[#self.fieldWidgets + 1] = intro
-    y = y - 94
+    y = y - 74
 
     if not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) and Widgets.ConditionTreeWidget and Widgets.ConditionTreeWidget.Create then
       self.conditionTree = Widgets.ConditionTreeWidget:Create(self.content, function()
@@ -1685,7 +3187,7 @@ function AuraEditorPanel:RenderTab(tabKey)
     y = self:RenderGenericFields(filtered, y)
   end
 
-  self.content:SetHeight(math.max(360, -y + 20))
+  self.content:SetHeight(math.max(360, -y + 76))
   self.suspendFieldChanges = false
   self:ValidateDraft()
 end
@@ -1924,50 +3426,64 @@ function AuraEditorPanel:Create(parent)
   o.frame:SetAllPoints()
   createBackdrop(o.frame)
 
+  o.eyebrow = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  o.eyebrow:SetPoint("TOPLEFT", 0, -2)
+  o.eyebrow:SetText("SELECTED AURA")
+  o.eyebrow:SetTextColor(0.66, 0.70, 0.76)
+
   o.titleText = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  o.titleText:SetPoint("TOPLEFT", 12, -10)
-  o.titleText:SetText("Aura Editor")
+  o.titleText:SetPoint("TOPLEFT", 0, -14)
+  o.titleText:SetText("Inspector")
+  o.titleText:SetTextColor(0.96, 0.97, 0.99)
 
   o.subtitle = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  o.subtitle:SetPoint("TOPLEFT", 12, -28)
-  o.subtitle:SetPoint("RIGHT", -14, 0)
+  o.subtitle:SetPoint("TOPLEFT", 0, -28)
+  o.subtitle:SetPoint("RIGHT", -112, 0)
   o.subtitle:SetJustifyH("LEFT")
-  o.subtitle:SetText("Select an aura from the list or create a new one.")
+  o.subtitle:SetText("")
 
   o.previewBanner = CreateFrame("Frame", nil, o.frame, "BackdropTemplate")
-  createBackdrop(o.previewBanner)
-  o.previewBanner:SetPoint("TOPLEFT", 10, -48)
-  o.previewBanner:SetPoint("TOPRIGHT", -12, -48)
-  o.previewBanner:SetHeight(30)
+  createCardBackdrop(o.previewBanner)
+  o.previewBanner:SetPoint("TOPLEFT", 0, -46)
+  o.previewBanner:SetPoint("RIGHT", -112, 0)
+  o.previewBanner:SetHeight(34)
 
-  o.previewBannerText = o.previewBanner:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  o.previewBannerText:SetPoint("LEFT", 10, 0)
-  o.previewBannerText:SetPoint("RIGHT", -10, 0)
+  o.previewBannerText = o.previewBanner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  o.previewBannerText:SetPoint("TOPLEFT", 10, -6)
+  o.previewBannerText:SetPoint("RIGHT", -100, 0)
   o.previewBannerText:SetJustifyH("LEFT")
   o.previewBannerText:SetText("No aura selected")
+  o.previewBannerText:SetTextColor(0.95, 0.96, 0.98)
 
   o.previewBannerHint = o.previewBanner:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  o.previewBannerHint:SetPoint("TOPLEFT", 10, -24)
+  o.previewBannerHint:SetPoint("TOPLEFT", 10, -19)
   o.previewBannerHint:SetPoint("RIGHT", -10, 0)
   o.previewBannerHint:SetJustifyH("LEFT")
   o.previewBannerHint:SetText("")
   o.previewBannerHint:Hide()
+  o.previewBannerHint:SetTextColor(0.68, 0.72, 0.78)
 
   o.tabStrip = CreateFrame("Frame", nil, o.frame)
-  o.tabStrip:SetPoint("TOPLEFT", 10, -82)
-  o.tabStrip:SetPoint("TOPRIGHT", -138, -82)
-  o.tabStrip:SetHeight(26)
+  o.tabStrip:SetPoint("TOPLEFT", 0, -94)
+  o.tabStrip:SetPoint("TOPRIGHT", -112, -94)
+  o.tabStrip:SetHeight(24)
+
+  o.tabStripLine = o.tabStrip:CreateTexture(nil, "ARTWORK")
+  o.tabStripLine:SetColorTexture(1.0, 0.82, 0.18, 0.04)
+  o.tabStripLine:SetPoint("BOTTOMLEFT", 0, 0)
+  o.tabStripLine:SetPoint("BOTTOMRIGHT", 0, 0)
+  o.tabStripLine:SetHeight(1)
 
   o.btnMode = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-  o.btnMode:SetSize(118, 22)
-  o.btnMode:SetPoint("TOPRIGHT", -12, -82)
-  o.btnMode:SetText("More Options")
+  o.btnMode:SetSize(96, 22)
+  o.btnMode:SetPoint("TOPRIGHT", 0, -46)
+  o.btnMode:SetText("Advanced")
   if Skin and Skin.ApplyButton then
     Skin:SetButtonVariant(o.btnMode, "ghost")
   end
   o.btnMode:SetScript("OnClick", function()
     o.showAdvanced = not o.showAdvanced
-    o.btnMode:SetText(o.showAdvanced and "Simple View" or "More Options")
+    o.btnMode:SetText(o.showAdvanced and "Guided" or "Advanced")
     o:RefreshTabButtons()
     local activeTab = o.currentTab or "Tracking"
     if not isTabAvailable(o.draft, activeTab, o.showAdvanced) then
@@ -1984,7 +3500,7 @@ function AuraEditorPanel:Create(parent)
   for i = 1, #(Schemas and Schemas.EditorTabs or {}) do
     local tab = Schemas.EditorTabs[i]
     local btn = CreateFrame("Button", nil, o.tabStrip, "UIPanelButtonTemplate")
-    btn:SetSize(96, 22)
+    btn:SetSize(102, 22)
     btn:SetPoint("TOPLEFT", x, 0)
     btn:SetText(tab.label or tab.key)
     if Skin and Skin.ApplyButton then
@@ -1994,21 +3510,57 @@ function AuraEditorPanel:Create(parent)
       o:SelectTab(tab.key)
     end)
     o.tabs[tab.key] = btn
-    x = x + 100
+    x = x + 110
   end
 
-  o.scroll = CreateFrame("ScrollFrame", nil, o.frame, "UIPanelScrollFrameTemplate")
-  o.scroll:SetPoint("TOPLEFT", 8, -110)
-  o.scroll:SetPoint("BOTTOMRIGHT", -28, 48)
+  o.scroll = CreateFrame("ScrollFrame", nil, o.frame)
+  o.scroll:SetPoint("TOPLEFT", 18, -122)
+  o.scroll:SetPoint("BOTTOMRIGHT", -8, 40)
+  o.scroll:EnableMouseWheel(true)
 
   o.content = CreateFrame("Frame", nil, o.scroll)
   o.content:SetSize(1, 1)
   o.scroll:SetScrollChild(o.content)
+  o.scroll:SetScript("OnMouseWheel", function(selfScroll, delta)
+    local current = selfScroll:GetVerticalScroll() or 0
+    local maxScroll = math.max(0, (o.content:GetHeight() or 0) - (selfScroll:GetHeight() or 0))
+    local nextScroll = math.max(0, math.min(maxScroll, current - (delta * 36)))
+    selfScroll:SetVerticalScroll(nextScroll)
+  end)
+  o.scroll:SetScript("OnSizeChanged", function(selfScroll, width)
+    local nextWidth = math.max(1, (width or 0) - 24)
+    o.content:SetWidth(nextWidth)
+    o.content.width = nextWidth
+    if o.draft and not o._pendingLayoutRefresh then
+      o._pendingLayoutRefresh = true
+      C_Timer.After(0, function()
+        if not o then
+          return
+        end
+        o._pendingLayoutRefresh = false
+        if o.draft then
+          o:RenderTab(o.currentTab or "Tracking")
+        end
+      end)
+    end
+  end)
+
+  o.footerLine = o.frame:CreateTexture(nil, "ARTWORK")
+  o.footerLine:SetPoint("BOTTOMLEFT", 0, 48)
+  o.footerLine:SetPoint("BOTTOMRIGHT", -12, 48)
+  o.footerLine:SetHeight(1)
+  o.footerLine:SetColorTexture(0.72, 0.78, 0.90, 0.10)
+
+  o.actionBar = CreateFrame("Frame", nil, o.frame, "BackdropTemplate")
+  o.actionBar:SetPoint("BOTTOMLEFT", 0, 0)
+  o.actionBar:SetPoint("BOTTOMRIGHT", -12, 0)
+  o.actionBar:SetHeight(32)
+  createCardBackdrop(o.actionBar)
 
   o.status = o.frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  o.status:SetPoint("BOTTOMLEFT", 12, 38)
-  o.status:SetPoint("RIGHT", -12, 0)
-  o.status:SetJustifyH("LEFT")
+  o.status:SetPoint("BOTTOMRIGHT", -12, 52)
+  o.status:SetWidth(250)
+  o.status:SetJustifyH("RIGHT")
   o.status:SetText("Ready")
 
   function o:RefreshDeleteButton()
@@ -2021,8 +3573,9 @@ function AuraEditorPanel:Create(parent)
   end
 
   o.btnSave = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-  o.btnSave:SetSize(110, 24)
-  o.btnSave:SetPoint("BOTTOMLEFT", 10, 10)
+  o.btnSave:SetSize(98, 20)
+  o.btnSave:SetParent(o.actionBar)
+  o.btnSave:SetPoint("LEFT", 8, 0)
   o.btnSave:SetText("Save Aura")
   o.btnSave:SetScript("OnClick", function()
     o:SaveCurrent()
@@ -2032,7 +3585,8 @@ function AuraEditorPanel:Create(parent)
   end
 
   o.btnReset = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-  o.btnReset:SetSize(90, 24)
+  o.btnReset:SetSize(82, 20)
+  o.btnReset:SetParent(o.actionBar)
   o.btnReset:SetPoint("LEFT", o.btnSave, "RIGHT", 8, 0)
   o.btnReset:SetText("Discard")
   o.btnReset:SetScript("OnClick", function()
@@ -2042,20 +3596,9 @@ function AuraEditorPanel:Create(parent)
     Skin:SetButtonVariant(o.btnReset, "ghost")
   end
 
-  o.btnDelete = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-  o.btnDelete:SetSize(90, 24)
-  o.btnDelete:SetPoint("LEFT", o.btnDuplicate, "RIGHT", 96, 0)
-  o.btnDelete:SetText("Delete")
-  o.btnDelete:SetScript("OnClick", function()
-    o:DeleteCurrent()
-  end)
-  if Skin and Skin.ApplyButton then
-    Skin:SetButtonVariant(o.btnDelete, "danger")
-  end
-  o:RefreshDeleteButton()
-
   o.btnDuplicate = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-  o.btnDuplicate:SetSize(90, 24)
+  o.btnDuplicate:SetSize(84, 20)
+  o.btnDuplicate:SetParent(o.actionBar)
   o.btnDuplicate:SetPoint("LEFT", o.btnReset, "RIGHT", 8, 0)
   o.btnDuplicate:SetText("Duplicate")
   o.btnDuplicate:SetScript("OnClick", function()
@@ -2067,7 +3610,8 @@ function AuraEditorPanel:Create(parent)
   o.duplicateButton = o.btnDuplicate
 
   o.btnExport = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-  o.btnExport:SetSize(80, 24)
+  o.btnExport:SetSize(72, 20)
+  o.btnExport:SetParent(o.actionBar)
   o.btnExport:SetPoint("LEFT", o.btnDuplicate, "RIGHT", 8, 0)
   o.btnExport:SetText("Export")
   o.btnExport:SetScript("OnClick", function()
@@ -2077,8 +3621,18 @@ function AuraEditorPanel:Create(parent)
     Skin:SetButtonVariant(o.btnExport, "ghost")
   end
 
-  o.btnDelete:ClearAllPoints()
+  o.btnDelete = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
+  o.btnDelete:SetSize(82, 20)
+  o.btnDelete:SetParent(o.actionBar)
   o.btnDelete:SetPoint("LEFT", o.btnExport, "RIGHT", 8, 0)
+  o.btnDelete:SetText("Delete")
+  o.btnDelete:SetScript("OnClick", function()
+    o:DeleteCurrent()
+  end)
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(o.btnDelete, "danger")
+  end
+  o:RefreshDeleteButton()
 
   if E then
     E:On(E.Names.AURA_SELECTED, function(payload)
@@ -2136,6 +3690,18 @@ function AuraEditorPanel:Create(parent)
       end
     end)
   end
+
+  C_Timer.After(0, function()
+    if not o or not o.scroll or not o.content then
+      return
+    end
+    local nextWidth = math.max(1, (o.scroll:GetWidth() or 0) - 24)
+    o.content:SetWidth(nextWidth)
+    o.content.width = nextWidth
+    if o.draft then
+      o:RenderTab(o.currentTab or "Tracking")
+    end
+  end)
 
   o:LoadAura(nil)
   return o

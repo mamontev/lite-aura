@@ -143,6 +143,69 @@ suite:case("Synthetic tracking roundtrip preserves duration and per-trigger stac
   T.equal(tonumber(editable.produceTriggers[2].stackAmount), 1)
 end)
 
+suite:case("Visual style preset survives rebuild-style roundtrip", function()
+  local env, ns = makeEnv()
+  local D = ns.SettingsData
+  local key = assert(D:AddEntry(env.makeModel({
+    spellInput = 12345,
+    displayName = "Styled Aura",
+    stylePreset = "center_burst",
+    timerVisual = "iconbar",
+    iconWidth = 44,
+    iconHeight = 44,
+    barWidth = 128,
+    barHeight = 14,
+    barColor = "0.95,0.72,0.18",
+    barTexture = "Interface\\AddOns\\AuraLite\\Media\\StatusBars\\aura_pulse",
+  })))
+
+  ns:RebuildWatchIndex()
+
+  local editable = D:BuildEditableModel(assert(D:ResolveEntry(key)))
+  T.equal(editable.stylePreset, "center_burst")
+  T.equal(editable.iconWidth, 44)
+  T.equal(editable.barWidth, 128)
+  T.equal(editable.barTexture, "Interface\\AddOns\\AuraLite\\Media\\StatusBars\\aura_pulse")
+end)
+
+suite:case("Visual state styling survives rebuild-style roundtrip", function()
+  local env, ns = makeEnv()
+  local D = ns.SettingsData
+  local key = assert(D:AddEntry(env.makeModel({
+    spellInput = 260240,
+    displayName = "Precise Shots",
+    visualStates = {
+      onGain = "burst",
+      lowTime = "intense",
+      maxStacks = "heroic",
+    },
+  })))
+
+  ns:RebuildWatchIndex()
+
+  local editable = D:BuildEditableModel(assert(D:ResolveEntry(key)))
+  T.equal(editable.visualStates.onGain, "burst")
+  T.equal(editable.visualStates.lowTime, "intense")
+  T.equal(editable.visualStates.maxStacks, "heroic")
+end)
+
+suite:case("Cooldown tracking mode survives rebuild-style roundtrip", function()
+  local env, ns = makeEnv()
+  local D = ns.SettingsData
+  local key = assert(D:AddEntry(env.makeModel({
+    spellInput = 23922,
+    displayName = "Shield Slam Cooldown",
+    trackingMode = "cooldown",
+    unit = "player",
+  })))
+
+  ns:RebuildWatchIndex()
+
+  local editable = D:BuildEditableModel(assert(D:ResolveEntry(key)))
+  T.equal(editable.trackingMode, "cooldown")
+  T.equal(editable.unit, "player")
+end)
+
 suite:case("DeleteGroup removes only the container and leaves children standalone", function()
   local env, ns = makeEnv()
   local D = ns.SettingsData

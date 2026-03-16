@@ -248,6 +248,9 @@ end
 local function normalizeTrackingMode(value, unit)
   local mode = tostring(value or ""):lower()
   unit = tostring(unit or "player"):lower()
+  if unit == "player" and mode == "cooldown" then
+    return "cooldown"
+  end
   if unit == "target" and mode == "estimated" then
     return "estimated"
   end
@@ -585,6 +588,27 @@ local function normalizeCustomText(text)
     text = text:sub(1, 120)
   end
   return text
+end
+
+local validCustomFonts = {
+  friz = true,
+  arial = true,
+  morpheus = true,
+  skurri = true,
+  blei = true,
+  arhei = true,
+  font2002 = true,
+}
+
+local function normalizeCustomFont(value)
+  value = tostring(value or "friz"):lower()
+  if value:match("^lsm:") then
+    return value
+  end
+  if validCustomFonts[value] then
+    return value
+  end
+  return "friz"
 end
 
 local function parseEntryKey(key)
@@ -1120,6 +1144,8 @@ function D:BuildEditableModel(entry)
     customTexture = item.customTexture or "",
     barTexture = item.barTexture or "",
     customText = item.customText or "",
+    stylePreset = tostring(item.stylePreset or ""),
+    visualStates = (ns.VisualStyle and ns.VisualStyle.CloneStates and ns.VisualStyle:CloneStates(item.visualStates)) or nil,
     groupOrder = tonumber(item.groupOrder) or 0,
     timerVisual = item.timerVisual or "icon",
     iconWidth = tonumber(item.iconWidth) or 36,
@@ -1127,8 +1153,18 @@ function D:BuildEditableModel(entry)
     barWidth = tonumber(item.barWidth) or 94,
     barHeight = tonumber(item.barHeight) or 16,
     showTimerText = item.showTimerText ~= false,
+    timerTextSize = tonumber(item.timerTextSize) or 12,
+    timerTextFont = normalizeCustomFont(item.timerTextFont),
     barColor = tostring(item.barColor or ""),
+    barGradientEnabled = item.barGradientEnabled == true,
+    barColor2 = tostring(item.barColor2 or ""),
     barSide = normalizeBarSide(item.barSide),
+    showNameText = item.showNameText ~= false,
+    nameTextSize = tonumber(item.nameTextSize) or 12,
+    nameTextFont = normalizeCustomFont(item.nameTextFont),
+    showCustomText = item.showCustomText ~= false,
+    customTextSize = tonumber(item.customTextSize) or 12,
+    customTextFont = normalizeCustomFont(item.customTextFont),
     timerAnchor = item.timerAnchor or "BOTTOM",
     timerOffsetX = tonumber(item.timerOffsetX) or 0,
     timerOffsetY = tonumber(item.timerOffsetY) or -1,
@@ -1178,14 +1214,26 @@ function D:BuildDefaultCreateModel()
     customTexture = "",
     barTexture = "",
     customText = "",
+    stylePreset = "",
+    visualStates = (ns.VisualStyle and ns.VisualStyle.GetDefaults and ns.VisualStyle:GetDefaults()) or nil,
     timerVisual = "icon",
     iconWidth = 36,
     iconHeight = 36,
     barWidth = 94,
     barHeight = 16,
     showTimerText = true,
+    timerTextSize = 12,
+    timerTextFont = "friz",
     barColor = "",
+    barGradientEnabled = false,
+    barColor2 = "",
     barSide = "right",
+    showNameText = true,
+    nameTextSize = 12,
+    nameTextFont = "friz",
+    showCustomText = true,
+    customTextSize = 12,
+    customTextFont = "friz",
     groupOrder = 0,
     timerAnchor = "BOTTOM",
     timerOffsetX = 0,
@@ -1233,9 +1281,9 @@ function D:BuildWatchItemFromModel(model, options)
   local iconMode = (model.iconMode == "custom") and "custom" or "spell"
   local customTexture = ""
   if iconMode == "custom" then
-    customTexture = ns.AuraAPI:ResolveCustomTexturePath(model.customTexture)
+    customTexture = ns.AuraAPI and ns.AuraAPI.NormalizeTexturePath and ns.AuraAPI:NormalizeTexturePath(model.customTexture) or tostring(model.customTexture or "")
   end
-  local barTexture = ns.AuraAPI:ResolveBarTexturePath(model.barTexture)
+  local barTexture = ns.AuraAPI and ns.AuraAPI.NormalizeTexturePath and ns.AuraAPI:NormalizeTexturePath(model.barTexture) or tostring(model.barTexture or "")
 
   local resourceMin = normalizePercent(model.resourceMinPct, 0)
   local resourceMax = normalizePercent(model.resourceMaxPct, 100)
@@ -1266,6 +1314,8 @@ function D:BuildWatchItemFromModel(model, options)
     alert = normalizeBool(model.alert, true),
     displayName = normalizeDisplayName(model.displayName),
     customText = normalizeCustomText(model.customText),
+    stylePreset = tostring(model.stylePreset or ""),
+    visualStates = (ns.VisualStyle and ns.VisualStyle:NormalizeStates(model.visualStates)) or nil,
     groupOrder = tonumber(model.groupOrder) or 0,
     timerVisual = normalizeTimerVisual(model.timerVisual),
     iconWidth = normalizeSize(model.iconWidth, 36, 12, 256),
@@ -1273,8 +1323,18 @@ function D:BuildWatchItemFromModel(model, options)
     barWidth = normalizeSize(model.barWidth, 94, 60, 512),
     barHeight = normalizeSize(model.barHeight, 16, 6, 128),
     showTimerText = normalizeBool(model.showTimerText, true),
+    timerTextSize = normalizeSize(model.timerTextSize, 12, 8, 32),
+    timerTextFont = normalizeCustomFont(model.timerTextFont),
     barColor = normalizeColorCSV(model.barColor),
+    barGradientEnabled = normalizeBool(model.barGradientEnabled, false),
+    barColor2 = normalizeColorCSV(model.barColor2),
     barSide = normalizeBarSide(model.barSide),
+    showNameText = normalizeBool(model.showNameText, true),
+    nameTextSize = normalizeSize(model.nameTextSize, 12, 8, 32),
+    nameTextFont = normalizeCustomFont(model.nameTextFont),
+    showCustomText = normalizeBool(model.showCustomText, true),
+    customTextSize = normalizeSize(model.customTextSize, 12, 8, 32),
+    customTextFont = normalizeCustomFont(model.customTextFont),
     timerAnchor = normalizeAnchor(model.timerAnchor, "BOTTOM"),
     timerOffsetX = normalizeOffset(model.timerOffsetX, 0),
     timerOffsetY = normalizeOffset(model.timerOffsetY, -1),

@@ -8,6 +8,7 @@ local Panels = UI.Panels
 local E = UI.Events
 local FieldFactory = UI.FieldFactory
 local Skin = ns.UISkin
+local Widgets = UI.Widgets or {}
 
 local GroupsPanel = {}
 GroupsPanel.__index = GroupsPanel
@@ -33,6 +34,10 @@ local GROUP_FIELDS = {
 }
 
 local function createBackdrop(frame)
+  if Skin and Skin.ApplyWindow then
+    Skin:ApplyWindow(frame)
+    return
+  end
   frame:SetBackdrop({
     bgFile = "Interface/Tooltips/UI-Tooltip-Background",
     edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
@@ -41,6 +46,47 @@ local function createBackdrop(frame)
   })
   frame:SetBackdropColor(0.02, 0.05, 0.10, 0.96)
   frame:SetBackdropBorderColor(0.44, 0.36, 0.16, 0.82)
+end
+
+local function applyFloatingWindowChrome(frame)
+  frame:SetFrameStrata("FULLSCREEN_DIALOG")
+  frame:SetToplevel(true)
+  frame:SetClampedToScreen(true)
+  frame:SetMovable(true)
+  frame:EnableMouse(true)
+  frame:RegisterForDrag("LeftButton")
+  frame:SetScript("OnDragStart", function(self)
+    self:Raise()
+    self:StartMoving()
+  end)
+  frame:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+  end)
+end
+
+local function attachDragHandle(frame, handle)
+  if not frame or not handle then
+    return
+  end
+  local dragHandle = handle
+  if type(dragHandle) == "table" and dragHandle.frame and dragHandle.frame.GetObjectType then
+    dragHandle = dragHandle.frame
+  end
+  if not (dragHandle and dragHandle.EnableMouse and dragHandle.RegisterForDrag and dragHandle.SetScript) then
+    local proxy = CreateFrame("Frame", nil, frame)
+    proxy:SetPoint("TOPLEFT", handle, "TOPLEFT", 0, 0)
+    proxy:SetPoint("BOTTOMRIGHT", handle, "BOTTOMRIGHT", 0, 0)
+    dragHandle = proxy
+  end
+  dragHandle:EnableMouse(true)
+  dragHandle:RegisterForDrag("LeftButton")
+  dragHandle:SetScript("OnDragStart", function()
+    frame:Raise()
+    frame:StartMoving()
+  end)
+  dragHandle:SetScript("OnDragStop", function()
+    frame:StopMovingOrSizing()
+  end)
 end
 
 local function makeButton(parent, text, w, variant, onClick)
@@ -107,7 +153,7 @@ end
 
 function GroupsPanel:RenderList()
   local rows = self:BuildRows()
-  local width = math.max(120, (self.listScroll and self.listScroll:GetWidth() or 0) - 28)
+  local width = math.max(120, (self.listScroll and self.listScroll:GetWidth() or 0) - 8)
   local y = -2
   self.rowButtons = self.rowButtons or {}
   local used = {}
@@ -182,7 +228,7 @@ end
 function GroupsPanel:RenderMembers()
   self.memberRows = self.memberRows or {}
   local rows = self:BuildMemberRows()
-  local width = math.max(180, (self.membersScroll and self.membersScroll:GetWidth() or 0) - 28)
+  local width = math.max(180, (self.membersScroll and self.membersScroll:GetWidth() or 0) - 8)
   local y = -2
   local used = {}
 
@@ -404,10 +450,9 @@ end
 function GroupsPanel:Create(parent)
   local o = setmetatable({}, self)
 
-  o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-  o.frame:SetSize(680, 620)
-  o.frame:SetFrameStrata("DIALOG")
-  o.frame:SetToplevel(true)
+  o.frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+  o.frame:SetSize(760, 654)
+  applyFloatingWindowChrome(o.frame)
   createBackdrop(o.frame)
   o.frame:Hide()
 
@@ -420,45 +465,94 @@ function GroupsPanel:Create(parent)
     self.btnDelete:SetText(armed and "Confirm Delete" or "Delete Group")
   end
 
-  local title = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  title:SetPoint("TOPLEFT", 10, -8)
-  title:SetText("Groups")
+  local title = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  title:SetPoint("TOPLEFT", 14, -16)
+  title:SetText("Group Studio")
+  title:SetTextColor(0.98, 0.88, 0.34)
+  attachDragHandle(o.frame, title)
 
   local subtitle = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  subtitle:SetPoint("TOPLEFT", 10, -26)
-  subtitle:SetPoint("RIGHT", -10, 0)
+  subtitle:SetPoint("TOPLEFT", 14, -34)
+  subtitle:SetPoint("RIGHT", -14, 0)
   subtitle:SetJustifyH("LEFT")
-  subtitle:SetText("Groups own movers, direction, spacing and ordering. Auras inside the same group move together.")
+  subtitle:SetText("Compose shared layout containers, tune spacing and order, then manage the auras living inside them.")
+  attachDragHandle(o.frame, subtitle)
 
   o.listPane = CreateFrame("Frame", nil, o.frame, "BackdropTemplate")
-  createBackdrop(o.listPane)
-  o.listPane:SetPoint("TOPLEFT", 10, -50)
-  o.listPane:SetPoint("BOTTOMLEFT", 10, 40)
-  o.listPane:SetWidth(200)
+  if Skin and Skin.ApplyInsetPanel then
+    Skin:ApplyInsetPanel(o.listPane)
+  else
+    createBackdrop(o.listPane)
+  end
+  o.listPane:SetPoint("TOPLEFT", 14, -76)
+  o.listPane:SetPoint("BOTTOMLEFT", 14, 52)
+  o.listPane:SetWidth(224)
 
   o.editorPane = CreateFrame("Frame", nil, o.frame, "BackdropTemplate")
-  createBackdrop(o.editorPane)
+  if Skin and Skin.ApplyInsetPanel then
+    Skin:ApplyInsetPanel(o.editorPane)
+  else
+    createBackdrop(o.editorPane)
+  end
   o.editorPane:SetPoint("TOPLEFT", o.listPane, "TOPRIGHT", 8, 0)
-  o.editorPane:SetPoint("BOTTOMRIGHT", -10, 40)
+  o.editorPane:SetPoint("BOTTOMRIGHT", -14, 52)
+
+  if Widgets.SectionHeaderWidget and Widgets.SectionHeaderWidget.Create then
+    o.listHeader = Widgets.SectionHeaderWidget:Create(o.listPane, {
+      title = "Groups",
+      helpTitle = "Groups",
+      helpBody = "Groups act like shared containers. Their mover, direction, spacing, and order affect every aura inside them.",
+      compact = true,
+      lineWidth = 42,
+    })
+    o.listHeader:SetPoint("TOPLEFT", 6, -4)
+    o.listHeader:SetPoint("TOPRIGHT", -6, -4)
+    attachDragHandle(o.frame, o.listHeader)
+
+    o.editorHeader = Widgets.SectionHeaderWidget:Create(o.editorPane, {
+      title = "Group Settings",
+      helpTitle = "Group Settings",
+      helpBody = "Edit layout behavior, then manage which auras belong to the selected group.",
+      compact = true,
+      lineWidth = 56,
+    })
+    o.editorHeader:SetPoint("TOPLEFT", 8, -4)
+    o.editorHeader:SetPoint("TOPRIGHT", -8, -4)
+    attachDragHandle(o.frame, o.editorHeader)
+  end
 
   o.footerBar = CreateFrame("Frame", nil, o.editorPane)
   o.footerBar:SetPoint("BOTTOMLEFT", 10, 10)
   o.footerBar:SetPoint("BOTTOMRIGHT", -10, 10)
-  o.footerBar:SetHeight(50)
+  o.footerBar:SetHeight(48)
+
+  o.footerLine = o.footerBar:CreateTexture(nil, "ARTWORK")
+  o.footerLine:SetPoint("TOPLEFT", 0, 0)
+  o.footerLine:SetPoint("TOPRIGHT", 0, 0)
+  o.footerLine:SetHeight(1)
+  do
+    local r, g, b = 0.94, 0.78, 0.18
+    local _, classToken = UnitClass and UnitClass("player") or nil
+    local color = classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken] or nil
+    if color then
+      r, g, b = color.r or r, color.g or g, color.b or b
+    end
+    o.footerLine:SetColorTexture(r, g, b, 0.72)
+  end
 
   o.footerTop = CreateFrame("Frame", nil, o.footerBar)
-  o.footerTop:SetPoint("TOPLEFT", 0, 0)
+  o.footerTop:SetPoint("TOPLEFT", 0, -3)
   o.footerTop:SetPoint("TOPRIGHT", 0, 0)
-  o.footerTop:SetHeight(22)
+  o.footerTop:SetHeight(18)
 
   o.footerBottom = CreateFrame("Frame", nil, o.footerBar)
   o.footerBottom:SetPoint("BOTTOMLEFT", 0, 0)
   o.footerBottom:SetPoint("BOTTOMRIGHT", 0, 0)
-  o.footerBottom:SetHeight(22)
+  o.footerBottom:SetHeight(18)
 
   o.listScroll = CreateFrame("ScrollFrame", nil, o.listPane, "UIPanelScrollFrameTemplate")
-  o.listScroll:SetPoint("TOPLEFT", 6, -6)
-  o.listScroll:SetPoint("BOTTOMRIGHT", -28, 6)
+  o.listScroll:SetPoint("TOPLEFT", 6, -24)
+  o.listScroll:SetPoint("BOTTOMRIGHT", -12, 6)
   o.listChild = CreateFrame("Frame", nil, o.listScroll)
   o.listChild:SetSize(1, 1)
   o.listScroll:SetScrollChild(o.listChild)
@@ -467,13 +561,14 @@ function GroupsPanel:Create(parent)
   end)
 
   o.editorBody = CreateFrame("Frame", nil, o.editorPane)
-  o.editorBody:SetPoint("TOPLEFT", 10, -10)
-  o.editorBody:SetPoint("TOPRIGHT", -10, -10)
-  o.editorBody:SetHeight(360)
+  o.editorBody:SetPoint("TOPLEFT", 10, -28)
+  o.editorBody:SetPoint("TOPRIGHT", -10, -28)
+  o.editorBody:SetHeight(350)
 
-  o.membersLabel = o.editorPane:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  o.membersLabel = o.editorPane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   o.membersLabel:SetPoint("TOPLEFT", o.editorBody, "BOTTOMLEFT", 0, -12)
-  o.membersLabel:SetText("Group Members")
+  o.membersLabel:SetText("Members")
+  o.membersLabel:SetTextColor(0.98, 0.86, 0.22)
 
   o.selectedAuraHint = o.editorPane:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   o.selectedAuraHint:SetPoint("TOPLEFT", o.membersLabel, "BOTTOMLEFT", 0, -4)
@@ -491,55 +586,55 @@ function GroupsPanel:Create(parent)
   end)
 
   o.emptyText = o.editorPane:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  o.emptyText:SetPoint("TOPLEFT", 12, -14)
+  o.emptyText:SetPoint("TOPLEFT", 12, -34)
   o.emptyText:SetPoint("RIGHT", -12, 0)
   o.emptyText:SetJustifyH("LEFT")
-  o.emptyText:SetText("Select a group on the left to edit its shared mover and layout settings.")
+  o.emptyText:SetText("Select a group from the browser to shape its shared layout, then manage its member stack below.")
 
-  o.btnSave = makeButton(o.frame, "Save Group", 100, "primary", function()
+  o.btnSave = makeButton(o.frame, "Save Group", 92, "primary", function()
     o:SaveCurrent()
   end)
   o.btnSave:SetParent(o.footerTop)
   o.btnSave:SetPoint("LEFT", o.footerTop, "LEFT", 0, 0)
 
-  o.btnDelete = makeButton(o.frame, "Delete Group", 108, "danger", function()
+  o.btnDelete = makeButton(o.frame, "Delete Group", 100, "danger", function()
     o:DeleteCurrent()
   end)
   o.btnDelete:SetParent(o.footerTop)
   o.btnDelete:SetPoint("LEFT", o.btnSave, "RIGHT", 8, 0)
   o:RefreshDeleteButton()
 
-  o.btnAddSelected = makeButton(o.frame, "Add Selected Aura", 118, "default", function()
+  o.btnAddSelected = makeButton(o.frame, "Add Selected Aura", 112, "default", function()
     o:AddSelectedAuraToCurrentGroup()
   end)
   o.btnAddSelected:SetParent(o.footerTop)
   o.btnAddSelected:SetPoint("LEFT", o.btnDelete, "RIGHT", 8, 0)
 
-  o.btnClose = makeButton(o.frame, "Close", 90, "ghost", function()
+  o.btnClose = makeButton(o.frame, "Close", 82, "ghost", function()
     o.frame:Hide()
   end)
   o.btnClose:SetParent(o.footerTop)
   o.btnClose:SetPoint("RIGHT", o.footerTop, "RIGHT", 0, 0)
 
-  o.btnMoveUp = makeButton(o.frame, "Up", 50, "ghost", function()
+  o.btnMoveUp = makeButton(o.frame, "Up", 44, "ghost", function()
     o:MoveSelectedMember("up")
   end)
   o.btnMoveUp:SetParent(o.footerBottom)
   o.btnMoveUp:SetPoint("LEFT", o.footerBottom, "LEFT", 0, 0)
 
-  o.btnMoveDown = makeButton(o.frame, "Down", 56, "ghost", function()
+  o.btnMoveDown = makeButton(o.frame, "Down", 50, "ghost", function()
     o:MoveSelectedMember("down")
   end)
   o.btnMoveDown:SetParent(o.footerBottom)
   o.btnMoveDown:SetPoint("LEFT", o.btnMoveUp, "RIGHT", 6, 0)
 
-  o.btnUngroupAura = makeButton(o.frame, "Ungroup Aura", 104, "ghost", function()
+  o.btnUngroupAura = makeButton(o.frame, "Ungroup", 88, "ghost", function()
     o:UngroupSelectedAura()
   end)
   o.btnUngroupAura:SetParent(o.footerBottom)
   o.btnUngroupAura:SetPoint("LEFT", o.btnMoveDown, "RIGHT", 6, 0)
 
-  o.btnExport = makeButton(o.frame, "Export Group", 110, "ghost", function()
+  o.btnExport = makeButton(o.frame, "Export", 82, "ghost", function()
     o:ExportCurrent()
   end)
   o.btnExport:SetParent(o.footerBottom)
@@ -549,15 +644,13 @@ function GroupsPanel:Create(parent)
   o.deleteHint:SetPoint("LEFT", o.btnAddSelected, "RIGHT", 10, 0)
   o.deleteHint:SetPoint("RIGHT", o.btnClose, "LEFT", -10, 0)
   o.deleteHint:SetJustifyH("LEFT")
-  o.deleteHint:SetText("Deleting a group keeps its auras and makes them standalone.")
+  o.deleteHint:SetText("Deleting a group keeps its auras as standalone entries.")
 
   if E then
     E:On(E.Names.OPEN_GROUPS_PANEL, function(payload)
-      local anchor = payload and payload.anchor
-      if anchor then
-        o.frame:ClearAllPoints()
-        o.frame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", -320, -6)
-      end
+      o.frame:ClearAllPoints()
+      o.frame:SetPoint("CENTER", UIParent, "CENTER", 36, 10)
+      o.frame:Raise()
       o.frame:SetShown(not o.frame:IsShown())
       if o.frame:IsShown() then
         local selectedAura = o:GetSelectedAuraContext()

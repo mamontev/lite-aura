@@ -385,10 +385,14 @@ function A:GetSpellCooldownData(spellID)
     gcdStart = safeNumber(gs, 0)
     gcdDuration = safeNumber(gd, 0)
   end
-  if gcdDuration > 0 then
-    local sameStart = math.abs(finalStart - gcdStart) <= 0.06
-    local sameDuration = math.abs(finalDuration - gcdDuration) <= 0.06
-    if sameStart and sameDuration then
+  if gcdDuration > 0 and gcdStart > 0 then
+    local sameStart = math.abs(finalStart - gcdStart) <= 0.10
+    local sameDuration = math.abs(finalDuration - gcdDuration) <= 0.12
+    local mostlyInsideGCDWindow =
+      finalStart >= (gcdStart - 0.10)
+      and finalStart <= (gcdStart + 0.10)
+      and finalDuration <= (gcdDuration + 0.12)
+    if (sameStart and sameDuration) or mostlyInsideGCDWindow then
       return nil
     end
   end
@@ -429,7 +433,7 @@ function A:ResolveCustomTexturePath(path)
     return ""
   end
 
-  if normalized:lower():find("^interface\\", 1, true) then
+  if normalized:lower():match("^interface\\") then
     return normalized
   end
 
@@ -446,7 +450,7 @@ function A:ResolveBarTexturePath(path)
     return "Interface\\TargetingFrame\\UI-StatusBar"
   end
 
-  if normalized:lower():find("^lsm:", 1, true) then
+  if normalized:lower():match("^lsm:") then
     local key = normalized:sub(5)
     if key ~= "" and ns.Media and ns.Media.Fetch then
       local resolved = ns.Media:Fetch("statusbar", key)
@@ -457,7 +461,7 @@ function A:ResolveBarTexturePath(path)
     return "Interface\\TargetingFrame\\UI-StatusBar"
   end
 
-  if normalized:lower():find("^interface\\", 1, true) then
+  if normalized:lower():match("^interface\\") then
     return normalized
   end
 

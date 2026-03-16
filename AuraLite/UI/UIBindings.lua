@@ -112,6 +112,9 @@ end
 local function normalizeTrackingMode(value, unit)
   local mode = tostring(value or ""):lower()
   unit = tostring(unit or "player")
+  if unit == "player" and mode == "cooldown" then
+    return "cooldown"
+  end
   if unit == "target" and mode == "estimated" then
     return "estimated"
   end
@@ -150,6 +153,14 @@ local function defaultBarHeight(value)
   return 16
 end
 
+local function normalizeStylePreset(value)
+  value = trim(value)
+  if value == "" then
+    return ""
+  end
+  return value
+end
+
 function B:IsDraftID(auraId)
   return type(auraId) == "string" and auraId:find("^__new__:") ~= nil
 end
@@ -175,6 +186,14 @@ function B:IsEstimatedTargetDebuffTracking(draft)
     and normalizeTrackingMode(draft.trackingMode, draft.unit) == "estimated"
 end
 
+function B:IsCooldownTracking(draft)
+  if type(draft) ~= "table" then
+    return false
+  end
+  return tostring(draft.unit or "player") == "player"
+    and normalizeTrackingMode(draft.trackingMode, draft.unit) == "cooldown"
+end
+
 function B:DraftFromEditableModel(model)
   model = model or {}
   local specList = parseCSVNumbers(model.loadSpecIDs)
@@ -197,7 +216,7 @@ function B:DraftFromEditableModel(model)
     groupWrapAfter = tonumber(model.groupWrapAfter) or 0,
     groupOffsetX = tonumber(model.groupOffsetX) or 0,
     groupOffsetY = tonumber(model.groupOffsetY) or 0,
-    triggerType = (unit == "target" and trackingMode ~= "estimated") and "aura" or "cast",
+    triggerType = (trackingMode == "cooldown") and "cooldown" or ((unit == "target" and trackingMode ~= "estimated") and "aura" or "cast"),
     trackingMode = trackingMode,
     castSpellIDs = toCSV(model.castSpellIDs),
     ruleName = "",
@@ -230,14 +249,30 @@ function B:DraftFromEditableModel(model)
     customTexture = tostring(model.customTexture or ""),
     barTexture = tostring(model.barTexture or ""),
     customText = tostring(model.customText or ""),
+    stylePreset = normalizeStylePreset(model.stylePreset),
+    visualStates = (ns.VisualStyle and ns.VisualStyle.CloneStates and ns.VisualStyle:CloneStates(model.visualStates)) or {
+      onGain = "off",
+      lowTime = "warning",
+      maxStacks = "gold",
+    },
     timerVisual = tostring(model.timerVisual or "icon"),
     iconWidth = defaultIconWidth(model.iconWidth),
     iconHeight = defaultIconHeight(model.iconHeight),
     barWidth = defaultBarWidth(model.barWidth),
     barHeight = defaultBarHeight(model.barHeight),
     showTimerText = model.showTimerText ~= false,
+    timerTextSize = math.max(8, tonumber(model.timerTextSize) or 12),
+    timerTextFont = tostring(model.timerTextFont or "friz"),
     barColor = tostring(model.barColor or ""),
+    barGradientEnabled = model.barGradientEnabled == true,
+    barColor2 = tostring(model.barColor2 or ""),
     barSide = tostring(model.barSide or "right"),
+    showNameText = model.showNameText ~= false,
+    nameTextSize = math.max(8, tonumber(model.nameTextSize) or 12),
+    nameTextFont = tostring(model.nameTextFont or "friz"),
+    showCustomText = model.showCustomText ~= false,
+    customTextSize = math.max(8, tonumber(model.customTextSize) or 12),
+    customTextFont = tostring(model.customTextFont or "friz"),
     timerAnchor = tostring(model.timerAnchor or "BOTTOM"),
     timerOffsetX = tonumber(model.timerOffsetX) or 0,
     timerOffsetY = tonumber(model.timerOffsetY) or -1,
@@ -297,8 +332,24 @@ function B:NewDraft(auraId)
     barWidth = 94,
     barHeight = 16,
     showTimerText = true,
+    timerTextSize = 12,
+    timerTextFont = "friz",
     barColor = "",
+    barGradientEnabled = false,
+    barColor2 = "",
     barSide = "right",
+    showNameText = true,
+    nameTextSize = 12,
+    nameTextFont = "friz",
+    showCustomText = true,
+    customTextSize = 12,
+    customTextFont = "friz",
+    stylePreset = "",
+    visualStates = (ns.VisualStyle and ns.VisualStyle.GetDefaults and ns.VisualStyle:GetDefaults()) or {
+      onGain = "off",
+      lowTime = "warning",
+      maxStacks = "gold",
+    },
     produceTriggers = {},
     notes = "",
     debug = false,
@@ -352,9 +403,21 @@ function B:ToSettingsDataModel(draft)
     barWidth = defaultBarWidth(draft.barWidth),
     barHeight = defaultBarHeight(draft.barHeight),
     showTimerText = draft.showTimerText ~= false,
+    timerTextSize = math.max(8, tonumber(draft.timerTextSize) or 12),
+    timerTextFont = tostring(draft.timerTextFont or "friz"),
     barColor = draft.barColor or "",
+    barGradientEnabled = draft.barGradientEnabled == true,
+    barColor2 = draft.barColor2 or "",
     barSide = tostring(draft.barSide or "right"),
+    showNameText = draft.showNameText ~= false,
+    nameTextSize = math.max(8, tonumber(draft.nameTextSize) or 12),
+    nameTextFont = tostring(draft.nameTextFont or "friz"),
+    showCustomText = draft.showCustomText ~= false,
+    customTextSize = math.max(8, tonumber(draft.customTextSize) or 12),
+    customTextFont = tostring(draft.customTextFont or "friz"),
     customText = draft.customText or "",
+    stylePreset = normalizeStylePreset(draft.stylePreset),
+    visualStates = (ns.VisualStyle and ns.VisualStyle.CloneStates and ns.VisualStyle:CloneStates(draft.visualStates)) or nil,
     resourceConditionEnabled = draft.resourceConditionEnabled == true,
     resourceMinPct = tonumber(draft.resourceMinPct) or 0,
     resourceMaxPct = tonumber(draft.resourceMaxPct) or 100,
@@ -380,7 +443,7 @@ function B:ToSettingsDataModel(draft)
 end
 
 function B:ToRuleModel(draft, auraSpellID)
-  if self:IsDirectAuraTracking(draft) or self:IsEstimatedTargetDebuffTracking(draft) then
+  if self:IsCooldownTracking(draft) or self:IsDirectAuraTracking(draft) or self:IsEstimatedTargetDebuffTracking(draft) then
     return nil
   end
 
@@ -431,7 +494,7 @@ function B:ToRuleModel(draft, auraSpellID)
 end
 
 function B:BuildProduceRuleModels(draft, auraSpellID)
-  if self:IsDirectAuraTracking(draft) or self:IsEstimatedTargetDebuffTracking(draft) then
+  if self:IsCooldownTracking(draft) or self:IsDirectAuraTracking(draft) or self:IsEstimatedTargetDebuffTracking(draft) then
     return {}
   end
 

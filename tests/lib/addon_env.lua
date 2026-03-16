@@ -71,6 +71,7 @@ return function()
       [1004] = true,
     },
     auraByUnit = {},
+    cooldownsBySpell = {},
     refreshCount = 0,
     playerCastingSpellID = nil,
   }
@@ -88,6 +89,10 @@ return function()
 
   function env.setPlayerCasting(spellID)
     env.playerCastingSpellID = tonumber(spellID)
+  end
+
+  function env.setCooldown(spellID, data)
+    env.cooldownsBySpell[tonumber(spellID)] = data
   end
 
   _G.GetTime = function()
@@ -227,9 +232,39 @@ return function()
       local info = spells.byID[tonumber(spellID)]
       return info and info.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
     end,
+    SelectBestTexture = function(_, primary, fallback, defaultValue)
+      return primary or fallback or defaultValue or "Interface\\Icons\\INV_Misc_QuestionMark"
+    end,
+    GetDisplayTextureForItem = function(_, item)
+      if type(item) == "table" and tonumber(item.spellID) then
+        return spells.byID[tonumber(item.spellID)] and spells.byID[tonumber(item.spellID)].texture or "Interface\\Icons\\INV_Misc_QuestionMark"
+      end
+      return "Interface\\Icons\\INV_Misc_QuestionMark"
+    end,
     GetAuraBySpellID = function(_, unit, spellID)
       local unitAuras = env.auraByUnit[unit]
       return unitAuras and unitAuras[tonumber(spellID)] or nil
+    end,
+    GetAuraTiming = function(_, aura)
+      if type(aura) ~= "table" then
+        return nil, nil
+      end
+      return tonumber(aura.expirationTime), tonumber(aura.duration)
+    end,
+    GetAuraApplications = function(_, aura)
+      if type(aura) ~= "table" then
+        return 0
+      end
+      return tonumber(aura.applications) or 0
+    end,
+    GetSourceLabel = function(_, aura)
+      return type(aura) == "table" and tostring(aura.sourceLabel or "") or ""
+    end,
+    GetAuraInstanceID = function(_, aura)
+      return type(aura) == "table" and tonumber(aura.instanceID) or nil
+    end,
+    CanComputeRemaining = function(_, aura)
+      return type(aura) == "table" and tonumber(aura.expirationTime) ~= nil and tonumber(aura.duration) ~= nil
     end,
     IsSecretCooldownsRestricted = function()
       return false
@@ -237,8 +272,8 @@ return function()
     IsRestrictionActive = function()
       return false
     end,
-    GetSpellCooldownData = function()
-      return nil
+    GetSpellCooldownData = function(_, spellID)
+      return env.cooldownsBySpell[tonumber(spellID)] or nil
     end,
   }
 
@@ -268,6 +303,7 @@ return function()
   }
 
   loadAddonFile("AuraLite/Utils.lua", ns)
+  loadAddonFile("AuraLite/VisualStyleEngine.lua", ns)
   loadAddonFile("AuraLite/AuraWatchlistRegistry.lua", ns)
   loadAddonFile("AuraLite/SettingsData.lua", ns)
   loadAddonFile("AuraLite/ProcRuleEngine.lua", ns)

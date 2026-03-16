@@ -19,6 +19,7 @@ MediaLibrary.lua
 StatusbarTextures.lua
 UISkin.lua
 PresetLibrary.lua
+VisualStyleEngine.lua
 ProfileManager.lua
 DebugManager.lua
 SoundManager.lua
@@ -49,6 +50,10 @@ UI\Repositories\RuleRepository.lua
 UI\Widgets\RuleBuilderWidget.lua
 UI\Widgets\ConditionTreeWidget.lua
 UI\Widgets\TriggerListWidget.lua
+UI\Widgets\HelpIconWidget.lua
+UI\Widgets\SectionHeaderWidget.lua
+UI\Widgets\DropTargetWidget.lua
+UI\Widgets\GroupBrowserWidget.lua
 UI\Widgets\PreviewPanelWidget.lua
 UI\Panels\AuraEditorPanel.lua
 UI\Panels\AuraListPanel.lua

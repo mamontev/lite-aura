@@ -12,18 +12,18 @@ local validThemes = {
 
 local palettes = {
   modern = {
-    windowBG = { 0.09, 0.12, 0.18, 0.90 },
-    windowBorder = { 0.28, 0.48, 0.68, 0.90 },
-    sectionBG = { 0.12, 0.16, 0.23, 0.84 },
-    sectionBorder = { 0.24, 0.36, 0.50, 0.82 },
-    sectionAccent = { 0.42, 0.72, 0.88, 0.84 },
-    textureAlpha = 0.10,
-    buttonBG = { 0.15, 0.20, 0.28, 0.92 },
-    buttonHover = { 0.20, 0.28, 0.38, 0.96 },
-    buttonBorder = { 0.36, 0.56, 0.74, 0.82 },
-    rowNormal = { 0.10, 0.14, 0.21, 0.72 },
-    rowHover = { 0.16, 0.22, 0.31, 0.90 },
-    rowSelected = { 0.20, 0.30, 0.42, 0.94 },
+    windowBG = { 0.045, 0.050, 0.058, 0.30 },
+    windowBorder = { 0.20, 0.23, 0.28, 0.22 },
+    sectionBG = { 0.085, 0.095, 0.110, 0.14 },
+    sectionBorder = { 0.20, 0.23, 0.28, 0.18 },
+    sectionAccent = { 0.62, 0.72, 0.88, 0.16 },
+    textureAlpha = 0.004,
+    buttonBG = { 0.12, 0.14, 0.17, 0.88 },
+    buttonHover = { 0.17, 0.20, 0.24, 0.94 },
+    buttonBorder = { 0.30, 0.35, 0.42, 0.72 },
+    rowNormal = { 0.13, 0.15, 0.18, 0.46 },
+    rowHover = { 0.18, 0.21, 0.25, 0.62 },
+    rowSelected = { 0.24, 0.30, 0.38, 0.74 },
   },
   sky = {
     windowBG = { 0.17, 0.26, 0.38, 0.86 },
@@ -78,7 +78,7 @@ local function resolveCustomPath(path)
   if ns.AuraAPI and ns.AuraAPI.ResolveCustomTexturePath then
     return ns.AuraAPI:ResolveCustomTexturePath(normalized)
   end
-  if normalized:lower():find("^interface\\", 1, true) then
+  if normalized:lower():match("^interface\\") then
     return normalized
   end
   if normalized:find("\\", 1, true) then
@@ -173,6 +173,16 @@ local function shiftColor(color, delta, alphaOverride)
   }
 end
 
+local function getClassAccentColor()
+  local _, classToken = UnitClass and UnitClass("player") or nil
+  local color = classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken] or nil
+  if color then
+    return color.r or 0.94, color.g or 0.78, color.b or 0.18
+  end
+  local p = S:GetPalette()
+  return p.sectionAccent[1], p.sectionAccent[2], p.sectionAccent[3]
+end
+
 local function getButtonVariantPalette(base, variant)
   variant = tostring(variant or "default")
   if variant == "primary" then
@@ -193,27 +203,27 @@ local function getButtonVariantPalette(base, variant)
     }
   elseif variant == "ghost" then
     return {
-      bg = { base.sectionBG[1], base.sectionBG[2], base.sectionBG[3], 0.38 },
-      hover = { base.sectionBG[1] + 0.06, base.sectionBG[2] + 0.06, base.sectionBG[3] + 0.06, 0.58 },
-      pressed = { base.sectionBG[1] + 0.03, base.sectionBG[2] + 0.03, base.sectionBG[3] + 0.03, 0.72 },
-      border = { base.sectionBorder[1], base.sectionBorder[2], base.sectionBorder[3], 0.55 },
-      text = { 0.90, 0.96, 1.0 },
+      bg = { base.sectionBG[1], base.sectionBG[2], base.sectionBG[3], 0.48 },
+      hover = { base.sectionBG[1] + 0.04, base.sectionBG[2] + 0.04, base.sectionBG[3] + 0.04, 0.66 },
+      pressed = { base.sectionBG[1] + 0.02, base.sectionBG[2] + 0.02, base.sectionBG[3] + 0.02, 0.78 },
+      border = { base.sectionBorder[1], base.sectionBorder[2], base.sectionBorder[3], 0.48 },
+      text = { 0.88, 0.91, 0.96 },
     }
   elseif variant == "tab" then
     return {
-      bg = { base.sectionBG[1], base.sectionBG[2], base.sectionBG[3], 0.28 },
-      hover = { base.sectionBG[1] + 0.04, base.sectionBG[2] + 0.04, base.sectionBG[3] + 0.04, 0.52 },
-      pressed = { base.sectionBG[1] + 0.02, base.sectionBG[2] + 0.02, base.sectionBG[3] + 0.02, 0.70 },
-      border = { base.sectionBorder[1], base.sectionBorder[2], base.sectionBorder[3], 0.40 },
-      text = { 0.84, 0.90, 0.97 },
+      bg = { base.sectionBG[1], base.sectionBG[2], base.sectionBG[3], 0.44 },
+      hover = { base.buttonHover[1], base.buttonHover[2], base.buttonHover[3], 0.72 },
+      pressed = { base.sectionBG[1], base.sectionBG[2], base.sectionBG[3], 0.82 },
+      border = { base.buttonBorder[1], base.buttonBorder[2], base.buttonBorder[3], 0.55 },
+      text = { 0.88, 0.91, 0.96 },
     }
   elseif variant == "segment" then
     return {
-      bg = { base.buttonBG[1], base.buttonBG[2], base.buttonBG[3], 0.62 },
-      hover = { base.buttonHover[1], base.buttonHover[2], base.buttonHover[3], 0.80 },
+      bg = { base.buttonBG[1], base.buttonBG[2], base.buttonBG[3], 0.68 },
+      hover = { base.buttonHover[1], base.buttonHover[2], base.buttonHover[3], 0.86 },
       pressed = { base.sectionBG[1], base.sectionBG[2], base.sectionBG[3], 0.92 },
       border = { base.buttonBorder[1], base.buttonBorder[2], base.buttonBorder[3], 0.60 },
-      text = { 0.92, 0.96, 1.0 },
+      text = { 0.90, 0.93, 0.97 },
     }
   end
 
@@ -245,9 +255,9 @@ local function applyButtonState(button, state)
 
   if button._alButtonSelected then
     bg = palette.hover
-    border = shiftColor(palette.border, 0.04, 0.90)
-    text = { 0.96, 0.98, 1.0 }
-    accent = shiftColor(border, 0.02, 0.72)
+    border = shiftColor(palette.border, 0.04, 0.78)
+    text = { 0.98, 0.98, 0.99 }
+    accent = shiftColor(border, 0.02, 0.82)
     shadowAlpha = 0.18
   elseif state == "pressed" then
     bg = palette.pressed
@@ -256,7 +266,7 @@ local function applyButtonState(button, state)
   elseif state == "hover" then
     bg = palette.hover
     border = shiftColor(palette.border, 0.02, 0.82)
-    accent = shiftColor(border, 0.00, 0.46)
+    accent = shiftColor(border, 0.00, 0.56)
     shadowAlpha = 0.16
   end
 
@@ -273,10 +283,10 @@ local function applyButtonState(button, state)
     button._alButtonSkin.accent:SetColorTexture(accent[1], accent[2], accent[3], accent[4] or 0.95)
   end
   if button._alButtonSkin.bottomShade then
-    button._alButtonSkin.bottomShade:SetColorTexture(0, 0, 0, state == "pressed" and 0.06 or 0.14)
+    button._alButtonSkin.bottomShade:SetColorTexture(0, 0, 0, state == "pressed" and 0.04 or 0.10)
   end
   if button._alButtonSkin.gloss then
-    button._alButtonSkin.gloss:SetAlpha(state == "pressed" and 0.01 or 0.03)
+    button._alButtonSkin.gloss:SetAlpha(state == "pressed" and 0.00 or 0.02)
   end
 
   local fs = getButtonFontString(button)
@@ -292,14 +302,92 @@ function S:ApplyWindow(frame)
     return
   end
   local p = self:GetPalette()
-  applyBackdrop(frame, p.windowBG, p.windowBorder)
-  applyFillTexture(frame, "_alWindowFill", self:GetResolvedTexturePath(), p.textureAlpha)
+  applyBackdrop(frame, {
+    p.windowBG[1],
+    p.windowBG[2],
+    p.windowBG[3],
+    math.max(0.92, p.windowBG[4] or 0.92),
+  }, {
+    p.windowBorder[1],
+    p.windowBorder[2],
+    p.windowBorder[3],
+    math.max(0.78, p.windowBorder[4] or 0.78),
+  })
+  applyFillTexture(frame, "_alWindowFill", self:GetResolvedTexturePath(), math.max(0.04, p.textureAlpha))
   if frame.Bg then
     frame.Bg:Hide()
   end
   if frame.NineSlice then
-    frame.NineSlice:SetAlpha(0.12)
+    frame.NineSlice:SetAlpha(0.18)
   end
+end
+
+function S:ApplyDialog(frame)
+  if not frame then
+    return
+  end
+  local p = self:GetPalette()
+  applyBackdrop(frame, {
+    p.windowBG[1],
+    p.windowBG[2],
+    p.windowBG[3],
+    0.98,
+  }, {
+    p.windowBorder[1],
+    p.windowBorder[2],
+    p.windowBorder[3],
+    0.84,
+  })
+  applyFillTexture(frame, "_alDialogFill", self:GetResolvedTexturePath(), math.max(0.05, p.textureAlpha * 0.95))
+
+  if not frame._alDialogShade then
+    frame._alDialogShade = frame:CreateTexture(nil, "BACKGROUND")
+    frame._alDialogShade:SetPoint("TOPLEFT", 1, -1)
+    frame._alDialogShade:SetPoint("BOTTOMRIGHT", -1, 1)
+    frame._alDialogShade:SetTexture("Interface\\Buttons\\WHITE8x8")
+  end
+  frame._alDialogShade:SetColorTexture(0.01, 0.01, 0.01, 0.18)
+
+  if not frame._alDialogTopLine then
+    frame._alDialogTopLine = frame:CreateTexture(nil, "ARTWORK")
+    frame._alDialogTopLine:SetPoint("TOPLEFT", 12, -12)
+    frame._alDialogTopLine:SetPoint("TOPRIGHT", -12, -12)
+    frame._alDialogTopLine:SetHeight(1)
+    frame._alDialogTopLine:SetTexture("Interface\\Buttons\\WHITE8x8")
+  end
+
+  local ar, ag, ab = getClassAccentColor()
+  frame._alDialogTopLine:SetColorTexture(ar, ag, ab, 0.34)
+end
+
+function S:ApplyInsetPanel(frame)
+  if not frame then
+    return
+  end
+  local p = self:GetPalette()
+  applyBackdrop(frame, {
+    p.sectionBG[1] - 0.01,
+    p.sectionBG[2] - 0.01,
+    p.sectionBG[3] - 0.01,
+    0.42,
+  }, {
+    p.sectionBorder[1],
+    p.sectionBorder[2],
+    p.sectionBorder[3],
+    0.56,
+  })
+  applyFillTexture(frame, "_alInsetFill", self:GetResolvedTexturePath(), math.max(0.04, p.textureAlpha * 0.45))
+
+  if not frame._alInsetAccent then
+    frame._alInsetAccent = frame:CreateTexture(nil, "ARTWORK")
+    frame._alInsetAccent:SetPoint("TOPLEFT", 8, -8)
+    frame._alInsetAccent:SetPoint("TOPRIGHT", -8, -8)
+    frame._alInsetAccent:SetHeight(1)
+    frame._alInsetAccent:SetTexture("Interface\\Buttons\\WHITE8x8")
+  end
+
+  local ar, ag, ab = getClassAccentColor()
+  frame._alInsetAccent:SetColorTexture(ar, ag, ab, 0.14)
 end
 
 function S:ApplySection(frame)
@@ -307,8 +395,18 @@ function S:ApplySection(frame)
     return
   end
   local p = self:GetPalette()
-  applyBackdrop(frame, p.sectionBG, p.sectionBorder)
-  applyFillTexture(frame, "_alSectionFill", self:GetResolvedTexturePath(), p.textureAlpha)
+  applyBackdrop(frame, {
+    p.sectionBG[1],
+    p.sectionBG[2],
+    p.sectionBG[3],
+    math.max(0.46, p.sectionBG[4] or 0.46),
+  }, {
+    p.sectionBorder[1],
+    p.sectionBorder[2],
+    p.sectionBorder[3],
+    math.max(0.54, p.sectionBorder[4] or 0.54),
+  })
+  applyFillTexture(frame, "_alSectionFill", self:GetResolvedTexturePath(), math.max(0.04, p.textureAlpha * 0.8))
 
   if not frame._alSectionAccent then
     frame._alSectionAccent = frame:CreateTexture(nil, "ARTWORK")
@@ -316,7 +414,8 @@ function S:ApplySection(frame)
     frame._alSectionAccent:SetPoint("TOPLEFT", 2, -2)
     frame._alSectionAccent:SetPoint("TOPRIGHT", -2, -2)
   end
-  frame._alSectionAccent:SetColorTexture(p.sectionAccent[1], p.sectionAccent[2], p.sectionAccent[3], p.sectionAccent[4])
+  local ar, ag, ab = getClassAccentColor()
+  frame._alSectionAccent:SetColorTexture(ar, ag, ab, p.sectionAccent[4])
 end
 
 function S:ApplyButton(button)
@@ -353,14 +452,14 @@ function S:ApplyButton(button)
     skin.bg:SetTexture("Interface\\Buttons\\WHITE8x8")
 
     skin.gloss = button:CreateTexture(nil, "ARTWORK")
-    skin.gloss:SetPoint("TOPLEFT", 2, -2)
-    skin.gloss:SetPoint("TOPRIGHT", -2, -2)
-    skin.gloss:SetHeight(math.max(7, math.floor((button:GetHeight() or 24) * 0.40)))
+    skin.gloss:SetPoint("TOPLEFT", 1, -1)
+    skin.gloss:SetPoint("TOPRIGHT", -1, -1)
+    skin.gloss:SetHeight(math.max(4, math.floor((button:GetHeight() or 24) * 0.20)))
     skin.gloss:SetTexture("Interface\\Buttons\\WHITE8x8")
     if skin.gloss.SetGradientAlpha then
-      skin.gloss:SetGradientAlpha("VERTICAL", 1, 1, 1, 0.14, 1, 1, 1, 0.02)
+      skin.gloss:SetGradientAlpha("VERTICAL", 1, 1, 1, 0.06, 1, 1, 1, 0.00)
     else
-      skin.gloss:SetColorTexture(1, 1, 1, 0.08)
+      skin.gloss:SetColorTexture(1, 1, 1, 0.03)
     end
 
     skin.accent = button:CreateTexture(nil, "ARTWORK")
@@ -372,7 +471,7 @@ function S:ApplyButton(button)
     skin.bottomShade = button:CreateTexture(nil, "ARTWORK")
     skin.bottomShade:SetPoint("BOTTOMLEFT", 2, 2)
     skin.bottomShade:SetPoint("BOTTOMRIGHT", -2, 2)
-    skin.bottomShade:SetHeight(math.max(5, math.floor((button:GetHeight() or 24) * 0.22)))
+    skin.bottomShade:SetHeight(math.max(4, math.floor((button:GetHeight() or 24) * 0.16)))
     skin.bottomShade:SetTexture("Interface\\Buttons\\WHITE8x8")
 
     skin.border = button:CreateTexture(nil, "BORDER")
@@ -459,10 +558,20 @@ function S:ApplyEditBox(edit)
     edit._alEditBorder:SetPoint("TOPLEFT", -4, 4)
     edit._alEditBorder:SetPoint("BOTTOMRIGHT", 4, -4)
     edit._alEditBorder:SetTexture("Interface\\Buttons\\WHITE8x8")
+
+    edit._alEditAccent = edit:CreateTexture(nil, "ARTWORK")
+    edit._alEditAccent:SetPoint("TOPLEFT", -3, 3)
+    edit._alEditAccent:SetPoint("TOPRIGHT", 3, 3)
+    edit._alEditAccent:SetHeight(1)
+    edit._alEditAccent:SetTexture("Interface\\Buttons\\WHITE8x8")
   end
 
-  edit._alEditBG:SetVertexColor(p.sectionBG[1], p.sectionBG[2], p.sectionBG[3], 0.9)
-  edit._alEditBorder:SetVertexColor(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.42)
+  do
+    local ar, ag, ab = getClassAccentColor()
+    edit._alEditBG:SetVertexColor(p.sectionBG[1], p.sectionBG[2], p.sectionBG[3], 0.94)
+    edit._alEditBorder:SetVertexColor(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.56)
+    edit._alEditAccent:SetVertexColor(ar, ag, ab, 0.75)
+  end
 end
 
 function S:ApplyDropdown(dropdown)
@@ -484,26 +593,52 @@ function S:ApplyDropdown(dropdown)
   end
   if not dropdown._alDropBG then
     dropdown._alDropBG = dropdown:CreateTexture(nil, "BACKGROUND")
-    dropdown._alDropBG:SetPoint("TOPLEFT", 16, -3)
-    dropdown._alDropBG:SetPoint("BOTTOMRIGHT", -18, 8)
+    dropdown._alDropBG:SetPoint("TOPLEFT", 18, -4)
+    dropdown._alDropBG:SetPoint("BOTTOMRIGHT", -22, 8)
     dropdown._alDropBG:SetTexture("Interface\\Buttons\\WHITE8x8")
 
     dropdown._alDropBorder = dropdown:CreateTexture(nil, "BORDER")
-    dropdown._alDropBorder:SetPoint("TOPLEFT", 16, -3)
-    dropdown._alDropBorder:SetPoint("BOTTOMRIGHT", -18, 8)
+    dropdown._alDropBorder:SetPoint("TOPLEFT", 18, -4)
+    dropdown._alDropBorder:SetPoint("BOTTOMRIGHT", -22, 8)
     dropdown._alDropBorder:SetTexture("Interface\\Buttons\\WHITE8x8")
 
+    dropdown._alDropInner = dropdown:CreateTexture(nil, "BORDER")
+    dropdown._alDropInner:SetPoint("TOPLEFT", 19, -5)
+    dropdown._alDropInner:SetPoint("BOTTOMRIGHT", -23, 9)
+    dropdown._alDropInner:SetTexture("Interface\\Buttons\\WHITE8x8")
+
+    dropdown._alDropShade = dropdown:CreateTexture(nil, "ARTWORK")
+    dropdown._alDropShade:SetPoint("TOPLEFT", 19, -5)
+    dropdown._alDropShade:SetPoint("BOTTOMRIGHT", -23, 9)
+    dropdown._alDropShade:SetTexture("Interface\\Buttons\\WHITE8x8")
+
     dropdown._alDropAccent = dropdown:CreateTexture(nil, "ARTWORK")
-    dropdown._alDropAccent:SetPoint("TOPLEFT", 17, -4)
-    dropdown._alDropAccent:SetPoint("TOPRIGHT", -19, -4)
+    dropdown._alDropAccent:SetPoint("TOPLEFT", 24, -6)
+    dropdown._alDropAccent:SetPoint("TOPRIGHT", -28, -6)
     dropdown._alDropAccent:SetHeight(1)
     dropdown._alDropAccent:SetTexture("Interface\\Buttons\\WHITE8x8")
+
+    dropdown._alDropBottom = dropdown:CreateTexture(nil, "ARTWORK")
+    dropdown._alDropBottom:SetPoint("BOTTOMLEFT", 24, 10)
+    dropdown._alDropBottom:SetPoint("BOTTOMRIGHT", -28, 10)
+    dropdown._alDropBottom:SetHeight(1)
+    dropdown._alDropBottom:SetTexture("Interface\\Buttons\\WHITE8x8")
   end
-  dropdown._alDropBG:SetColorTexture(p.sectionBG[1], p.sectionBG[2], p.sectionBG[3], 0.82)
-  dropdown._alDropBorder:SetColorTexture(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.55)
-  dropdown._alDropAccent:SetColorTexture(p.sectionAccent[1], p.sectionAccent[2], p.sectionAccent[3], 0.70)
+  dropdown._alDropBG:SetColorTexture(p.sectionBG[1] + 0.01, p.sectionBG[2] + 0.01, p.sectionBG[3] + 0.015, 0.96)
+  dropdown._alDropBorder:SetColorTexture(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.82)
+  dropdown._alDropInner:SetColorTexture(1, 1, 1, 0.03)
+  dropdown._alDropShade:SetColorTexture(0, 0, 0, 0.10)
+  do
+    local ar, ag, ab = getClassAccentColor()
+    dropdown._alDropAccent:SetColorTexture(ar, ag, ab, 0.32)
+    dropdown._alDropBottom:SetColorTexture(ar, ag, ab, 0.10)
+  end
   if dropdown.Text then
-    dropdown.Text:SetTextColor(0.95, 0.97, 1.0)
+    dropdown.Text:ClearAllPoints()
+    dropdown.Text:SetPoint("LEFT", dropdown, "LEFT", 30, 2)
+    dropdown.Text:SetPoint("RIGHT", dropdown, "RIGHT", -44, 2)
+    dropdown.Text:SetJustifyH("LEFT")
+    dropdown.Text:SetTextColor(0.94, 0.96, 0.98)
     dropdown.Text:SetShadowOffset(1, -1)
   end
   if dropdown.Button then
@@ -515,8 +650,8 @@ function S:ApplyDropdown(dropdown)
     if btn.PushedTexture then btn.PushedTexture:SetAlpha(0) end
     if btn.HighlightTexture then btn.HighlightTexture:SetAlpha(0) end
     btn:ClearAllPoints()
-    btn:SetPoint("RIGHT", dropdown, "RIGHT", -18, -2)
-    btn:SetSize(18, 18)
+    btn:SetPoint("RIGHT", dropdown, "RIGHT", -23, -2)
+    btn:SetSize(22, 22)
 
     if not btn._alDropBtnBG then
       btn._alDropBtnBG = btn:CreateTexture(nil, "BORDER")
@@ -528,12 +663,17 @@ function S:ApplyDropdown(dropdown)
       btn._alDropBtnBorder:SetPoint("BOTTOMRIGHT", 0, 0)
       btn._alDropBtnBorder:SetTexture("Interface\\Buttons\\WHITE8x8")
 
+      btn._alDropBtnInner = btn:CreateTexture(nil, "ARTWORK")
+      btn._alDropBtnInner:SetPoint("TOPLEFT", 1, -1)
+      btn._alDropBtnInner:SetPoint("BOTTOMRIGHT", -1, 1)
+      btn._alDropBtnInner:SetTexture("Interface\\Buttons\\WHITE8x8")
+
       btn._alDropBtnGlyph = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
       btn._alDropBtnGlyph:SetPoint("CENTER", 0, -1)
       btn._alDropBtnGlyph:SetText("v")
 
       btn:HookScript("OnEnter", function(selfBtn)
-        selfBtn._alDropBtnBG:SetColorTexture(p.buttonHover[1], p.buttonHover[2], p.buttonHover[3], 0.92)
+        selfBtn._alDropBtnBG:SetColorTexture(p.buttonHover[1], p.buttonHover[2], p.buttonHover[3], 0.96)
       end)
       btn:HookScript("OnLeave", function(selfBtn)
         selfBtn._alDropBtnBG:SetColorTexture(p.buttonBG[1], p.buttonBG[2], p.buttonBG[3], 0.88)
@@ -552,7 +692,8 @@ function S:ApplyDropdown(dropdown)
 
     btn._alDropBtnBG:SetColorTexture(p.buttonBG[1], p.buttonBG[2], p.buttonBG[3], 0.88)
     btn._alDropBtnBorder:SetColorTexture(p.buttonBorder[1], p.buttonBorder[2], p.buttonBorder[3], 0.72)
-    btn._alDropBtnGlyph:SetTextColor(0.92, 0.96, 1.0)
+    btn._alDropBtnInner:SetColorTexture(1, 1, 1, 0.03)
+    btn._alDropBtnGlyph:SetTextColor(0.90, 0.93, 0.97)
   end
 end
 
@@ -644,13 +785,19 @@ function S:ApplyClickableRow(row, variant)
   end
 
   if row._alRowVariant == "header" then
-    row._alRowBG:SetColorTexture(p.sectionBG[1], p.sectionBG[2], p.sectionBG[3], 0.90)
-    row._alRowBorder:SetColorTexture(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.70)
-    row._alRowAccent:SetColorTexture(p.sectionAccent[1], p.sectionAccent[2], p.sectionAccent[3], 0.85)
+    row._alRowBG:SetColorTexture(p.sectionBG[1], p.sectionBG[2], p.sectionBG[3], 0.94)
+    row._alRowBorder:SetColorTexture(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.42)
+    do
+      local ar, ag, ab = getClassAccentColor()
+      row._alRowAccent:SetColorTexture(ar, ag, ab, 0.28)
+    end
   else
     row._alRowBG:SetColorTexture(p.rowNormal[1], p.rowNormal[2], p.rowNormal[3], p.rowNormal[4])
-    row._alRowBorder:SetColorTexture(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.32)
-    row._alRowAccent:SetColorTexture(p.sectionAccent[1], p.sectionAccent[2], p.sectionAccent[3], 0.35)
+    row._alRowBorder:SetColorTexture(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.20)
+    do
+      local ar, ag, ab = getClassAccentColor()
+      row._alRowAccent:SetColorTexture(ar, ag, ab, 0.14)
+    end
   end
 end
 
@@ -668,16 +815,19 @@ function S:SetClickableRowState(row, state)
   local accentAlpha = 0.35
   if state == "selected" then
     color = p.rowSelected
-    borderAlpha = 0.76
-    accentAlpha = 0.95
+    borderAlpha = 0.44
+    accentAlpha = 0.52
   elseif state == "hover" then
     color = p.rowHover
-    borderAlpha = 0.52
-    accentAlpha = 0.72
+    borderAlpha = 0.32
+    accentAlpha = 0.34
   end
   row._alRowBG:SetColorTexture(color[1], color[2], color[3], color[4])
   row._alRowBorder:SetColorTexture(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], borderAlpha)
-  row._alRowAccent:SetColorTexture(p.sectionAccent[1], p.sectionAccent[2], p.sectionAccent[3], accentAlpha)
+  do
+    local ar, ag, ab = getClassAccentColor()
+    row._alRowAccent:SetColorTexture(ar, ag, ab, accentAlpha)
+  end
 end
 
 function S:ApplyCloseButton(button)

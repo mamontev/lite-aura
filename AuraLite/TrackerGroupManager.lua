@@ -283,13 +283,110 @@ local function updateCustomText(icon, row, remaining)
   if not icon or not row then
     return
   end
-  if type(row.customText) ~= "string" or row.customText == "" then
+  if row.showCustomText == false or type(row.customText) ~= "string" or row.customText == "" then
     icon.customText:SetText("")
     icon.customText:Hide()
     return
   end
   icon.customText:SetText(buildCustomText(row, remaining))
   icon.customText:SetShown(icon.customText:GetText() ~= "")
+end
+
+local function resolveCustomFontPath(token)
+  token = tostring(token or "friz")
+  local lowered = token:lower()
+  if lowered:match("^lsm:") and ns.Media and ns.Media.Fetch then
+    local resolved = ns.Media:Fetch("font", token:sub(5))
+    if type(resolved) == "string" and resolved ~= "" then
+      return resolved
+    end
+  end
+  token = lowered
+  if token == "arial" then
+    return "Fonts\\ARIALN.TTF"
+  elseif token == "blei" then
+    return "Fonts\\BLEI00D.TTF"
+  elseif token == "font2002" then
+    return "Fonts\\2002.TTF"
+  elseif token == "arhei" then
+    return "Fonts\\ARHei.ttf"
+  elseif token == "morpheus" then
+    return "Fonts\\MORPHEUS.TTF"
+  elseif token == "skurri" then
+    return "Fonts\\skurri.ttf"
+  end
+  return "Fonts\\FRIZQT__.TTF"
+end
+
+local parseColorCSV
+
+local function applyStatusBarGradient(bar, row, r1, g1, b1)
+  if not bar then
+    return
+  end
+  local texture = bar.GetStatusBarTexture and bar:GetStatusBarTexture() or nil
+  local useGradient = row and row.barGradientEnabled == true
+  local r2, g2, b2 = parseColorCSV(row and row.barColor2 or "")
+  local orientation = "HORIZONTAL"
+  if bar.GetOrientation and tostring(bar:GetOrientation() or "") == "VERTICAL" then
+    orientation = "VERTICAL"
+  end
+  if texture and useGradient and r2 and g2 and b2 then
+    texture:SetVertexColor(1, 1, 1, 1)
+    if bar.SetStatusBarColor then
+      bar:SetStatusBarColor(1, 1, 1, 0.95)
+    end
+    if texture.SetGradientAlpha then
+      texture:SetGradientAlpha(orientation, r1, g1, b1, 0.95, r2, g2, b2, 0.95)
+      return
+    end
+  end
+  if texture and texture.SetGradientAlpha then
+    texture:SetGradientAlpha(orientation, r1, g1, b1, 0.95, r1, g1, b1, 0.95)
+  elseif texture then
+    texture:SetVertexColor(r1, g1, b1, 0.95)
+  end
+  if bar.SetStatusBarColor then
+    bar:SetStatusBarColor(r1, g1, b1, 0.95)
+  end
+end
+
+local function setGlowVisual(icon, style, fallbackAlpha)
+  if not icon then
+    return
+  end
+  local glowStyle = tostring(style and style.glowStyle or "flat")
+  local glowAlpha = tonumber(style and style.glowAlpha) or tonumber(fallbackAlpha) or 0
+  local glowR = tonumber(style and style.glowR) or 1
+  local glowG = tonumber(style and style.glowG) or 1
+  local glowB = tonumber(style and style.glowB) or 1
+
+  if icon.lowGlow then
+    if glowStyle == "flat" or glowStyle == "pixel" then
+      icon.lowGlow:SetColorTexture(glowR, glowG, glowB, glowAlpha)
+    else
+      icon.lowGlow:SetAlpha(0)
+    end
+  end
+
+  if icon.procGlow then
+    icon.procGlow:SetVertexColor(glowR, glowG, glowB, glowAlpha)
+    icon.procGlow:SetShown(glowStyle == "button" and glowAlpha > 0.01)
+  end
+
+  if icon.shineGlow then
+    icon.shineGlow:SetVertexColor(glowR, glowG, glowB, glowAlpha)
+    icon.shineGlow:SetShown(glowStyle == "shine" and glowAlpha > 0.01)
+  end
+
+  if icon.borderEdges then
+    local borderAlpha = (glowStyle == "pixel") and math.min(1, glowAlpha + 0.25) or (style and style.borderA) or 0.95
+    for i = 1, #icon.borderEdges do
+      if glowStyle == "pixel" then
+        icon.borderEdges[i]:SetColorTexture(glowR, glowG, glowB, borderAlpha)
+      end
+    end
+  end
 end
 
 local function setIconBorderColor(icon, r, g, b, a)
@@ -317,7 +414,7 @@ local function normalizeSizeOverride(value, fallback, minValue, maxValue)
   return n
 end
 
-local function parseColorCSV(text)
+parseColorCSV = function(text)
   text = tostring(text or "")
   if text == "" then
     return nil
@@ -501,6 +598,22 @@ local function createIcon(parent)
   f.lowGlow = f:CreateTexture(nil, "OVERLAY")
   f.lowGlow:SetAllPoints()
   f.lowGlow:SetColorTexture(1, 0.15, 0.1, 0.0)
+
+  f.procGlow = f:CreateTexture(nil, "OVERLAY")
+  f.procGlow:SetPoint("TOPLEFT", -18, 18)
+  f.procGlow:SetPoint("BOTTOMRIGHT", 18, -18)
+  f.procGlow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+  f.procGlow:SetBlendMode("ADD")
+  f.procGlow:SetAlpha(0)
+  f.procGlow:Hide()
+
+  f.shineGlow = f:CreateTexture(nil, "OVERLAY")
+  f.shineGlow:SetPoint("TOPLEFT", -6, 6)
+  f.shineGlow:SetPoint("BOTTOMRIGHT", 6, -6)
+  f.shineGlow:SetTexture("Interface\\Cooldown\\star4")
+  f.shineGlow:SetBlendMode("ADD")
+  f.shineGlow:SetAlpha(0)
+  f.shineGlow:Hide()
 
   return f
 end
@@ -774,9 +887,11 @@ function G:Render(activeByGroup)
         icon.timer:SetJustifyH("CENTER")
         applyTextPosition(icon.timer, icon, row.timerAnchor, row.timerOffsetX, row.timerOffsetY, "BOTTOM", 0, -1)
       end
+      icon.timer:SetFont(resolveCustomFontPath(row.timerTextFont), math.max(8, tonumber(row.timerTextSize) or 12), "OUTLINE")
       icon.timer:SetText("")
       icon.timer:SetShown(row.showTimerText ~= false)
       applyTextPosition(icon.customText, icon, row.customTextAnchor, row.customTextOffsetX, row.customTextOffsetY, "TOP", 0, 2)
+      icon.customText:SetFont(resolveCustomFontPath(row.customTextFont), math.max(8, tonumber(row.customTextSize) or 12), "OUTLINE")
       updateCustomText(icon, row, nil)
 
       local auraLabel = tostring(row.displayName or "")
@@ -795,11 +910,13 @@ function G:Render(activeByGroup)
         icon.nameText:SetPoint("RIGHT", icon, "RIGHT", 0, 0)
         icon.nameText:SetJustifyH("CENTER")
       end
-      icon.nameText:SetShown(auraLabel ~= "")
+      icon.nameText:SetFont(resolveCustomFontPath(row.nameTextFont), math.max(8, tonumber(row.nameTextSize) or 12), "OUTLINE")
+      icon.nameText:SetShown(row.showNameText ~= false and auraLabel ~= "")
 
       local previous = prevState[row.stateKey]
       nextState[row.stateKey] = {
         wasLow = previous and previous.wasLow or false,
+        gainedUntil = ((previous and previous.gainedUntil) or 0),
         soundOnGain = row.soundOnGain or "default",
         soundOnLow = row.soundOnLow or "default",
         soundOnExpire = row.soundOnExpire or "default",
@@ -808,6 +925,9 @@ function G:Render(activeByGroup)
       if allowTransitionSound and (not previous) and not row.isPlaceholder then
         ns.SoundManager:Play(row.soundOnGain or "default", "gain")
         ns.Debug:Verbosef("Sound trigger gain key=%s spellID=%s", tostring(row.stateKey), tostring(row.spellID))
+        nextState[row.stateKey].gainedUntil = GetTime() + 0.8
+      elseif (not previous) and not row.isPlaceholder then
+        nextState[row.stateKey].gainedUntil = GetTime() + 0.8
       end
 
       local r, g, b = getColorForUnit(row.unit)
@@ -827,6 +947,12 @@ function G:Render(activeByGroup)
       end
 
       icon.lowGlow:SetAlpha(0)
+      if icon.procGlow then
+        icon.procGlow:Hide()
+      end
+      if icon.shineGlow then
+        icon.shineGlow:Hide()
+      end
       icon:Show()
     end
     local contentCount = #entries
@@ -882,6 +1008,21 @@ function G:UpdateVisuals()
         local customBarR, customBarG, customBarB = parseColorCSV(row.barColor)
         if row.canCompute and row.duration and row.duration > 0 then
           local remaining = math.max(0, row.expirationTime - now)
+          local threshold = tonumber(row.lowTimeThreshold) or 0
+          if threshold <= 0 then
+            threshold = defaultThreshold
+          end
+          local thresholdReached = row.alert and remaining <= threshold and remaining > 0
+          local isMaxStacks = (tonumber(row.maxStacks) or 1) > 1
+            and (tonumber(row.applications) or 0) >= (tonumber(row.maxStacks) or 1)
+          local glowSpeed = math.max(0.25, math.min(3.0, tonumber((((row or {}).visualStates or {}).glowSpeed)) or 1.0))
+          local gainPulse = math.abs(math.sin((icon._phase or 0) * glowSpeed))
+          local visualStyle = (ns.VisualStyle and ns.VisualStyle.Resolve and ns.VisualStyle:Resolve(row, {
+            justGained = state and (tonumber(state.gainedUntil) or 0) > now,
+            thresholdReached = thresholdReached,
+            isMaxStacks = isMaxStacks,
+            pulse = gainPulse,
+          })) or { barColor = row.barColor or "", glowAlpha = 0, scale = 1.0 }
           if hasSideBar then
             if showTimerText then
               icon.timer:SetText(formatRemaining(remaining))
@@ -904,12 +1045,15 @@ function G:UpdateVisuals()
               ratio = 1
             end
             icon.cdBar:SetValue(ratio)
-            if customBarR and customBarG and customBarB then
-              icon.cdBar:SetStatusBarColor(customBarR, customBarG, customBarB, 0.95)
+            local styledBarR, styledBarG, styledBarB = parseColorCSV(visualStyle.barColor)
+            if styledBarR and styledBarG and styledBarB then
+              applyStatusBarGradient(icon.cdBar, row, styledBarR, styledBarG, styledBarB)
+            elseif customBarR and customBarG and customBarB then
+              applyStatusBarGradient(icon.cdBar, row, customBarR, customBarG, customBarB)
             elseif isEstimatedState(row) then
-              icon.cdBar:SetStatusBarColor(1.0, 0.72, 0.18, 0.95)
+              applyStatusBarGradient(icon.cdBar, row, 1.0, 0.72, 0.18)
             else
-              icon.cdBar:SetStatusBarColor(0.16, 0.64, 1.0, 0.95)
+              applyStatusBarGradient(icon.cdBar, row, 0.16, 0.64, 1.0)
             end
             icon.cdBar:Show()
             icon.cdBarBG:Show()
@@ -918,17 +1062,42 @@ function G:UpdateVisuals()
             icon.cdBarBG:Hide()
           end
 
-          local threshold = tonumber(row.lowTimeThreshold) or 0
-          if threshold <= 0 then
-            threshold = defaultThreshold
-          end
-          local thresholdReached = row.alert and remaining <= threshold and remaining > 0
           local showGlow = thresholdReached and ns.db.options.lowTimeGlow
-          if showGlow then
-            icon._phase = (icon._phase or 0) + 0.16
-            icon.lowGlow:SetAlpha(0.18 + (math.abs(math.sin(icon._phase)) * 0.35))
+          icon._phase = (icon._phase or 0) + 0.16
+          if showGlow or (tonumber(visualStyle.glowAlpha) or 0) > 0 then
+            local pulseAlpha = math.abs(math.sin(icon._phase))
+            local glowAlpha = tonumber(visualStyle.glowAlpha) or 0
+            if showGlow and glowAlpha <= 0 then
+              glowAlpha = 0.18 + (pulseAlpha * 0.35)
+              setGlowVisual(icon, {
+                glowStyle = "flat",
+                glowR = 1,
+                glowG = 0.15,
+                glowB = 0.1,
+                glowAlpha = glowAlpha,
+              }, glowAlpha)
+            else
+              setGlowVisual(icon, visualStyle, glowAlpha)
+            end
           else
             icon.lowGlow:SetAlpha(0)
+            if icon.procGlow then
+              icon.procGlow:Hide()
+            end
+            if icon.shineGlow then
+              icon.shineGlow:Hide()
+            end
+          end
+
+          icon:SetScale(tonumber(visualStyle.scale) or 1.0)
+          if visualStyle.borderR and visualStyle.borderG and visualStyle.borderB then
+            setIconBorderColor(icon, visualStyle.borderR, visualStyle.borderG, visualStyle.borderB, visualStyle.borderA or 0.95)
+          else
+            local r, g, b = getColorForUnit(row.unit)
+            if isEstimatedState(row) then
+              r, g, b = 1.0, 0.76, 0.18
+            end
+            setIconBorderColor(icon, r, g, b, 0.95)
           end
 
           if state then
@@ -946,6 +1115,20 @@ function G:UpdateVisuals()
           icon.cdBar:Hide()
           icon.cdBarBG:Hide()
           icon.lowGlow:SetAlpha(0)
+          if icon.procGlow then
+            icon.procGlow:Hide()
+          end
+          if icon.shineGlow then
+            icon.shineGlow:Hide()
+          end
+          icon:SetScale(1.0)
+          do
+            local r, g, b = getColorForUnit(row.unit)
+            if isEstimatedState(row) then
+              r, g, b = 1.0, 0.76, 0.18
+            end
+            setIconBorderColor(icon, r, g, b, 0.95)
+          end
           if state then
             state.wasLow = false
           end
@@ -957,6 +1140,20 @@ function G:UpdateVisuals()
           icon.cdBar:Hide()
           icon.cdBarBG:Hide()
           icon.lowGlow:SetAlpha(0)
+          if icon.procGlow then
+            icon.procGlow:Hide()
+          end
+          if icon.shineGlow then
+            icon.shineGlow:Hide()
+          end
+          icon:SetScale(1.0)
+          do
+            local r, g, b = getColorForUnit(row.unit)
+            if isEstimatedState(row) then
+              r, g, b = 1.0, 0.76, 0.18
+            end
+            setIconBorderColor(icon, r, g, b, 0.95)
+          end
           if state then
             state.wasLow = false
           end

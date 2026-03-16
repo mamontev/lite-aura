@@ -8,6 +8,7 @@ local Panels = UI.Panels
 local E = UI.Events
 local S = UI.State
 local Skin = ns.UISkin
+local AceGUI = LibStub and LibStub("AceGUI-3.0", true)
 
 local AuraListPanel = {}
 AuraListPanel.__index = AuraListPanel
@@ -42,17 +43,6 @@ end
 local function setGroupCollapsed(self, section, groupID, collapsed)
   self.collapsedGroups = self.collapsedGroups or {}
   self.collapsedGroups[makeCollapseKey(section, groupID)] = collapsed == true
-end
-
-local function createBackdrop(frame)
-  frame:SetBackdrop({
-    bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-    edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-    edgeSize = 12,
-    insets = { left = 2, right = 2, top = 2, bottom = 2 },
-  })
-  frame:SetBackdropColor(0.03, 0.08, 0.16, 0.74)
-  frame:SetBackdropBorderColor(0.1, 0.44, 0.76, 0.90)
 end
 
 local function matchesScope(scope, row)
@@ -105,6 +95,7 @@ function AuraListPanel:BuildRows()
   local state = S and S.Get and S:Get() or {}
   local search = lowerSafe(state.filters and state.filters.search or "")
   local scope = tostring(state.filters and state.filters.listScope or "all")
+  local groupFilter = tostring(state.filters and state.filters.group or "all")
 
   if search ~= "" then
     local filtered = {}
@@ -122,6 +113,21 @@ function AuraListPanel:BuildRows()
     local filtered = {}
     for i = 1, #rows do
       if matchesScope(scope, rows[i]) then
+        filtered[#filtered + 1] = rows[i]
+      end
+    end
+    rows = filtered
+  end
+
+  if groupFilter ~= "all" then
+    local filtered = {}
+    for i = 1, #rows do
+      local rowGroup = tostring(rows[i].group or "")
+      if groupFilter == "__ungrouped__" then
+        if rowGroup == "" then
+          filtered[#filtered + 1] = rows[i]
+        end
+      elseif rowGroup == groupFilter then
         filtered[#filtered + 1] = rows[i]
       end
     end
@@ -195,26 +201,28 @@ function AuraListPanel:AcquireRow(index, rowType)
   btn = CreateFrame("Button", nil, self.scrollChild)
 
   if rowType == "header" then
-    btn:SetHeight(20)
+    btn:SetHeight(22)
     btn:EnableMouse(true)
     btn.bg = btn:CreateTexture(nil, "BACKGROUND")
     btn.bg:SetAllPoints()
-    btn.bg:SetColorTexture(0.08, 0.2, 0.34, 0.8)
+    btn.bg:SetColorTexture(0.10, 0.11, 0.13, 0.62)
 
     btn.arrow = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    btn.arrow:SetPoint("LEFT", 8, 0)
+    btn.arrow:SetPoint("LEFT", 6, 0)
     btn.arrow:SetJustifyH("LEFT")
 
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     btn.text:SetPoint("LEFT", 20, 0)
     btn.text:SetJustifyH("LEFT")
+    btn.text:SetTextColor(0.88, 0.91, 0.96)
 
     btn.count = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    btn.count:SetPoint("RIGHT", -8, 0)
+    btn.count:SetPoint("RIGHT", -6, 0)
+    btn.count:SetTextColor(0.62, 0.70, 0.80)
 
     btn.exportButton = CreateFrame("Button", nil, btn, "UIPanelButtonTemplate")
-    btn.exportButton:SetSize(18, 16)
-    btn.exportButton:SetPoint("RIGHT", btn.count, "LEFT", -6, 0)
+    btn.exportButton:SetSize(18, 14)
+    btn.exportButton:SetPoint("RIGHT", btn.count, "LEFT", -4, 0)
     btn.exportButton:SetText("E")
     if Skin and Skin.ApplyButton then
       Skin:SetButtonVariant(btn.exportButton, "ghost")
@@ -261,62 +269,72 @@ function AuraListPanel:AcquireRow(index, rowType)
     btn:SetScript("OnEnter", function(selfBtn)
       local draggingAuraId = S and S.GetDraggingAura and S:GetDraggingAura() or nil
       if draggingAuraId then
-        selfBtn.bg:SetColorTexture(0.16, 0.34, 0.52, 0.92)
+        selfBtn.bg:SetColorTexture(0.18, 0.24, 0.30, 0.92)
       end
     end)
     btn:SetScript("OnLeave", function(selfBtn)
-      selfBtn.bg:SetColorTexture(0.08, 0.2, 0.34, 0.8)
+      selfBtn.bg:SetColorTexture(0.10, 0.11, 0.13, 0.62)
     end)
   elseif rowType == "section" then
-    btn:SetHeight(44)
+    btn:SetHeight(42)
     btn.bg = btn:CreateTexture(nil, "BACKGROUND")
     btn.bg:SetAllPoints()
-    btn.bg:SetColorTexture(0.12, 0.10, 0.05, 0.78)
+    btn.bg:SetColorTexture(0.09, 0.10, 0.12, 0.34)
 
     btn.topLine = btn:CreateTexture(nil, "BORDER")
-    btn.topLine:SetColorTexture(0.95, 0.78, 0.12, 0.30)
+    btn.topLine:SetColorTexture(0.60, 0.70, 0.86, 0.14)
     btn.topLine:SetPoint("TOPLEFT", 6, -1)
     btn.topLine:SetPoint("TOPRIGHT", -6, -1)
     btn.topLine:SetHeight(1)
 
     btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    btn.text:SetPoint("TOPLEFT", 8, -6)
+    btn.text:SetPoint("TOPLEFT", 10, -6)
     btn.text:SetJustifyH("LEFT")
-    btn.text:SetTextColor(1.0, 0.86, 0.18)
+    btn.text:SetTextColor(0.88, 0.92, 0.97)
 
     btn.reason = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    btn.reason:SetPoint("TOPLEFT", 8, -22)
-    btn.reason:SetPoint("RIGHT", -8, 0)
+    btn.reason:SetPoint("TOPLEFT", 10, -22)
+    btn.reason:SetPoint("RIGHT", -10, 0)
     btn.reason:SetJustifyH("LEFT")
     btn.reason:SetJustifyV("TOP")
     btn.reason:SetWordWrap(true)
   else
-    btn:SetHeight(30)
+    btn:SetHeight(46)
     btn:RegisterForDrag("LeftButton")
     btn.bg = btn:CreateTexture(nil, "BACKGROUND")
     btn.bg:SetAllPoints()
-    btn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
+    btn.bg:SetColorTexture(0.11, 0.13, 0.16, 0.48)
+
+    btn.accent = btn:CreateTexture(nil, "ARTWORK")
+    btn.accent:SetPoint("TOPLEFT", 0, 0)
+    btn.accent:SetPoint("BOTTOMLEFT", 0, 0)
+    btn.accent:SetWidth(0)
+    btn.accent:SetColorTexture(1.0, 0.82, 0.18, 0.00)
 
     btn.icon = btn:CreateTexture(nil, "ARTWORK")
-    btn.icon:SetPoint("LEFT", 6, 0)
-    btn.icon:SetSize(22, 22)
+    btn.icon:SetPoint("LEFT", 10, 0)
+    btn.icon:SetSize(20, 20)
 
-    btn.nameText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    btn.nameText:SetPoint("LEFT", btn.icon, "RIGHT", 8, 0)
-    btn.nameText:SetPoint("RIGHT", -144, 0)
+    btn.nameText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.nameText:SetPoint("TOPLEFT", btn.icon, "TOPRIGHT", 8, -4)
+    btn.nameText:SetPoint("RIGHT", -80, 0)
     btn.nameText:SetJustifyH("LEFT")
+    btn.nameText:SetJustifyV("TOP")
+    btn.nameText:SetWordWrap(false)
+    btn.nameText:SetTextColor(0.95, 0.96, 0.98)
 
     btn.metaText = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    btn.metaText:SetPoint("RIGHT", -84, 0)
-    btn.metaText:SetWidth(54)
-    btn.metaText:SetJustifyH("RIGHT")
+    btn.metaText:SetPoint("TOPLEFT", btn.icon, "BOTTOMRIGHT", 8, 3)
+    btn.metaText:SetPoint("RIGHT", -80, 0)
+    btn.metaText:SetJustifyH("LEFT")
+    btn.metaText:SetJustifyV("TOP")
+    btn.metaText:SetWordWrap(false)
+    btn.metaText:SetTextColor(0.64, 0.68, 0.74)
 
     btn.statusText = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     btn.statusText:SetPoint("RIGHT", -8, 0)
-
-    btn.previewText = btn:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    btn.previewText:SetPoint("RIGHT", btn.statusText, "LEFT", -8, 0)
-    btn.previewText:SetText("")
+    btn.statusText:SetJustifyH("RIGHT")
+    btn.statusText:SetTextColor(0.70, 0.74, 0.80)
 
     btn:SetScript("OnClick", function(selfBtn)
       if S and S.SetSelectedAura then
@@ -352,7 +370,7 @@ function AuraListPanel:AcquireRow(index, rowType)
       if Skin and Skin.SetClickableRowState then
         Skin:SetClickableRowState(selfBtn, "hover")
       else
-        selfBtn.bg:SetColorTexture(0.14, 0.28, 0.44, 0.78)
+        selfBtn.bg:SetColorTexture(0.14, 0.12, 0.07, 0.78)
       end
     end)
 
@@ -373,7 +391,7 @@ end
 
 function AuraListPanel:Render()
   local rows = self:BuildRows()
-  local width = math.max(100, (self.scroll:GetWidth() or self.scrollChild:GetWidth() or 0) - 28)
+  local width = math.max(100, (self.scroll:GetWidth() or self.scrollChild:GetWidth() or 0) - 2)
   local y = -2
 
   local used = {}
@@ -388,9 +406,14 @@ function AuraListPanel:Render()
     local state = S and S.Get and S:Get() or {}
     local scope = tostring(state.filters and state.filters.listScope or "all")
     local search = tostring(state.filters and state.filters.search or "")
+    local groupFilter = tostring(state.filters and state.filters.group or "all")
     local message = "No auras to show yet."
     if search ~= "" then
       message = string.format("No auras match \"%s\". Try a different search or clear the filter.", search)
+    elseif groupFilter == "__ungrouped__" then
+      message = "No standalone auras match the current filters."
+    elseif groupFilter ~= "all" then
+      message = "No auras in this group match the current filters."
     elseif scope == "loaded" then
       message = "No loaded auras match the current filters."
     elseif scope == "not_loaded" then
@@ -411,7 +434,7 @@ function AuraListPanel:Render()
     local rowType = row.isSection and "section" or (row.isHeader and "header" or "row")
     local btn = self:AcquireRow(i, rowType)
     used[tostring(i) .. ":" .. rowType] = true
-    btn:SetPoint("TOPLEFT", 2, y)
+    btn:SetPoint("TOPLEFT", 0, y)
     btn:SetWidth(width)
     btn:Show()
 
@@ -423,7 +446,7 @@ function AuraListPanel:Render()
 
       local titleHeight = btn.text:GetStringHeight() or 14
       local reasonHeight = btn.reason:GetStringHeight() or 12
-      local sectionHeight = math.max(44, math.floor(titleHeight + reasonHeight + 18))
+      local sectionHeight = math.max(32, math.floor(titleHeight + reasonHeight + 10))
       btn:SetHeight(sectionHeight)
       y = y - sectionHeight - 4
     elseif row.isHeader then
@@ -434,7 +457,7 @@ function AuraListPanel:Render()
       btn.text:SetText(tostring(row.group or "Group"))
       btn.count:SetText(tostring(row.count or 0))
       btn.exportButton:SetShown(btn.groupID ~= "")
-      y = y - 22
+      y = y - 24
     else
       btn.auraId = row.id
       btn.icon:SetTexture(row.icon or 134400)
@@ -444,7 +467,7 @@ function AuraListPanel:Render()
         auraName = "Aura " .. tostring(row.spellID or "?")
       end
       btn.nameText:SetText(auraName)
-      local meta = (row.isLoaded == false) and tostring(row.loadReason or "not loaded") or ((tostring(row.group or "") ~= "") and "In Group" or "")
+      local meta = (row.isLoaded == false) and tostring(row.loadReason or "Not Loaded") or ((tostring(row.group or "") ~= "") and ("Group: " .. tostring(row.group or "")) or tostring(row.unit or "player"))
       btn.metaText:SetText(meta)
 
       local status = tostring(row.status or "ok")
@@ -452,18 +475,15 @@ function AuraListPanel:Render()
       btn.statusText:SetText(status:upper())
       btn.statusText:SetTextColor(color[1], color[2], color[3])
       local isSelected = row.id and row.id == self.selectedAuraId
-      btn.previewText:SetText(isSelected and "PREVIEW" or "")
-      btn.previewText:SetTextColor(0.65, 0.88, 1.0)
-
       if Skin and Skin.SetClickableRowState then
         Skin:SetClickableRowState(btn, isSelected and "selected" or "normal")
       elseif isSelected then
-        btn.bg:SetColorTexture(0.18, 0.36, 0.56, 0.88)
+        btn.bg:SetColorTexture(0.20, 0.16, 0.08, 0.88)
       else
-        btn.bg:SetColorTexture(0.06, 0.11, 0.20, 0.45)
+        btn.bg:SetColorTexture(0.08, 0.07, 0.05, 0.44)
       end
 
-      y = y - 32
+      y = y - 50
     end
   end
 
@@ -490,15 +510,14 @@ end
 function AuraListPanel:Create(parent)
   local o = setmetatable({}, self)
 
-  o.frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+  o.frame = CreateFrame("Frame", nil, parent)
   o.frame:SetAllPoints()
-  createBackdrop(o.frame)
   o.collapsedGroups = {}
 
   local function makeFilterButton(text, scope, x, width)
     local btn = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-    btn:SetSize(width or 56, 18)
-    btn:SetPoint("TOPLEFT", x, -6)
+    btn:SetSize(width or 56, 20)
+    btn:SetPoint("TOPLEFT", x, -2)
     btn:SetText(text)
     if Skin and Skin.ApplyButton then
       Skin:SetButtonVariant(btn, "segment")
@@ -512,11 +531,11 @@ function AuraListPanel:Create(parent)
   end
 
   o.scopeButtons = {
-    makeFilterButton("All", "all", 6, 42),
-    makeFilterButton("Loaded", "loaded", 52, 58),
-    makeFilterButton("Not Loaded", "not_loaded", 114, 86),
-    makeFilterButton("Groups", "groups", 204, 58),
-    makeFilterButton("Drafts", "drafts", 266, 58),
+    makeFilterButton("All", "all", 0, 44),
+    makeFilterButton("Loaded", "loaded", 48, 62),
+    makeFilterButton("Not Loaded", "not_loaded", 114, 90),
+    makeFilterButton("Groups", "groups", 208, 62),
+    makeFilterButton("Drafts", "drafts", 274, 62),
   }
 
   local function refreshScopeButtons()
@@ -529,19 +548,53 @@ function AuraListPanel:Create(parent)
     end
   end
 
-  o.scroll = CreateFrame("ScrollFrame", nil, o.frame, "UIPanelScrollFrameTemplate")
-  o.scroll:SetPoint("TOPLEFT", 6, -28)
-  o.scroll:SetPoint("BOTTOMRIGHT", -28, 6)
+  o.footerLine = o.frame:CreateTexture(nil, "BORDER")
+  o.footerLine:SetPoint("TOPLEFT", 0, -28)
+  o.footerLine:SetPoint("TOPRIGHT", 0, -28)
+  o.footerLine:SetHeight(1)
+  o.footerLine:SetColorTexture(1.0, 0.82, 0.18, 0.16)
 
-  o.scrollChild = CreateFrame("Frame", nil, o.scroll)
-  o.scrollChild:SetPoint("TOPLEFT")
-  o.scrollChild:SetSize(math.max(1, (o.scroll:GetWidth() or 0) - 4), 1)
-  o.scroll:SetScrollChild(o.scrollChild)
+  if AceGUI then
+    o.scrollWidget = AceGUI:Create("ScrollFrame")
+    o.scrollWidget:SetLayout("Manual")
+    o.scrollWidget.frame:SetParent(o.frame)
+    o.scrollWidget.frame:ClearAllPoints()
+    o.scrollWidget.frame:SetPoint("TOPLEFT", 0, -30)
+    o.scrollWidget.frame:SetPoint("BOTTOMRIGHT", 0, 0)
+    o.scrollWidget.content:SetWidth(1)
+    o.scroll = o.scrollWidget.scrollframe or o.scrollWidget.frame
+    o.scrollChild = o.scrollWidget.content
+    o.scroll:SetScript("OnSizeChanged", function(scrollFrame, width)
+      o.scrollChild:SetWidth(math.max(1, (width or 0) - 6))
+      o:Render()
+    end)
+    C_Timer.After(0, function()
+      if o and o.scrollChild and o.scroll then
+        o.scrollChild:SetWidth(math.max(1, (o.scroll:GetWidth() or 0) - 6))
+        o:Render()
+      end
+    end)
+  else
+    o.scroll = CreateFrame("ScrollFrame", nil, o.frame)
+    o.scroll:SetPoint("TOPLEFT", 0, -30)
+    o.scroll:SetPoint("BOTTOMRIGHT", 0, 0)
+    o.scroll:EnableMouseWheel(true)
 
-  o.scroll:SetScript("OnSizeChanged", function(scrollFrame, width)
-    o.scrollChild:SetWidth(math.max(1, (width or 0) - 4))
-    o:Render()
-  end)
+    o.scrollChild = CreateFrame("Frame", nil, o.scroll)
+    o.scrollChild:SetPoint("TOPLEFT")
+    o.scrollChild:SetSize(math.max(1, (o.scroll:GetWidth() or 0) - 2), 1)
+    o.scroll:SetScrollChild(o.scrollChild)
+    o.scroll:SetScript("OnMouseWheel", function(scrollFrame, delta)
+      local current = scrollFrame:GetVerticalScroll() or 0
+      local maxScroll = math.max(0, (o.scrollChild:GetHeight() or 0) - (scrollFrame:GetHeight() or 0))
+      scrollFrame:SetVerticalScroll(math.max(0, math.min(maxScroll, current - (delta * 32))))
+    end)
+
+    o.scroll:SetScript("OnSizeChanged", function(scrollFrame, width)
+      o.scrollChild:SetWidth(math.max(1, (width or 0) - 2))
+      o:Render()
+    end)
+  end
 
   if E then
     E:On(E.Names.AURA_SELECTED, function(payload)
