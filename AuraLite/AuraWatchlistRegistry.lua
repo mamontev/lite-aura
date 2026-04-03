@@ -210,11 +210,14 @@ local function normalizeSpellIDList(value)
 end
 
 local function normalizeTrackingMode(value, unit)
-  local mode = tostring(value or ""):lower()
-  if tostring(unit or "") == "player" and mode == "cooldown" then
+  local valueType = type(value)
+  local unitType = type(unit)
+  local mode = ((valueType == "string" or valueType == "number" or valueType == "boolean") and tostring(value) or ""):lower()
+  local unitToken = ((unitType == "string" or unitType == "number" or unitType == "boolean") and tostring(unit) or "")
+  if unitToken == "player" and mode == "cooldown" then
     return "cooldown"
   end
-  if tostring(unit or "") == "target" and mode == "estimated" then
+  if unitToken == "target" and mode == "estimated" then
     return "estimated"
   end
   return "confirmed"

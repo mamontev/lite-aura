@@ -63,16 +63,21 @@ function S:ClearDraggingAura()
 end
 
 function S:SetSelectedAura(auraId, source)
-  local normalizedAuraId = tostring(auraId or "")
-  if normalizedAuraId == "" then
+  -- Guard against reentrant calls
+  if self._selectInFlight == true then
+    return
+  end
+
+  local normalizedAuraId
+  if type(auraId) == "string" then
+    normalizedAuraId = auraId ~= "" and auraId or nil
+  elseif type(auraId) == "number" then
+    normalizedAuraId = tostring(auraId)
+  else
     normalizedAuraId = nil
   end
 
   if self._data.selectedAuraId == normalizedAuraId then
-    return
-  end
-
-  if self._selectInFlight == true and self._selectingAuraId == normalizedAuraId then
     return
   end
 

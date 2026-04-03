@@ -50,16 +50,37 @@ $suffix = if ([string]::IsNullOrWhiteSpace($Label)) {
 
 $archiveName = "{0}-{1}-{2}.zip" -f $AddonDirName, $version, $suffix
 $archivePath = Join-Path $DistDir $archiveName
+$stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("AuraLitePackage_" + [guid]::NewGuid().ToString("N"))
+$stagingAddonRoot = Join-Path $stagingRoot $AddonDirName
 
 New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 if (Test-Path $archivePath) {
   Remove-Item -Path $archivePath -Force
 }
 
-Compress-Archive -Path $addonRoot -DestinationPath $archivePath -Force
+New-Item -ItemType Directory -Force -Path $stagingAddonRoot | Out-Null
+Copy-Item -Path (Join-Path $addonRoot '*') -Destination $stagingAddonRoot -Recurse -Force
+
+$excludedFiles = @(
+  "AI_AGENT_CONTEXT.md"
+)
+
+foreach ($relativePath in $excludedFiles) {
+  $fullPath = Join-Path $stagingAddonRoot $relativePath
+  if (Test-Path $fullPath) {
+    Remove-Item -Path $fullPath -Force
+  }
+}
+
+try {
+  Compress-Archive -Path $stagingAddonRoot -DestinationPath $archivePath -Force
+} finally {
+  if (Test-Path $stagingRoot) {
+    Remove-Item -Path $stagingRoot -Recurse -Force
+  }
+}
 
 Write-Host ("Package created: {0}" -f $archivePath) -ForegroundColor Green
 Write-Host ("Title:   {0}" -f $title)
 Write-Host ("Version: {0}" -f $version)
 Write-Host ("Channel: {0}" -f $safeChannel)
-

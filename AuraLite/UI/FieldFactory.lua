@@ -51,13 +51,15 @@ end
 local function createFieldShell(parent, field, multiline)
   local holder = CreateFrame("Frame", nil, parent, "BackdropTemplate")
   local hasHelpText = tostring(field and field.help or "") ~= ""
+  local isSpellField = field.widget == "spellid" or field.widget == "spellcsv"
   local isWideWidget = multiline
     or field.widget == "multiline"
     or field.widget == "dropdown"
     or field.widget == "bartexture"
     or field.widget == "soundpicker"
     or field.widget == "groupselect"
-  local baseHeight = isWideWidget and 58 or 30
+    or isSpellField
+  local baseHeight = isSpellField and 78 or (isWideWidget and 58 or 30)
   holder:SetHeight(baseHeight)
   styleFieldShell(holder)
 
@@ -80,9 +82,10 @@ local function createFieldShell(parent, field, multiline)
 
   local anchor = CreateFrame("Frame", nil, holder)
   if isWideWidget then
-    anchor:SetPoint("TOPLEFT", 12, -18)
-    anchor:SetPoint("TOPRIGHT", -12, -18)
-    anchor:SetHeight(baseHeight - 22)
+    local topOffset = isSpellField and -28 or -18
+    anchor:SetPoint("TOPLEFT", 12, topOffset)
+    anchor:SetPoint("TOPRIGHT", -12, topOffset)
+    anchor:SetHeight(baseHeight - (isSpellField and 42 or 22))
   else
     anchor:SetPoint("TOPRIGHT", -10, -3)
     anchor:SetPoint("BOTTOMRIGHT", -10, 4)
@@ -772,9 +775,10 @@ local function attachSpellResolver(holder, control, field, onChange)
   end
 
   local hint = holder:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  hint:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 0, -2)
+  hint:SetPoint("TOPLEFT", control, "BOTTOMLEFT", 0, -4)
   hint:SetPoint("RIGHT", -4, 0)
   hint:SetJustifyH("LEFT")
+  hint:SetJustifyV("TOP")
   hint:SetText("")
   if field and field.compactHint == false then
     hint:Hide()
@@ -1009,20 +1013,21 @@ function F:CreateField(parent, field, model, onChange)
   elseif field.widget == "groupselect" then
     control = createGroupSelect(holder, field, model, onChange)
   elseif field.widget == "checkbox" then
-    holder:SetHeight(34)
+    holder:SetHeight(30)
     control = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
-    control:SetPoint("TOPLEFT", 8, -8)
+    control:SetPoint("LEFT", 8, 0)
     control:SetChecked(model[field.key] == true)
     if Skin and Skin.ApplyCheckbox then
       Skin:ApplyCheckbox(control)
     end
 
     local cbLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    cbLabel:SetPoint("LEFT", control, "RIGHT", 4, 0)
+    cbLabel:SetPoint("LEFT", control, "RIGHT", 6, 0)
     cbLabel:SetPoint("RIGHT", -10, 0)
+    cbLabel:SetJustifyV("MIDDLE")
     cbLabel:SetJustifyH("LEFT")
     cbLabel:SetText(field.label or field.key or "Enabled")
-    label:SetText(" ")
+    label:Hide()
 
     control:SetScript("OnClick", function(btn)
       if Skin and Skin.RefreshCheckbox then
@@ -1245,4 +1250,3 @@ function F:CreateField(parent, field, model, onChange)
   holder.field = field
   return holder
 end
-

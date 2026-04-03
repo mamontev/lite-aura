@@ -24,3 +24,5 @@ Desktop.ini
 __pycache__/
 *.pyc
 
+docs/*.*
+

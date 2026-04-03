@@ -3,6 +3,7 @@ local U = ns.Utils or {}
 ns.EventRouter = ns.EventRouter or {}
 local E = ns.EventRouter
 E.lastProcessedCast = E.lastProcessedCast or {}
+E.lastAnyProcessedCast = E.lastAnyProcessedCast or { spellID = nil, at = 0 }
 E.lastCooldownRefresh = E.lastCooldownRefresh or 0
 E.castResolverStates = E.castResolverStates or {}
 E.castResolverTokenCounter = E.castResolverTokenCounter or 0
@@ -69,11 +70,15 @@ local SYNTHETIC_TARGET_TRIGGER_MAP = {
 local SYNTHETIC_TARGET_SLOT = "__current_target__"
 
 local function normalizeTrackingMode(item, unit)
-  local mode = tostring(item and item.trackingMode or ""):lower()
-  if tostring(unit or "") == "player" and mode == "cooldown" then
+  local rawMode = item and item.trackingMode or ""
+  local modeType = type(rawMode)
+  local unitType = type(unit)
+  local mode = ((modeType == "string" or modeType == "number" or modeType == "boolean") and tostring(rawMode) or ""):lower()
+  local unitToken = ((unitType == "string" or unitType == "number" or unitType == "boolean") and tostring(unit) or "")
+  if unitToken == "player" and mode == "cooldown" then
     return "cooldown"
   end
-  if tostring(unit or "") == "target" and mode == "estimated" then
+  if unitToken == "target" and mode == "estimated" then
     return "estimated"
   end
   return "confirmed"
@@ -577,9 +582,6 @@ local function isLikelyProxyCooldown(self, spellID, cooldown)
   if not spellID or spellID <= 0 or type(cooldown) ~= "table" then
     return false
   end
-  if isKnownPlayerSpell(spellID) then
-    return false
-  end
   if isPlayerCastingTrackedSpell(spellID) or isRuntimeCastInFlight(self, spellID) then
     return false
   end
@@ -596,6 +598,44 @@ local function isLikelyProxyCooldown(self, spellID, cooldown)
     return false
   end
 
+  local recentCast = self.lastAnyProcessedCast or E.lastAnyProcessedCast or {}
+  local recentCastSpellID = tonumber(recentCast.spellID)
+  local recentCastAt = tonumber(recentCast.at) or 0
+  local recentOtherSpellCast =
+    recentCastSpellID
+    and recentCastSpellID > 0
+    and recentCastSpellID ~= spellID
+    and (now - recentCastAt) <= 0.45
+  local recentSameSpellCast = lastConfirmed > 0 and (now - lastConfirmed) <= 0.35
+  local shortCooldownNoise =
+    cdDuration <= 2.0
+    and not recentSameSpellCast
+    and tostring(cooldown.durationKind or "cooldown") ~= "charge"
+    and tostring(cooldown.durationKind or "cooldown") ~= "loss_of_control"
+
+  if recentOtherSpellCast and cdDuration <= 2.0 then
+    ns.Debug:Throttled(
+      "cd-proxy-recent-cast-" .. tostring(spellID),
+      1.0,
+      "Ignoring proxy cooldown spellID=%d due recent other cast spellID=%d duration=%.2f",
+      tonumber(spellID) or 0,
+      tonumber(recentCastSpellID) or 0,
+      tonumber(cdDuration) or 0
+    )
+    return true
+  end
+
+  if shortCooldownNoise then
+    ns.Debug:Throttled(
+      "cd-proxy-short-" .. tostring(spellID),
+      1.0,
+      "Ignoring short proxy cooldown spellID=%d duration=%.2f without confirmed self cast",
+      tonumber(spellID) or 0,
+      tonumber(cdDuration) or 0
+    )
+    return true
+  end
+
   local gcdData = getRawGlobalCooldownData()
   if type(gcdData) ~= "table" then
     return false
@@ -609,7 +649,13 @@ local function isLikelyProxyCooldown(self, spellID, cooldown)
 
   local sameWindow = math.abs(cdStart - gcdStart) <= 0.20
   local nearGCDDuration = math.abs(cdDuration - gcdDuration) <= 0.35
-  return sameWindow and nearGCDDuration
+  if not (sameWindow and nearGCDDuration) then
+    return false
+  end
+
+  -- Treat GCD-shaped cooldown data as proxy noise unless this spell was
+  -- actually the one just confirmed by runtime events.
+  return true
 end
 
 local function getLatestPendingAttempt(self, spellID, now, maxAge)
@@ -1198,7 +1244,7 @@ function E:BuildRowsForUnit(unit)
   local playerInCombat = InCombatLockdown() == true
   local unitOrderMap = { player = 1, target = 2, focus = 3, pet = 4 }
 
-  for _, item in ipairs(list) do
+  for itemIndex, item in ipairs(list) do
     if isAuraLoadAllowed(item, playerClassToken, playerSpecID, playerInCombat) then
       local trackingMode = normalizeTrackingMode(item, unit)
       local cooldownMode = (trackingMode == "cooldown")
@@ -1294,9 +1340,11 @@ function E:BuildRowsForUnit(unit)
         local duration = auraDuration or (cooldown and cooldown.duration)
         local sourceLabel = aura and ns.AuraAPI:GetSourceLabel(aura) or ""
         local stateKind = (aura and aura._alStateKind)
+          or (cooldown and cooldown.durationKind == "loss_of_control" and "loss_of_control")
           or (cooldown and "cooldown")
           or ((trackingMode == "estimated") and "estimated_target_debuff" or "confirmed_aura")
         local stateLabel = (aura and aura._alStateLabel)
+          or (cooldown and cooldown.durationKind == "loss_of_control" and "Loss of control cooldown")
           or (cooldown and "Spell cooldown")
           or ((trackingMode == "estimated") and "Estimated from your cast" or "Direct aura read")
         rowsByGroup[effectiveGroupID] = rowsByGroup[effectiveGroupID] or {}
@@ -1314,6 +1362,19 @@ function E:BuildRowsForUnit(unit)
           applications = applications,
           expirationTime = expirationTime,
           duration = duration,
+          cooldownData = cooldown and {
+            startTime = cooldown.startTime,
+            duration = cooldown.duration,
+            expirationTime = cooldown.expirationTime,
+            isActive = cooldown.isActive,
+            isEnabled = cooldown.isEnabled,
+            modRate = cooldown.modRate,
+            currentCharges = cooldown.currentCharges,
+            maxCharges = cooldown.maxCharges,
+            durationObject = cooldown.durationObject,
+            durationKind = cooldown.durationKind,
+            canCompute = cooldown.canCompute,
+          } or nil,
           sourceLabel = sourceLabel,
           stateKind = stateKind,
           stateLabel = stateLabel,
@@ -1356,11 +1417,12 @@ function E:BuildRowsForUnit(unit)
           unitOrder = unitOrderMap[unit] or 99,
           isPlaceholder = false,
         }
-      elseif selectedInUnlock
+      elseif (not cooldownMode) and (
+        selectedInUnlock
         or groupedMoverPreview
         or ns.TestMode:IsEnabled()
         or ((ns.db and ns.db.locked == false) and not configPreviewVisible)
-      then
+      ) then
         local placeholderItem = item
         local fake = ns.TestMode:BuildPlaceholder(placeholderItem, unit)
         fake.entryKey = tostring(unit) .. ":" .. tostring(itemIndex)
@@ -1798,6 +1860,11 @@ processPlayerCast = function(self, spellID, sourceTag)
     return
   end
   E.lastProcessedCast[spellID] = now
+  E.lastAnyProcessedCast = {
+    spellID = spellID,
+    at = now,
+  }
+  self.lastAnyProcessedCast = E.lastAnyProcessedCast
 
   local ruleCount = 0
   if ns.ProcRules and ns.ProcRules.byIfEventSpell and ns.ProcRules.byIfEventSpell[spellID] then

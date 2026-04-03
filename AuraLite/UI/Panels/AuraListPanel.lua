@@ -37,7 +37,12 @@ end
 
 local function isGroupCollapsed(self, section, groupID)
   self.collapsedGroups = self.collapsedGroups or {}
-  return self.collapsedGroups[makeCollapseKey(section, groupID)] == true
+  local key = makeCollapseKey(section, groupID)
+  local value = self.collapsedGroups[key]
+  if value == nil then
+    return tostring(section or "") == "not_loaded"
+  end
+  return value == true
 end
 
 local function setGroupCollapsed(self, section, groupID, collapsed)
@@ -80,6 +85,20 @@ function AuraListPanel:ExportGroup(groupID)
       text,
       "This exports the selected group, its layout, and all contained auras with their linked rules."
     )
+  end
+end
+
+function AuraListPanel:RefreshDragAssignmentHint()
+  if not self.dragHint then
+    return
+  end
+  local draggingAuraId = S and S.GetDraggingAura and S:GetDraggingAura() or nil
+  if draggingAuraId then
+    self.dragHint:SetText("Drop the dragged aura onto a group in the left column to assign it.")
+    self.dragHint:SetTextColor(0.96, 0.82, 0.22)
+  else
+    self.dragHint:SetText("Tip: drag an aura from this list into a group on the left to assign it.")
+    self.dragHint:SetTextColor(0.62, 0.68, 0.74)
   end
 end
 
@@ -397,11 +416,68 @@ function AuraListPanel:Render()
   local used = {}
 
   if #rows == 0 then
-    self.emptyState = self.emptyState or self.scrollChild:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    self.emptyState:SetPoint("TOPLEFT", 10, -12)
-    self.emptyState:SetPoint("RIGHT", -10, 0)
-    self.emptyState:SetJustifyH("LEFT")
-    self.emptyState:SetJustifyV("TOP")
+    if not self.emptyStateCard then
+      local card = CreateFrame("Frame", nil, self.scrollChild, "BackdropTemplate")
+      if Skin and Skin.ApplySection then
+        Skin:ApplySection(card)
+      end
+      card:SetPoint("TOPLEFT", 4, -10)
+      card:SetPoint("RIGHT", -4, 0)
+      card:SetHeight(168)
+      self.emptyStateCard = card
+
+      self.emptyState = card:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+      self.emptyState:SetPoint("TOPLEFT", 12, -12)
+      self.emptyState:SetPoint("RIGHT", -12, 0)
+      self.emptyState:SetJustifyH("LEFT")
+      self.emptyState:SetJustifyV("TOP")
+
+      self.emptyStateHint = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+      self.emptyStateHint:SetPoint("TOPLEFT", 12, -36)
+      self.emptyStateHint:SetPoint("RIGHT", -12, 0)
+      self.emptyStateHint:SetJustifyH("LEFT")
+      self.emptyStateHint:SetJustifyV("TOP")
+      self.emptyStateHint:SetText("Start by creating an aura, importing one, or dragging future auras into a group on the left.")
+
+      self.emptyNewButton = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
+      self.emptyNewButton:SetSize(92, 22)
+      self.emptyNewButton:SetPoint("TOPLEFT", 12, -72)
+      self.emptyNewButton:SetText("New Aura")
+      if Skin and Skin.ApplyButton then
+        Skin:SetButtonVariant(self.emptyNewButton, "primary")
+      end
+      self.emptyNewButton:SetScript("OnClick", function()
+        if E then
+          E:Emit(E.Names.NEW_AURA, { source = "empty_state" })
+        end
+      end)
+
+      self.emptyImportButton = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
+      self.emptyImportButton:SetSize(82, 22)
+      self.emptyImportButton:SetPoint("LEFT", self.emptyNewButton, "RIGHT", 8, 0)
+      self.emptyImportButton:SetText("Import")
+      if Skin and Skin.ApplyButton then
+        Skin:SetButtonVariant(self.emptyImportButton, "ghost")
+      end
+      self.emptyImportButton:SetScript("OnClick", function()
+        if E then
+          E:Emit(E.Names.OPEN_IMPORT_PANEL, { source = "empty_state" })
+        end
+      end)
+
+      self.emptyGroupsButton = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
+      self.emptyGroupsButton:SetSize(82, 22)
+      self.emptyGroupsButton:SetPoint("LEFT", self.emptyImportButton, "RIGHT", 8, 0)
+      self.emptyGroupsButton:SetText("Groups")
+      if Skin and Skin.ApplyButton then
+        Skin:SetButtonVariant(self.emptyGroupsButton, "ghost")
+      end
+      self.emptyGroupsButton:SetScript("OnClick", function()
+        if E then
+          E:Emit(E.Names.OPEN_GROUPS_PANEL, { source = "empty_state" })
+        end
+      end)
+    end
 
     local state = S and S.Get and S:Get() or {}
     local scope = tostring(state.filters and state.filters.listScope or "all")
@@ -424,9 +500,9 @@ function AuraListPanel:Render()
       message = "No unsaved drafts right now."
     end
     self.emptyState:SetText(message)
-    self.emptyState:Show()
-  elseif self.emptyState then
-    self.emptyState:Hide()
+    self.emptyStateCard:Show()
+  elseif self.emptyStateCard then
+    self.emptyStateCard:Hide()
   end
 
   for i = 1, #rows do
@@ -493,7 +569,11 @@ function AuraListPanel:Render()
     end
   end
 
-  self.scrollChild:SetHeight(math.max(1, -y + 8))
+  if self.emptyStateCard and self.emptyStateCard:IsShown() then
+    self.scrollChild:SetHeight(math.max(176, -y + 8))
+  else
+    self.scrollChild:SetHeight(math.max(1, -y + 8))
+  end
 end
 
 function AuraListPanel:BindSearchBox(editBox)
@@ -549,17 +629,24 @@ function AuraListPanel:Create(parent)
   end
 
   o.footerLine = o.frame:CreateTexture(nil, "BORDER")
-  o.footerLine:SetPoint("TOPLEFT", 0, -28)
-  o.footerLine:SetPoint("TOPRIGHT", 0, -28)
+  o.footerLine:SetPoint("TOPLEFT", 0, -48)
+  o.footerLine:SetPoint("TOPRIGHT", 0, -48)
   o.footerLine:SetHeight(1)
   o.footerLine:SetColorTexture(1.0, 0.82, 0.18, 0.16)
+
+  o.dragHint = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  o.dragHint:SetPoint("TOPLEFT", 0, -28)
+  o.dragHint:SetPoint("RIGHT", 0, 0)
+  o.dragHint:SetJustifyH("LEFT")
+  o.dragHint:SetWordWrap(false)
+  o.dragHint:SetText("Tip: drag an aura onto a group header to move it into that group.")
 
   if AceGUI then
     o.scrollWidget = AceGUI:Create("ScrollFrame")
     o.scrollWidget:SetLayout("Manual")
     o.scrollWidget.frame:SetParent(o.frame)
     o.scrollWidget.frame:ClearAllPoints()
-    o.scrollWidget.frame:SetPoint("TOPLEFT", 0, -30)
+    o.scrollWidget.frame:SetPoint("TOPLEFT", 0, -52)
     o.scrollWidget.frame:SetPoint("BOTTOMRIGHT", 0, 0)
     o.scrollWidget.content:SetWidth(1)
     o.scroll = o.scrollWidget.scrollframe or o.scrollWidget.frame
@@ -576,7 +663,7 @@ function AuraListPanel:Create(parent)
     end)
   else
     o.scroll = CreateFrame("ScrollFrame", nil, o.frame)
-    o.scroll:SetPoint("TOPLEFT", 0, -30)
+    o.scroll:SetPoint("TOPLEFT", 0, -52)
     o.scroll:SetPoint("BOTTOMRIGHT", 0, 0)
     o.scroll:EnableMouseWheel(true)
 
@@ -595,6 +682,14 @@ function AuraListPanel:Create(parent)
       o:Render()
     end)
   end
+
+  if E then
+    E:On(E.Names.STATE_CHANGED, function()
+      o:RefreshDragAssignmentHint()
+    end)
+  end
+
+  o:RefreshDragAssignmentHint()
 
   if E then
     E:On(E.Names.AURA_SELECTED, function(payload)

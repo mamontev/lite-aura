@@ -146,31 +146,32 @@ local function ensurePreviewChrome(widget)
 
   if not widget.mode then
     widget.mode = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    widget.mode:SetPoint("TOPRIGHT", 0, -2)
-    widget.mode:SetJustifyH("RIGHT")
+    widget.mode:SetPoint("TOPLEFT", 0, -20)
+    widget.mode:SetPoint("RIGHT", 0, 0)
+    widget.mode:SetJustifyH("LEFT")
     widget.mode:SetTextColor(1.0, 0.86, 0.18)
   end
 
   if not widget.status then
     widget.status = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     widget.status:SetPoint("TOPLEFT", 0, -2)
-    widget.status:SetPoint("RIGHT", -4, 0)
+    widget.status:SetPoint("RIGHT", 0, 0)
     widget.status:SetJustifyH("LEFT")
     widget.status:SetWordWrap(false)
   end
 
   if not widget.divider then
     widget.divider = frame:CreateTexture(nil, "ARTWORK")
-    widget.divider:SetPoint("TOPLEFT", 0, -32)
-    widget.divider:SetPoint("TOPRIGHT", 0, -32)
+    widget.divider:SetPoint("TOPLEFT", 0, -40)
+    widget.divider:SetPoint("TOPRIGHT", 0, -40)
     widget.divider:SetHeight(1)
     widget.divider:SetColorTexture(1.0, 0.82, 0.18, 0.28)
   end
 
   if not widget.previewCard then
     widget.previewCard = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    widget.previewCard:SetPoint("TOPLEFT", 0, -42)
-    widget.previewCard:SetPoint("TOPRIGHT", 0, -42)
+    widget.previewCard:SetPoint("TOPLEFT", 0, -50)
+    widget.previewCard:SetPoint("TOPRIGHT", 0, -50)
     widget.previewCard:SetHeight(96)
     if Skin and Skin.ApplySection then
       Skin:ApplySection(widget.previewCard)
@@ -386,7 +387,16 @@ local function playWidget(widget, duration)
   widget.bar:SetValue(widget.duration)
   widget.frame:Show()
   if widget.cooldown and widget.cooldown:IsShown() then
-    widget.cooldown:SetCooldown((GetTime() or 0), widget.duration)
+    if ns.AuraAPI and ns.AuraAPI.ApplyCooldownToFrame then
+      ns.AuraAPI:ApplyCooldownToFrame(widget.cooldown, {
+        startTime = (GetTime() or 0),
+        duration = widget.duration,
+        expirationTime = (GetTime() or 0) + widget.duration,
+        isActive = true,
+      })
+    else
+      widget.cooldown:SetCooldown((GetTime() or 0), widget.duration)
+    end
   end
 end
 
@@ -399,7 +409,11 @@ local function stopWidget(widget)
     widget.bar:SetValue(0)
   end
   if widget.cooldown then
-    widget.cooldown:SetCooldown(0, 0)
+    if ns.AuraAPI and ns.AuraAPI.ClearCooldownFrame then
+      ns.AuraAPI:ClearCooldownFrame(widget.cooldown)
+    else
+      widget.cooldown:SetCooldown(0, 0)
+    end
   end
 end
 

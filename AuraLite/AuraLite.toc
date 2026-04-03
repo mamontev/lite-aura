@@ -1,9 +1,9 @@
-## Interface: 120000
+## Interface: 120001
 ## Title: AuraLite
 ## Notes: Lightweight aura tracker for Retail Midnight (presentation-only)
 ## IconTexture: Interface\AddOns\AuraLite\Media\AuraLiteIcon
 ## Author: YourName
-## Version: 0.1.1
+## Version: 0.1.5
 ## SavedVariables: AuraLiteDB
 ## OptionalDeps: Ace3, LibSharedMedia-3.0, LibUIDropDownMenu
 

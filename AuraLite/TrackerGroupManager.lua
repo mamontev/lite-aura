@@ -938,12 +938,30 @@ function G:Render(activeByGroup)
 
       if row.canCompute and row.duration and row.duration > 0 then
         if hasSideBar then
-          icon.cooldown:SetCooldown(0, 0)
+          if ns.AuraAPI and ns.AuraAPI.ClearCooldownFrame then
+            ns.AuraAPI:ClearCooldownFrame(icon.cooldown)
+          else
+            icon.cooldown:SetCooldown(0, 0)
+          end
         else
-          icon.cooldown:SetCooldown(row.expirationTime - row.duration, row.duration)
+          local cooldownData = row.cooldownData or {
+            startTime = row.expirationTime - row.duration,
+            duration = row.duration,
+            expirationTime = row.expirationTime,
+            isActive = true,
+          }
+          if ns.AuraAPI and ns.AuraAPI.ApplyCooldownToFrame then
+            ns.AuraAPI:ApplyCooldownToFrame(icon.cooldown, cooldownData)
+          else
+            icon.cooldown:SetCooldown(row.expirationTime - row.duration, row.duration)
+          end
         end
       else
-        icon.cooldown:SetCooldown(0, 0)
+        if ns.AuraAPI and ns.AuraAPI.ClearCooldownFrame then
+          ns.AuraAPI:ClearCooldownFrame(icon.cooldown)
+        else
+          icon.cooldown:SetCooldown(0, 0)
+        end
       end
 
       icon.lowGlow:SetAlpha(0)

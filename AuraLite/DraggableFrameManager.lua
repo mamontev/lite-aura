@@ -5,6 +5,27 @@ local D = ns.Dragger
 
 D.pendingPositions = D.pendingPositions or {}
 
+local function getMoverSnapSize()
+  local settings = ns.db and ns.db.settings or nil
+  local value = settings and tonumber(settings.moverSnap) or 0
+  if not value or value < 0 then
+    return 0
+  end
+  return math.floor(value + 0.5)
+end
+
+local function snapCoordinate(value, step)
+  value = tonumber(value) or 0
+  step = tonumber(step) or 0
+  if step <= 0 then
+    return value
+  end
+  if value >= 0 then
+    return math.floor((value / step) + 0.5) * step
+  end
+  return math.ceil((value / step) - 0.5) * step
+end
+
 function D:ApplyPosition(frame, key)
   if not ns.db or not ns.db.positions then
     return
@@ -73,6 +94,11 @@ function D:SavePosition(frame, key)
     return
   end
   local point, _, relativePoint, x, y = frame:GetPoint(1)
+  local snap = getMoverSnapSize()
+  x = snapCoordinate(x, snap)
+  y = snapCoordinate(y, snap)
+  frame:ClearAllPoints()
+  frame:SetPoint(point or "CENTER", UIParent, relativePoint or "CENTER", x, y)
   local pos = {
     point = point,
     relativePoint = relativePoint,
@@ -106,6 +132,80 @@ function D:SavePosition(frame, key)
     end
   end
   frame._alPositionApplied = true
+end
+
+function D:GetMoverSnapSize()
+  return getMoverSnapSize()
+end
+
+function D:CycleMoverSnap()
+  ns.db = ns.db or {}
+  ns.db.settings = ns.db.settings or {}
+  local options = { 0, 4, 8, 16 }
+  local current = getMoverSnapSize()
+  local nextIndex = 1
+  for i = 1, #options do
+    if options[i] == current then
+      nextIndex = (i % #options) + 1
+      break
+    end
+  end
+  ns.db.settings.moverSnap = options[nextIndex]
+  return options[nextIndex]
+end
+
+function D:ResetPosition(frame, key)
+  if not (ns.db and ns.db.positions) then
+    return false
+  end
+
+  ns.db.positions[key] = nil
+  self.pendingPositions[key] = nil
+
+  if type(frame) == "table" and type(frame._alMirrorPositionKeys) == "table" then
+    for mirrorKey in pairs(frame._alMirrorPositionKeys) do
+      if type(mirrorKey) == "string" and mirrorKey ~= "" then
+        ns.db.positions[mirrorKey] = nil
+        self.pendingPositions[mirrorKey] = nil
+      end
+    end
+  end
+
+  if ns.SettingsData and ns.SettingsData.ResolveEntry and type(frame) == "table" and type(frame._alEntryKeys) == "table" then
+    for entryKey in pairs(frame._alEntryKeys) do
+      local entry = ns.SettingsData:ResolveEntry(entryKey)
+      if entry and entry.item then
+        entry.item.savedPosition = nil
+      end
+    end
+  end
+
+  if frame then
+    frame._alPositionApplied = false
+  end
+
+  return true
+end
+
+function D:ResetAllVisiblePositions()
+  if not (ns.GroupManager and ns.GroupManager.frames) then
+    return 0
+  end
+
+  local reset = 0
+  for key, frame in pairs(ns.GroupManager.frames) do
+    if frame and frame.IsShown and frame:IsShown() then
+      if self:ResetPosition(frame, key) then
+        reset = reset + 1
+      end
+    end
+  end
+
+  if reset > 0 and ns.EventRouter and ns.EventRouter.RefreshAll then
+    ns.EventRouter:RefreshAll()
+  end
+
+  return reset
 end
 
 function D:CanMove()

@@ -455,8 +455,8 @@ local function setTabVisual(btn, active)
   end
 
   if Skin and Skin.SetButtonSelected then
-    Skin:SetButtonSelected(btn, active)
     Skin:SetButtonVariant(btn, "tab")
+    Skin:SetButtonSelected(btn, active)
     return
   end
 
@@ -751,6 +751,9 @@ local function estimateFieldHeight(field)
   if field.widget == "multiline" then
     return 92
   end
+  if field.widget == "spellid" or field.widget == "spellcsv" then
+    return 72
+  end
   if field.widget == "bartexture" then
     return 132
   end
@@ -1014,9 +1017,14 @@ function AuraEditorPanel:CommitProduceTriggerWidgets()
 end
 
 function AuraEditorPanel:ValidateDraft()
+  if self._validatingDraft == true then
+    return
+  end
+  self._validatingDraft = true
   local issues = {}
   if not self.draft then
     V:SetStatus("warn", "No aura selected.")
+    self._validatingDraft = false
     return
   end
 
@@ -1032,29 +1040,20 @@ function AuraEditorPanel:ValidateDraft()
   if isCooldownTracking(self.draft) then
     self.draft.triggerType = "cooldown"
     self.draft.actionMode = "produce"
-    if S and S.SetDirty then
-      S:SetDirty(true)
+  else
+    if isEstimatedTargetTracking(self.draft) then
+      if tostring(self.draft.castSpellIDs or "") == "" then
+        issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "Add at least one spell you cast to start this debuff timer." }
+      end
+      if tonumber(self.draft.estimatedDuration) == nil or tonumber(self.draft.estimatedDuration) <= 0 then
+        issues[#issues + 1] = { severity = "error", path = "estimatedDuration", message = "Set the expected debuff duration in seconds." }
+      end
+    elseif not isCooldownTracking(self.draft)
+      and not isDirectAuraTracking(self.draft)
+      and tostring(self.draft.triggerType or "cast") == "cast"
+      and tostring(self.draft.castSpellIDs or "") == "" then
+      issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "Add at least one trigger spell to drive this aura." }
     end
-    self:UpdateHeader()
-    self:ValidateDraft()
-    self:RefreshTabButtons()
-    self:RenderTab(self.currentTab or "Tracking")
-    self:RefreshLivePreview(true)
-    return
-  end
-
-  if isEstimatedTargetTracking(self.draft) then
-    if tostring(self.draft.castSpellIDs or "") == "" then
-      issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "Add at least one spell you cast to start this debuff timer." }
-    end
-    if tonumber(self.draft.estimatedDuration) == nil or tonumber(self.draft.estimatedDuration) <= 0 then
-      issues[#issues + 1] = { severity = "error", path = "estimatedDuration", message = "Set the expected debuff duration in seconds." }
-    end
-  elseif not isCooldownTracking(self.draft)
-    and not isDirectAuraTracking(self.draft)
-    and tostring(self.draft.triggerType or "cast") == "cast"
-    and tostring(self.draft.castSpellIDs or "") == "" then
-    issues[#issues + 1] = { severity = "warn", path = "castSpellIDs", message = "Add at least one trigger spell to drive this aura." }
   end
 
   if not isCooldownTracking(self.draft) and not isDirectAuraTracking(self.draft) and not isEstimatedTargetTracking(self.draft) then
@@ -1125,6 +1124,7 @@ function AuraEditorPanel:ValidateDraft()
   else
     V:SetEntries(issues)
   end
+  self._validatingDraft = false
 end
 
 function AuraEditorPanel:UpdateHeader()
@@ -1387,41 +1387,64 @@ function AuraEditorPanel:LoadAura(auraId)
 
   self._loadAuraInProgress = true
   self._loadingAuraId = auraId
-  self.draft = Repo:GetAuraDraft(auraId)
-  self.deleteArmedUntil = nil
-  if self.draft and tostring(self.draft.unit or "player") == "target" and tostring(self.draft.trackingMode or "confirmed") == "confirmed" then
-    self.draft.trackingMode = "estimated"
-    self.draft.triggerType = "cast"
-    self.draft.actionMode = "produce"
-    self.draft.onlyMine = true
-  end
-  self.triggerEditMode = tostring(self.draft and self.draft.actionMode or "produce")
-  if self.draft then
-    self.draft._produceTriggersDirty = false
-  end
-  self.currentAuraId = self.draft and self.draft.id or auraId
-  if S and S.SetDirty then
-    S:SetDirty(false)
-  end
+  local ok, err = xpcall(function()
+    self.draft = Repo:GetAuraDraft(auraId)
+    self.deleteArmedUntil = nil
+    if self.draft and tostring(self.draft.unit or "player") == "target" and tostring(self.draft.trackingMode or "confirmed") == "confirmed" then
+      self.draft.trackingMode = "estimated"
+      self.draft.triggerType = "cast"
+      self.draft.actionMode = "produce"
+      self.draft.onlyMine = true
+    end
+    self.triggerEditMode = tostring(self.draft and self.draft.actionMode or "produce")
+    if self.draft then
+      self.draft._produceTriggersDirty = false
+    end
+    self.currentAuraId = self.draft and self.draft.id or auraId
+    if S and S.SetDirty then
+      S:SetDirty(false)
+    end
 
-  self:UpdateHeader()
-  self:RefreshTabButtons()
-  local tab = (S and S.Get and S:Get().activeTab) or "Tracking"
-  if not isTabAvailable(self.draft, tab, self.showAdvanced) then
-    tab = "Tracking"
-    if S and S.SetActiveTab then
-      S:SetActiveTab(tab)
+    self:UpdateHeader()
+    self:RefreshTabButtons()
+    local tab = (S and S.Get and S:Get().activeTab) or "Tracking"
+    if not isTabAvailable(self.draft, tab, self.showAdvanced) then
+      tab = "Tracking"
+      if S and S.SetActiveTab then
+        S:SetActiveTab(tab)
+      end
+    end
+    self:RenderTab(tab)
+    self:ValidateDraft()
+    self:RefreshLivePreview(true)
+    if self.RefreshDeleteButton then
+      self:RefreshDeleteButton()
+    end
+    if S and S.SetDirty then
+      S:SetDirty(false)
+    end
+  end, function(loadErr)
+    return debugstack and (tostring(loadErr) .. "\n" .. debugstack(2, 8, 8)) or tostring(loadErr)
+  end)
+
+  if not ok then
+    self.draft = Repo:CreateDraft()
+    self.currentAuraId = self.draft and self.draft.id or nil
+    self.deleteArmedUntil = nil
+    if ns.state then
+      ns.state.selectedAuraPreviewItem = nil
+    end
+    if S and S.SetDirty then
+      S:SetDirty(false)
+    end
+    if V and V.SetStatus then
+      V:SetStatus("error", "Failed to load aura. Draft reset.")
+    end
+    if ns.Debug and ns.Debug.Logf then
+      ns.Debug:Logf("LoadAura failed auraId=%s err=%s", tostring(auraId), tostring(err))
     end
   end
-  self:RenderTab(tab)
-  self:ValidateDraft()
-  self:RefreshLivePreview(true)
-  if self.RefreshDeleteButton then
-    self:RefreshDeleteButton()
-  end
-  if S and S.SetDirty then
-    S:SetDirty(false)
-  end
+
   self._forceAuraReload = false
   self._loadAuraInProgress = false
   self._loadingAuraId = nil
@@ -2406,9 +2429,9 @@ function AuraEditorPanel:RenderTrackingDetailsCard(y, title, body, fields)
     return y
   end
 
-  local cardHeight = 42
+  local cardHeight = 50
   for i = 1, #fields do
-    cardHeight = cardHeight + estimateFieldHeight(fields[i])
+    cardHeight = cardHeight + estimateFieldHeight(fields[i]) + 6
   end
 
   local card = createCard(
@@ -2425,8 +2448,9 @@ function AuraEditorPanel:RenderTrackingDetailsCard(y, title, body, fields)
   )
   self.fieldWidgets[#self.fieldWidgets + 1] = card
 
-  local nextY = self:RenderGenericFields(fields, -4, card.content, 2, -2)
-  card.content:SetHeight(math.max(24, -nextY + 6))
+  local nextY = self:RenderGenericFields(fields, -2, card.content, 8, -8)
+  card.content:SetHeight(math.max(24, -nextY + 10))
+  card:SetHeight(card.content:GetHeight() + 40)
   return y - card:GetHeight() - 10
 end
 
@@ -3267,10 +3291,76 @@ function AuraEditorPanel:DuplicateCurrent()
   if S and S.SetSelectedAura then
     S:SetSelectedAura(newId, "duplicate")
   end
-  V:SetStatus("ok", "Aura duplicated.")
+  V:SetStatus("ok", "Variant created from the selected aura.")
   if E then
     E:Emit(E.Names.FILTER_CHANGED, { key = "duplicate", value = newId })
   end
+end
+
+function AuraEditorPanel:TestTrigger()
+  if not self.draft then
+    V:SetStatus("warn", "Select or create an aura first.")
+    return
+  end
+
+  self:CommitProduceTriggerWidgets()
+  self:ValidateDraft()
+
+  if self.hasValidationErrors then
+    V:SetStatus("warn", "Fix validation errors before running a trigger test.")
+    return
+  end
+
+  local previewItem = nil
+  if ns and ns.state then
+    ns.state.selectedAura = {
+      key = tostring(self.currentAuraId or self.draft._sourceKey or self.draft.id or ""),
+      unit = tostring(self.draft.unit or "player"),
+      spellID = tonumber(self.draft.spellID) or 0,
+      instanceUID = tostring(self.draft.instanceUID or ""),
+    }
+  end
+
+  if UI and UI.Bindings and UI.Bindings.ToSettingsDataModel and ns.SettingsData and ns.SettingsData.BuildWatchItemFromModel then
+    local settingsModel = UI.Bindings:ToSettingsDataModel(self.draft)
+    local existingEntry = nil
+    if ns.SettingsData.ResolveEntry then
+      local sourceKey = tostring(self.currentAuraId or self.draft._sourceKey or self.draft.id or "")
+      existingEntry = ns.SettingsData:ResolveEntry(sourceKey)
+      local existingUID = existingEntry and existingEntry.item and tostring(existingEntry.item.instanceUID or "") or ""
+      if existingUID ~= "" then
+        settingsModel.instanceUID = existingUID
+        self.draft.instanceUID = existingUID
+        if ns and ns.state and ns.state.selectedAura then
+          ns.state.selectedAura.instanceUID = existingUID
+        end
+      end
+    end
+    previewItem = ns.SettingsData:BuildWatchItemFromModel(settingsModel, { existingItem = existingEntry and existingEntry.item or nil })
+  end
+
+  if not previewItem then
+    previewItem = (ns.Utils and ns.Utils.DeepCopy and ns.Utils.DeepCopy(self.draft)) or {}
+  end
+
+  if ns and ns.state then
+    ns.state.selectedAuraPreviewItem = previewItem
+  end
+
+  local duration = tonumber(previewItem.duration) or tonumber(previewItem.estimatedDuration) or tonumber(self.draft.duration) or tonumber(self.draft.estimatedDuration) or 8
+  duration = math.max(0.5, duration)
+
+  if E then
+    E:Emit(E.Names.SIMULATE_TRIGGER, {
+      kind = "produce",
+      duration = duration,
+      draft = previewItem,
+    })
+  end
+  if ns.EventRouter and ns.EventRouter.RefreshAll then
+    ns.EventRouter:RefreshAll()
+  end
+  V:SetStatus("ok", "Trigger test played in the live preview.")
 end
 
 function AuraEditorPanel:ExportCurrent()
@@ -3515,7 +3605,7 @@ function AuraEditorPanel:Create(parent)
 
   o.scroll = CreateFrame("ScrollFrame", nil, o.frame)
   o.scroll:SetPoint("TOPLEFT", 18, -122)
-  o.scroll:SetPoint("BOTTOMRIGHT", -8, 40)
+  o.scroll:SetPoint("BOTTOMRIGHT", -8, 64)
   o.scroll:EnableMouseWheel(true)
 
   o.content = CreateFrame("Frame", nil, o.scroll)
@@ -3597,10 +3687,10 @@ function AuraEditorPanel:Create(parent)
   end
 
   o.btnDuplicate = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
-  o.btnDuplicate:SetSize(84, 20)
+  o.btnDuplicate:SetSize(110, 20)
   o.btnDuplicate:SetParent(o.actionBar)
   o.btnDuplicate:SetPoint("LEFT", o.btnReset, "RIGHT", 8, 0)
-  o.btnDuplicate:SetText("Duplicate")
+  o.btnDuplicate:SetText("New Variant")
   o.btnDuplicate:SetScript("OnClick", function()
     o:DuplicateCurrent()
   end)
@@ -3609,10 +3699,22 @@ function AuraEditorPanel:Create(parent)
   end
   o.duplicateButton = o.btnDuplicate
 
+  o.btnTest = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
+  o.btnTest:SetSize(90, 20)
+  o.btnTest:SetParent(o.actionBar)
+  o.btnTest:SetPoint("LEFT", o.btnDuplicate, "RIGHT", 8, 0)
+  o.btnTest:SetText("Test Trigger")
+  o.btnTest:SetScript("OnClick", function()
+    o:TestTrigger()
+  end)
+  if Skin and Skin.ApplyButton then
+    Skin:SetButtonVariant(o.btnTest, "ghost")
+  end
+
   o.btnExport = CreateFrame("Button", nil, o.frame, "UIPanelButtonTemplate")
   o.btnExport:SetSize(72, 20)
   o.btnExport:SetParent(o.actionBar)
-  o.btnExport:SetPoint("LEFT", o.btnDuplicate, "RIGHT", 8, 0)
+  o.btnExport:SetPoint("LEFT", o.btnTest, "RIGHT", 8, 0)
   o.btnExport:SetText("Export")
   o.btnExport:SetScript("OnClick", function()
     o:ExportCurrent()
@@ -3708,5 +3810,3 @@ function AuraEditorPanel:Create(parent)
 end
 
 Panels.AuraEditorPanel = AuraEditorPanel
-
-

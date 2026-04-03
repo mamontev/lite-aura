@@ -527,8 +527,11 @@ function S:SetButtonVariant(button, variant)
   if not button then
     return
   end
-  button._alButtonVariant = tostring(variant or "default")
-  self:ApplyButton(button)
+  variant = tostring(variant or "default")
+  if button._alButtonVariant ~= variant then
+    button._alButtonVariant = variant
+    self:ApplyButton(button)
+  end
   applyButtonState(button, "normal")
 end
 
@@ -536,8 +539,11 @@ function S:SetButtonSelected(button, selected)
   if not button then
     return
   end
-  button._alButtonSelected = selected == true
-  self:ApplyButton(button)
+  selected = selected == true
+  if button._alButtonSelected ~= selected then
+    button._alButtonSelected = selected
+    self:ApplyButton(button)
+  end
   applyButtonState(button, "normal")
 end
 
@@ -549,6 +555,24 @@ function S:ApplyEditBox(edit)
 
   if not edit._alEditStyled then
     edit._alEditStyled = true
+    if edit.Left then
+      edit.Left:SetAlpha(0)
+      edit.Left:Hide()
+    end
+    if edit.Middle then
+      edit.Middle:SetAlpha(0)
+      edit.Middle:Hide()
+    end
+    if edit.Right then
+      edit.Right:SetAlpha(0)
+      edit.Right:Hide()
+    end
+    local regions = { edit:GetRegions() }
+    for _, region in ipairs(regions) do
+      if region and region.GetObjectType and region:GetObjectType() == "Texture" then
+        region:SetAlpha(0)
+      end
+    end
     edit._alEditBG = edit:CreateTexture(nil, "BACKGROUND")
     edit._alEditBG:SetPoint("TOPLEFT", -4, 4)
     edit._alEditBG:SetPoint("BOTTOMRIGHT", 4, -4)
@@ -559,18 +583,48 @@ function S:ApplyEditBox(edit)
     edit._alEditBorder:SetPoint("BOTTOMRIGHT", 4, -4)
     edit._alEditBorder:SetTexture("Interface\\Buttons\\WHITE8x8")
 
+    edit._alEditInner = edit:CreateTexture(nil, "BORDER")
+    edit._alEditInner:SetPoint("TOPLEFT", -3, 3)
+    edit._alEditInner:SetPoint("BOTTOMRIGHT", 3, -3)
+    edit._alEditInner:SetTexture("Interface\\Buttons\\WHITE8x8")
+
+    edit._alEditShade = edit:CreateTexture(nil, "ARTWORK")
+    edit._alEditShade:SetPoint("TOPLEFT", -3, 3)
+    edit._alEditShade:SetPoint("BOTTOMRIGHT", 3, -3)
+    edit._alEditShade:SetTexture("Interface\\Buttons\\WHITE8x8")
+
     edit._alEditAccent = edit:CreateTexture(nil, "ARTWORK")
     edit._alEditAccent:SetPoint("TOPLEFT", -3, 3)
     edit._alEditAccent:SetPoint("TOPRIGHT", 3, 3)
     edit._alEditAccent:SetHeight(1)
     edit._alEditAccent:SetTexture("Interface\\Buttons\\WHITE8x8")
+
+    edit._alEditBottom = edit:CreateTexture(nil, "ARTWORK")
+    edit._alEditBottom:SetPoint("BOTTOMLEFT", -3, -3)
+    edit._alEditBottom:SetPoint("BOTTOMRIGHT", 3, -3)
+    edit._alEditBottom:SetHeight(1)
+    edit._alEditBottom:SetTexture("Interface\\Buttons\\WHITE8x8")
   end
 
   do
     local ar, ag, ab = getClassAccentColor()
-    edit._alEditBG:SetVertexColor(p.sectionBG[1], p.sectionBG[2], p.sectionBG[3], 0.94)
-    edit._alEditBorder:SetVertexColor(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.56)
-    edit._alEditAccent:SetVertexColor(ar, ag, ab, 0.75)
+    local bgR = math.min(1, p.sectionBG[1] + 0.004)
+    local bgG = math.min(1, p.sectionBG[2] + 0.004)
+    local bgB = math.min(1, p.sectionBG[3] + 0.008)
+    edit._alEditBG:SetVertexColor(bgR, bgG, bgB, 0.98)
+    edit._alEditBorder:SetVertexColor(p.sectionBorder[1], p.sectionBorder[2], p.sectionBorder[3], 0.82)
+    edit._alEditInner:SetVertexColor(1, 1, 1, 0.03)
+    edit._alEditShade:SetVertexColor(0, 0, 0, 0.12)
+    edit._alEditAccent:SetVertexColor(ar, ag, ab, 0.18)
+    edit._alEditBottom:SetVertexColor(ar, ag, ab, 0.08)
+  end
+
+  if edit.SetTextColor then
+    edit:SetTextColor(0.94, 0.96, 0.98)
+  end
+  if edit.SetShadowColor then
+    edit:SetShadowColor(0, 0, 0, 0.85)
+    edit:SetShadowOffset(1, -1)
   end
 end
 
@@ -836,16 +890,32 @@ function S:ApplyCloseButton(button)
   end
   self:SetButtonVariant(button, "ghost")
   button:SetSize(24, 24)
-  if button.SetNormalTexture then
-    button:SetNormalTexture("")
-    button:SetPushedTexture("")
-    button:SetHighlightTexture("")
+  if button.GetNormalTexture and button:GetNormalTexture() then
+    button:GetNormalTexture():SetAlpha(0)
+  end
+  if button.GetPushedTexture and button:GetPushedTexture() then
+    button:GetPushedTexture():SetAlpha(0)
+  end
+  if button.GetHighlightTexture and button:GetHighlightTexture() then
+    button:GetHighlightTexture():SetAlpha(0)
+  end
+  if button.GetDisabledTexture and button:GetDisabledTexture() then
+    button:GetDisabledTexture():SetAlpha(0)
+  end
+  for _, region in ipairs({ button:GetRegions() }) do
+    if region and region.GetObjectType and region:GetObjectType() == "Texture" then
+      region:SetAlpha(0)
+      region:Hide()
+    end
   end
   if not button._alCloseGlyph then
     button._alCloseGlyph = button:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     button._alCloseGlyph:SetPoint("CENTER", 0, 0)
     button._alCloseGlyph:SetText("x")
   end
+  button._alCloseGlyph:SetTextColor(0.94, 0.96, 0.98)
+  button._alCloseGlyph:SetShadowColor(0, 0, 0, 0.85)
+  button._alCloseGlyph:SetShadowOffset(1, -1)
 end
 
 function S:GetListRowColor(state)

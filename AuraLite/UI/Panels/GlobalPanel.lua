@@ -87,23 +87,24 @@ function GlobalPanel:Create(parent)
   local o = setmetatable({}, self)
 
   o.frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-  o.frame:SetSize(396, 278)
+  o.frame:SetSize(396, 320)
   applyFloatingWindowChrome(o.frame)
   createBackdrop(o.frame)
   o.frame:Hide()
 
   o.title = o.frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  o.title:SetPoint("TOPLEFT", 14, -16)
+  o.title:SetPoint("TOPLEFT", 14, -14)
+  o.title:SetPoint("TOPRIGHT", -44, -14)
+  o.title:SetJustifyH("LEFT")
+  o.title:SetJustifyV("MIDDLE")
   o.title:SetText("Global Studio")
   o.title:SetTextColor(0.98, 0.88, 0.34)
+  o.title:SetHeight(20)
 
   o.subtitle = o.frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  o.subtitle:SetPoint("TOPLEFT", 14, -34)
-  o.subtitle:SetPoint("RIGHT", -14, 0)
-  o.subtitle:SetJustifyH("LEFT")
-  o.subtitle:SetText("Launch interface settings, localization, import, and diagnostics from one place.")
+  o.subtitle:SetText("")
+  o.subtitle:Hide()
   attachDragHandle(o.frame, o.title)
-  attachDragHandle(o.frame, o.subtitle)
 
   if Widgets.SectionHeaderWidget and Widgets.SectionHeaderWidget.Create then
     o.header = Widgets.SectionHeaderWidget:Create(o.frame, {
@@ -113,8 +114,8 @@ function GlobalPanel:Create(parent)
       compact = true,
       lineWidth = 62,
     })
-    o.header:SetPoint("TOPLEFT", 14, -58)
-    o.header:SetPoint("TOPRIGHT", -14, -58)
+    o.header:SetPoint("TOPLEFT", 14, -42)
+    o.header:SetPoint("TOPRIGHT", -14, -42)
     attachDragHandle(o.frame, o.header)
   end
 
@@ -122,16 +123,17 @@ function GlobalPanel:Create(parent)
   if Skin and Skin.ApplyInsetPanel then
     Skin:ApplyInsetPanel(body)
   end
-  body:SetPoint("TOPLEFT", 14, -86)
-  body:SetPoint("TOPRIGHT", -14, -86)
-  body:SetPoint("BOTTOMRIGHT", -14, 52)
-  body:SetPoint("BOTTOMLEFT", 14, 52)
+  body:SetPoint("TOPLEFT", 14, -72)
+  body:SetPoint("TOPRIGHT", -14, -72)
+  body:SetPoint("BOTTOMRIGHT", -14, 54)
+  body:SetPoint("BOTTOMLEFT", 14, 54)
 
   local bodyText = body:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   bodyText:SetPoint("TOPLEFT", 12, -10)
   bodyText:SetPoint("RIGHT", -12, 0)
   bodyText:SetJustifyH("LEFT")
   bodyText:SetText("Quick launch tools for settings, localization, import, and diagnostics.")
+  bodyText:SetSpacing(2)
 
   o.btnSettings = makeButton(body, "Interface Settings", 224, function()
     if ns.OptionsIntegration and ns.OptionsIntegration.OpenBlizzardCategory then
@@ -142,7 +144,7 @@ function GlobalPanel:Create(parent)
     o.frame:Hide()
   end)
   o.btnSettings:SetSize(336, 28)
-  o.btnSettings:SetPoint("TOPLEFT", 12, -38)
+  o.btnSettings:SetPoint("TOPLEFT", 12, -48)
 
   o.btnLocalization = makeButton(body, "Localization", 224, function()
     if ns.SettingsUI and ns.SettingsUI.OpenLocalizationPanel then
@@ -153,7 +155,7 @@ function GlobalPanel:Create(parent)
     o.frame:Hide()
   end)
   o.btnLocalization:SetSize(336, 28)
-  o.btnLocalization:SetPoint("TOPLEFT", 12, -74)
+  o.btnLocalization:SetPoint("TOPLEFT", 12, -84)
 
   o.btnDebug = makeButton(body, "Toggle Debug", 224, function()
     if ns.Debug and ns.Debug.Toggle then
@@ -161,7 +163,7 @@ function GlobalPanel:Create(parent)
     end
   end)
   o.btnDebug:SetSize(336, 28)
-  o.btnDebug:SetPoint("TOPLEFT", 12, -110)
+  o.btnDebug:SetPoint("TOPLEFT", 12, -120)
 
   o.btnImport = makeButton(body, "Import String", 224, function()
     if E then
@@ -170,7 +172,7 @@ function GlobalPanel:Create(parent)
     o.frame:Hide()
   end)
   o.btnImport:SetSize(336, 28)
-  o.btnImport:SetPoint("TOPLEFT", 12, -146)
+  o.btnImport:SetPoint("TOPLEFT", 12, -156)
 
   o.footer = CreateFrame("Frame", nil, o.frame)
   o.footer:SetPoint("BOTTOMLEFT", 14, 12)
@@ -185,6 +187,8 @@ function GlobalPanel:Create(parent)
 
   o.footerHint = o.footer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   o.footerHint:SetPoint("LEFT", 0, -6)
+  o.footerHint:SetPoint("RIGHT", -96, -6)
+  o.footerHint:SetJustifyH("LEFT")
   o.footerHint:SetText("Quick launch panel for tools that sit outside the main inspector.")
 
   o.btnClose = makeButton(o.footer, "Close", 88, function()

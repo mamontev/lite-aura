@@ -322,17 +322,135 @@ function A:GetSpellCooldownData(spellID)
     return 1
   end
 
+  local function safeBoolean(value)
+    if type(value) == "boolean" and not self:IsSecret(value) then
+      return value
+    end
+    return nil
+  end
+
+  local function safeDurationObject(value)
+    if value == nil or self:IsSecret(value) then
+      return nil
+    end
+    local valueType = type(value)
+    if valueType == "table" or valueType == "userdata" then
+      return value
+    end
+    return nil
+  end
+
+  local function getChargeData(spellIDValue)
+    local charges, maxCount, chargeStartTime, chargeDurationSeconds = nil, nil, 0, 0
+
+    if C_Spell and type(C_Spell.GetSpellCharges) == "function" then
+      local ok, data = pcall(C_Spell.GetSpellCharges, spellIDValue)
+      if ok and type(data) == "table" then
+        charges = safeNumber(data.currentCharges or data.charges, nil)
+        maxCount = safeNumber(data.maxCharges, nil)
+        chargeStartTime = safeNumber(data.cooldownStartTime or data.startTime, 0)
+        chargeDurationSeconds = safeNumber(data.cooldownDuration or data.duration, 0)
+      end
+    end
+
+    if charges == nil and GetSpellCharges then
+      local c, m, cs, cd = GetSpellCharges(spellIDValue)
+      charges = safeNumber(c, nil)
+      maxCount = safeNumber(m, nil)
+      chargeStartTime = safeNumber(cs, chargeStartTime)
+      chargeDurationSeconds = safeNumber(cd, chargeDurationSeconds)
+    end
+
+    return charges, maxCount, chargeStartTime, chargeDurationSeconds
+  end
+
+  local function getDurationObject(methodName, spellIDValue)
+    if not (C_Spell and type(C_Spell[methodName]) == "function") then
+      return nil
+    end
+    local ok, object = pcall(C_Spell[methodName], spellIDValue)
+    if not ok then
+      return nil
+    end
+    return safeDurationObject(object)
+  end
+
+  local function getLossOfControlCooldownData(spellIDValue)
+    local info = nil
+    if C_Spell and type(C_Spell.GetSpellLossOfControlCooldownInfo) == "function" then
+      local ok, data = pcall(C_Spell.GetSpellLossOfControlCooldownInfo, spellIDValue)
+      if ok and type(data) == "table" then
+        info = data
+      end
+    elseif type(GetSpellLossOfControlCooldownInfo) == "function" then
+      local ok, data = pcall(GetSpellLossOfControlCooldownInfo, spellIDValue)
+      if ok and type(data) == "table" then
+        info = data
+      end
+    elseif type(GetSpellLossOfControlCooldown) == "function" then
+      local ok, startValue, durationValue = pcall(GetSpellLossOfControlCooldown, spellIDValue)
+      if ok then
+        info = {
+          startTime = startValue,
+          duration = durationValue,
+        }
+      end
+    end
+
+    if type(info) ~= "table" then
+      return nil
+    end
+
+    local locStart = safeNumber(info.startTime or info.cooldownStartTime, 0)
+    local locDuration = safeNumber(info.duration or info.cooldownDuration, 0)
+    local locActive = safeBoolean(info.isActive)
+    local replaceNormal = safeBoolean(info.shouldReplaceNormalCooldown)
+    local locModRate = safeNumber(info.modRate, 1)
+    local locDurationObject = safeDurationObject(info.durationObject or info.cooldownDurationObject)
+
+    if locActive == false then
+      return nil
+    end
+    if locActive == nil then
+      locActive = locStart > 0 and locDuration > 0
+    end
+    if not locActive then
+      return nil
+    end
+    if locStart <= 0 or locDuration <= 0.05 then
+      return nil
+    end
+
+    return {
+      startTime = locStart,
+      duration = locDuration,
+      expirationTime = locStart + locDuration,
+      isActive = true,
+      shouldReplaceNormalCooldown = replaceNormal == true,
+      modRate = locModRate,
+      durationObject = locDurationObject,
+      durationKind = "loss_of_control",
+      canCompute = true,
+    }
+  end
+
   local startTime = 0
   local duration = 0
   local enabled = 1
+  local active = nil
+  local modRate = 1
 
-  local cStart, cDuration, cEnabled = 0, 0, 1
+  local cStart, cDuration, cEnabled, cActive, cMaxCharges, cCurrentCharges, cModRate = 0, 0, 1, nil, nil, nil, 1
   if C_Spell and C_Spell.GetSpellCooldown then
     local ok, data = pcall(C_Spell.GetSpellCooldown, spellID)
     if ok and type(data) == "table" then
       cStart = safeNumber(data.startTime or data.cooldownStartTime, 0)
       cDuration = safeNumber(data.duration or data.cooldownDuration, 0)
       cEnabled = safeEnabled(data.isEnabled)
+       cActive = safeBoolean(data.isActive)
+       cMaxCharges = safeNumber(data.maxCharges, nil)
+       cCurrentCharges = safeNumber(data.currentCharges or data.charges, nil)
+       cModRate = safeNumber(data.modRate, 1)
     end
   end
 
@@ -346,24 +464,24 @@ function A:GetSpellCooldownData(spellID)
 
   if cDuration >= lDuration then
     startTime, duration, enabled = cStart, cDuration, cEnabled
+    active = cActive
+    modRate = cModRate
   else
     startTime, duration, enabled = lStart, lDuration, lEnabled
   end
 
-  local chargeStart = 0
-  local chargeDuration = 0
-  local currentCharges, maxCharges = nil, nil
-  if GetSpellCharges then
-    local c, m, cs, cd = GetSpellCharges(spellID)
-    currentCharges = safeNumber(c, nil)
-    maxCharges = safeNumber(m, nil)
-    chargeStart = safeNumber(cs, 0)
-    chargeDuration = safeNumber(cd, 0)
+  local currentCharges, maxCharges, chargeStart, chargeDuration = getChargeData(spellID)
+  if maxCharges == nil then
+    maxCharges = cMaxCharges
+  end
+  if currentCharges == nil then
+    currentCharges = cCurrentCharges
   end
 
   local finalStart = startTime
   local finalDuration = duration
-  if maxCharges and maxCharges > 1 and currentCharges and currentCharges < maxCharges and chargeDuration > 0 and chargeStart > 0 then
+  local usesChargeCooldown = maxCharges and maxCharges > 1 and currentCharges and currentCharges < maxCharges and chargeDuration > 0 and chargeStart > 0
+  if usesChargeCooldown then
     finalStart = chargeStart
     finalDuration = chargeDuration
   end
@@ -371,11 +489,18 @@ function A:GetSpellCooldownData(spellID)
   if enabled == 0 then
     return nil
   end
+  if active == false then
+    return nil
+  end
   if not self:IsSafeNumber(finalStart) or not self:IsSafeNumber(finalDuration) then
     return nil
   end
   if finalDuration <= 0 or finalStart <= 0 then
     return nil
+  end
+
+  if active == nil then
+    active = finalDuration > 0 and finalStart > 0
   end
 
   local gcdStart = 0
@@ -401,12 +526,82 @@ function A:GetSpellCooldownData(spellID)
     return nil
   end
 
+  local durationObject = nil
+  if usesChargeCooldown then
+    durationObject = getDurationObject("GetSpellChargeCooldown", spellID)
+      or getDurationObject("GetSpellChargeDuration", spellID)
+  end
+  if not durationObject then
+    durationObject = getDurationObject("GetSpellCooldownDuration", spellID)
+  end
+
+  local locCooldown = getLossOfControlCooldownData(spellID)
+  if locCooldown and (locCooldown.shouldReplaceNormalCooldown == true or active ~= true) then
+    locCooldown.isEnabled = enabled ~= 0
+    locCooldown.currentCharges = currentCharges
+    locCooldown.maxCharges = maxCharges
+    if not locCooldown.durationObject then
+      locCooldown.durationObject = durationObject
+    end
+    return locCooldown
+  end
+
   return {
     startTime = finalStart,
     duration = finalDuration,
     expirationTime = finalStart + finalDuration,
     canCompute = true,
+    isActive = active == true,
+    isEnabled = enabled ~= 0,
+    modRate = modRate,
+    currentCharges = currentCharges,
+    maxCharges = maxCharges,
+    durationObject = durationObject,
+    durationKind = usesChargeCooldown and "charge" or "cooldown",
+    shouldReplaceNormalCooldown = false,
   }
+end
+
+function A:ClearCooldownFrame(cooldownFrame)
+  if not cooldownFrame then
+    return false
+  end
+  if type(cooldownFrame.SetCooldown) == "function" then
+    local ok = pcall(cooldownFrame.SetCooldown, cooldownFrame, 0, 0)
+    if ok then
+      return true
+    end
+  end
+  return false
+end
+
+function A:ApplyCooldownToFrame(cooldownFrame, cooldownData)
+  if not cooldownFrame then
+    return false
+  end
+
+  if type(cooldownData) ~= "table" or cooldownData.isActive == false then
+    return self:ClearCooldownFrame(cooldownFrame)
+  end
+
+  local durationObject = cooldownData.durationObject
+  if durationObject ~= nil and type(cooldownFrame.SetCooldownFromDurationObject) == "function" then
+    local ok = pcall(cooldownFrame.SetCooldownFromDurationObject, cooldownFrame, durationObject)
+    if ok then
+      return true
+    end
+  end
+
+  local startTime = tonumber(cooldownData.startTime) or 0
+  local duration = tonumber(cooldownData.duration) or 0
+  if startTime > 0 and duration > 0 and type(cooldownFrame.SetCooldown) == "function" then
+    local ok = pcall(cooldownFrame.SetCooldown, cooldownFrame, startTime, duration)
+    if ok then
+      return true
+    end
+  end
+
+  return self:ClearCooldownFrame(cooldownFrame)
 end
 
 function A:NormalizeTexturePath(path)

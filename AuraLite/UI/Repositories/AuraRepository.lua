@@ -23,6 +23,33 @@ local function cloneShallow(tbl)
   return out
 end
 
+local function nextVariantName(baseName)
+  baseName = tostring(baseName or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if baseName == "" then
+    baseName = "Aura"
+  end
+
+  local existing = {}
+  local rows = R.ListAuras and R:ListAuras() or {}
+  for i = 1, #(rows or {}) do
+    local rowName = tostring(rows[i] and rows[i].name or "")
+    if rowName ~= "" then
+      existing[rowName] = true
+    end
+  end
+
+  local candidate = baseName .. " Variant"
+  if not existing[candidate] then
+    return candidate
+  end
+
+  local index = 2
+  while existing[candidate .. " " .. tostring(index)] do
+    index = index + 1
+  end
+  return candidate .. " " .. tostring(index)
+end
+
 local function isRealMode()
   return ns.SettingsData and type(ns.SettingsData.ListEntries) == "function"
 end
@@ -374,7 +401,7 @@ function R:DuplicateAura(auraId)
   if baseName == "" then
     baseName = "Aura"
   end
-  clone.name = baseName .. " Copy"
+  clone.name = nextVariantName(baseName)
   clone.displayName = clone.name
 
   return self:SaveDraft(clone)

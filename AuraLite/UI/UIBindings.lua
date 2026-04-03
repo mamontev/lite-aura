@@ -13,6 +13,14 @@ local function trim(text)
   return text
 end
 
+local function normalizeScalarString(value, fallback)
+  local valueType = type(value)
+  if valueType == "string" or valueType == "number" or valueType == "boolean" then
+    return tostring(value)
+  end
+  return tostring(fallback or "")
+end
+
 local function parseCSVNumbers(value)
   local out, seen = {}, {}
   if type(value) == "table" then
@@ -110,8 +118,8 @@ local function cloneProduceTriggers(value, fallbackCSV, fallbackStackAmount)
 end
 
 local function normalizeTrackingMode(value, unit)
-  local mode = tostring(value or ""):lower()
-  unit = tostring(unit or "player")
+  local mode = normalizeScalarString(value, ""):lower()
+  unit = normalizeScalarString(unit, "player")
   if unit == "player" and mode == "cooldown" then
     return "cooldown"
   end
@@ -197,22 +205,22 @@ end
 function B:DraftFromEditableModel(model)
   model = model or {}
   local specList = parseCSVNumbers(model.loadSpecIDs)
-  local unit = tostring(model.unit or "player")
+  local unit = normalizeScalarString(model.unit, "player")
   local trackingMode = normalizeTrackingMode(model.trackingMode, unit)
-  local displayName = tostring(model.displayName or "")
-  local groupID = tostring(model.groupID or "")
+  local displayName = normalizeScalarString(model.displayName, "")
+  local groupID = normalizeScalarString(model.groupID, "")
   return {
-    id = tostring(model.key or ""),
+    id = normalizeScalarString(model.key, ""),
     name = displayName,
     displayName = displayName,
-    spellID = tostring(model.spellID or ""),
+    spellID = normalizeScalarString(model.spellID, ""),
     unit = unit,
     group = groupID,
     groupID = groupID,
-    groupName = tostring(model.groupName or ""),
-    groupDirection = tostring(model.groupDirection or "RIGHT"),
+    groupName = normalizeScalarString(model.groupName, ""),
+    groupDirection = normalizeScalarString(model.groupDirection, "RIGHT"),
     groupSpacing = tonumber(model.groupSpacing) or 4,
-    groupSort = tostring(model.groupSort or "list"),
+    groupSort = normalizeScalarString(model.groupSort, "list"),
     groupWrapAfter = tonumber(model.groupWrapAfter) or 0,
     groupOffsetX = tonumber(model.groupOffsetX) or 0,
     groupOffsetY = tonumber(model.groupOffsetY) or 0,
@@ -228,55 +236,55 @@ function B:DraftFromEditableModel(model)
     actionMode = "produce",
     duration = tonumber(model.duration) and math.max(1, tonumber(model.duration)) or (tonumber(model.estimatedDuration) and math.max(1, tonumber(model.estimatedDuration)) or 8),
     estimatedDuration = tonumber(model.estimatedDuration) or 8,
-    timerBehavior = tostring(model.timerBehavior or "reset"),
+    timerBehavior = normalizeScalarString(model.timerBehavior, "reset"),
     maxDuration = tonumber(model.maxDuration) or 0,
-    stackBehavior = tostring(model.stackBehavior or "replace"),
+    stackBehavior = normalizeScalarString(model.stackBehavior, "replace"),
     stackAmount = tonumber(model.stackAmount) or 1,
     maxStacks = tonumber(model.maxStacks) or 1,
-    consumeBehavior = tostring(model.consumeBehavior or "hide"),
-    displayMode = tostring(model.timerVisual or "icon"),
+    consumeBehavior = normalizeScalarString(model.consumeBehavior, "hide"),
+    displayMode = normalizeScalarString(model.timerVisual, "icon"),
     lowTime = tonumber(model.lowTimeThreshold) or 0,
-    soundOnShow = tostring(model.soundOnGain or "default"),
-    soundOnLow = tostring(model.soundOnLow or "default"),
-    soundOnExpire = tostring(model.soundOnExpire or "none"),
-    loadClassToken = tostring(model.loadClassToken or ""),
+    soundOnShow = normalizeScalarString(model.soundOnGain, "default"),
+    soundOnLow = normalizeScalarString(model.soundOnLow, "default"),
+    soundOnExpire = normalizeScalarString(model.soundOnExpire, "none"),
+    loadClassToken = normalizeScalarString(model.loadClassToken, ""),
     loadSpecID = specList[1] or "",
     loadSpecIDs = specList,
-    instanceUID = tostring(model.instanceUID or ""),
+    instanceUID = normalizeScalarString(model.instanceUID, ""),
     onlyMine = model.onlyMine == true,
     alert = model.alert ~= false,
-    iconMode = tostring(model.iconMode or "spell"),
-    customTexture = tostring(model.customTexture or ""),
-    barTexture = tostring(model.barTexture or ""),
-    customText = tostring(model.customText or ""),
+    iconMode = normalizeScalarString(model.iconMode, "spell"),
+    customTexture = normalizeScalarString(model.customTexture, ""),
+    barTexture = normalizeScalarString(model.barTexture, ""),
+    customText = normalizeScalarString(model.customText, ""),
     stylePreset = normalizeStylePreset(model.stylePreset),
     visualStates = (ns.VisualStyle and ns.VisualStyle.CloneStates and ns.VisualStyle:CloneStates(model.visualStates)) or {
       onGain = "off",
       lowTime = "warning",
       maxStacks = "gold",
     },
-    timerVisual = tostring(model.timerVisual or "icon"),
+    timerVisual = normalizeScalarString(model.timerVisual, "icon"),
     iconWidth = defaultIconWidth(model.iconWidth),
     iconHeight = defaultIconHeight(model.iconHeight),
     barWidth = defaultBarWidth(model.barWidth),
     barHeight = defaultBarHeight(model.barHeight),
     showTimerText = model.showTimerText ~= false,
     timerTextSize = math.max(8, tonumber(model.timerTextSize) or 12),
-    timerTextFont = tostring(model.timerTextFont or "friz"),
-    barColor = tostring(model.barColor or ""),
+    timerTextFont = normalizeScalarString(model.timerTextFont, "friz"),
+    barColor = normalizeScalarString(model.barColor, ""),
     barGradientEnabled = model.barGradientEnabled == true,
-    barColor2 = tostring(model.barColor2 or ""),
-    barSide = tostring(model.barSide or "right"),
+    barColor2 = normalizeScalarString(model.barColor2, ""),
+    barSide = normalizeScalarString(model.barSide, "right"),
     showNameText = model.showNameText ~= false,
     nameTextSize = math.max(8, tonumber(model.nameTextSize) or 12),
-    nameTextFont = tostring(model.nameTextFont or "friz"),
+    nameTextFont = normalizeScalarString(model.nameTextFont, "friz"),
     showCustomText = model.showCustomText ~= false,
     customTextSize = math.max(8, tonumber(model.customTextSize) or 12),
-    customTextFont = tostring(model.customTextFont or "friz"),
-    timerAnchor = tostring(model.timerAnchor or "BOTTOM"),
+    customTextFont = normalizeScalarString(model.customTextFont, "friz"),
+    timerAnchor = normalizeScalarString(model.timerAnchor, "BOTTOM"),
     timerOffsetX = tonumber(model.timerOffsetX) or 0,
     timerOffsetY = tonumber(model.timerOffsetY) or -1,
-    customTextAnchor = tostring(model.customTextAnchor or "TOP"),
+    customTextAnchor = normalizeScalarString(model.customTextAnchor, "TOP"),
     customTextOffsetX = tonumber(model.customTextOffsetX) or 0,
     customTextOffsetY = tonumber(model.customTextOffsetY) or 2,
     produceTriggers = cloneProduceTriggers(model.produceTriggers, model.castSpellIDs, model.stackAmount),

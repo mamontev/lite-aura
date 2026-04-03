@@ -271,4 +271,194 @@ suite:case("Unknown proc aura IDs do not render proxy GCD cooldown rows", functi
   T.falsy(found)
 end)
 
+suite:case("Known cooldown spells do not light up from GCD-shaped proxy cooldown data", function()
+  local env, ns = makeEnv()
+  local E = ns.EventRouter
+
+  local spellID = 46968
+  env.knownSpells[spellID] = true
+
+  ns.TestMode = {
+    IsEnabled = function()
+      return false
+    end,
+    BuildPlaceholder = function(_, item)
+      return {
+        spellID = item.spellID,
+      }
+    end,
+  }
+
+  _G.GetSpellCooldown = function(queriedSpellID)
+    queriedSpellID = tonumber(queriedSpellID)
+    if queriedSpellID == 61304 or queriedSpellID == spellID then
+      return env.now - 0.1, 1.5, 1
+    end
+    return 0, 0, 1
+  end
+
+  ns.AuraAPI.GetSpellCooldownData = function(_, queriedSpellID)
+    if tonumber(queriedSpellID) == spellID then
+      return {
+        startTime = env.now - 0.1,
+        duration = 1.5,
+        expirationTime = env.now + 1.4,
+        canCompute = true,
+      }
+    end
+    return nil
+  end
+
+  table.insert(ns.db.watchlist.player, {
+    spellID = spellID,
+    displayName = "Shockwave",
+    unit = "player",
+    trackingMode = "cooldown",
+    timerVisual = "icon",
+    iconWidth = 36,
+    iconHeight = 36,
+    barWidth = 94,
+    barHeight = 16,
+    showTimerText = true,
+  })
+
+  local rowsByGroup = E:BuildRowsForUnit("player")
+  local found = false
+  for _, rows in pairs(rowsByGroup or {}) do
+    for i = 1, #rows do
+      if tonumber(rows[i].spellID) == spellID then
+        found = true
+        break
+      end
+    end
+  end
+
+  T.falsy(found)
+end)
+
+suite:case("Known cooldown spells do not light up after a different recent cast", function()
+  local env, ns = makeEnv()
+  local E = ns.EventRouter
+
+  local spellID = 46968
+  local otherSpellID = 372608
+  env.knownSpells[spellID] = true
+  env.knownSpells[otherSpellID] = true
+
+  ns.TestMode = {
+    IsEnabled = function()
+      return false
+    end,
+    BuildPlaceholder = function(_, item)
+      return {
+        spellID = item.spellID,
+      }
+    end,
+  }
+
+  E.lastAnyProcessedCast = {
+    spellID = otherSpellID,
+    at = env.now - 0.05,
+  }
+
+  _G.GetSpellCooldown = function(queriedSpellID)
+    queriedSpellID = tonumber(queriedSpellID)
+    if queriedSpellID == 61304 then
+      return 0, 0, 1
+    end
+    if queriedSpellID == spellID then
+      return env.now - 0.1, 1.5, 1
+    end
+    return 0, 0, 1
+  end
+
+  ns.AuraAPI.GetSpellCooldownData = function(_, queriedSpellID)
+    if tonumber(queriedSpellID) == spellID then
+      return {
+        startTime = env.now - 0.1,
+        duration = 1.5,
+        expirationTime = env.now + 1.4,
+        canCompute = true,
+      }
+    end
+    return nil
+  end
+
+  table.insert(ns.db.watchlist.player, {
+    spellID = spellID,
+    displayName = "Shockwave",
+    unit = "player",
+    trackingMode = "cooldown",
+    timerVisual = "icon",
+    iconWidth = 36,
+    iconHeight = 36,
+    barWidth = 94,
+    barHeight = 16,
+    showTimerText = true,
+  })
+
+  local rowsByGroup = E:BuildRowsForUnit("player")
+  local found = false
+  for _, rows in pairs(rowsByGroup or {}) do
+    for i = 1, #rows do
+      if tonumber(rows[i].spellID) == spellID then
+        found = true
+        break
+      end
+    end
+  end
+
+  T.falsy(found)
+end)
+
+suite:case("Cooldown tracking does not create placeholder rows in config preview mode", function()
+  local env, ns = makeEnv()
+  local E = ns.EventRouter
+
+  ns.TestMode = {
+    IsEnabled = function()
+      return true
+    end,
+    BuildPlaceholder = function(_, item)
+      return {
+        spellID = item.spellID,
+      }
+    end,
+  }
+
+  ns.UIV2 = {
+    ConfigFrame = {
+      IsShown = function()
+        return true
+      end,
+    },
+  }
+
+  table.insert(ns.db.watchlist.player, {
+    spellID = 46968,
+    displayName = "Shockwave",
+    unit = "player",
+    trackingMode = "cooldown",
+    timerVisual = "icon",
+    iconWidth = 36,
+    iconHeight = 36,
+    barWidth = 94,
+    barHeight = 16,
+    showTimerText = true,
+  })
+
+  local rowsByGroup = E:BuildRowsForUnit("player")
+  local found = false
+  for _, rows in pairs(rowsByGroup or {}) do
+    for i = 1, #rows do
+      if tonumber(rows[i].spellID) == 46968 then
+        found = true
+        break
+      end
+    end
+  end
+
+  T.falsy(found)
+end)
+
 return suite

@@ -108,6 +108,23 @@ function GroupsPanel:BuildRows()
   return (ns.SettingsData and ns.SettingsData.ListGroupsDetailed and ns.SettingsData:ListGroupsDetailed()) or {}
 end
 
+function GroupsPanel:AssignDraggedAuraToGroup(groupID)
+  local draggingAuraId = UI and UI.State and UI.State.GetDraggingAura and UI.State:GetDraggingAura() or nil
+  groupID = tostring(groupID or "")
+  if draggingAuraId and draggingAuraId ~= "" and groupID ~= "" and ns.SettingsData and ns.SettingsData.SetEntryGroup then
+    if ns.SettingsData:SetEntryGroup(draggingAuraId, groupID) then
+      self.selectedGroupID = groupID
+      self.selectedMemberKey = draggingAuraId
+      if UI and UI.State and UI.State.ClearDraggingAura then
+        UI.State:ClearDraggingAura()
+      end
+      self:LoadGroup(groupID)
+      return true
+    end
+  end
+  return false
+end
+
 function GroupsPanel:GetSelectedAuraContext()
   local state = UI and UI.State and UI.State.Get and UI.State:Get() or {}
   local auraId = state and state.selectedAuraId
@@ -178,6 +195,23 @@ function GroupsPanel:RenderList()
       end
       btn:SetScript("OnClick", function(selfBtn)
         self:LoadGroup(selfBtn.groupID)
+      end)
+      btn:SetScript("OnReceiveDrag", function(selfBtn)
+        self:AssignDraggedAuraToGroup(selfBtn.groupID)
+      end)
+      btn:SetScript("OnEnter", function(selfBtn)
+        local draggingAuraId = UI and UI.State and UI.State.GetDraggingAura and UI.State:GetDraggingAura() or nil
+        if draggingAuraId then
+          selfBtn.bg:SetColorTexture(0.18, 0.24, 0.30, 0.92)
+        end
+      end)
+      btn:SetScript("OnLeave", function(selfBtn)
+        local selected = selfBtn.groupID == self.selectedGroupID
+        if Skin and Skin.SetClickableRowState then
+          Skin:SetClickableRowState(selfBtn, selected and "selected" or "normal")
+        else
+          selfBtn.bg:SetColorTexture(selected and 0.18 or 0.06, selected and 0.36 or 0.11, selected and 0.56 or 0.20, selected and 0.88 or 0.55)
+        end
       end)
       self.rowButtons[i] = btn
     end
@@ -475,7 +509,8 @@ function GroupsPanel:Create(parent)
   subtitle:SetPoint("TOPLEFT", 14, -34)
   subtitle:SetPoint("RIGHT", -14, 0)
   subtitle:SetJustifyH("LEFT")
-  subtitle:SetText("Compose shared layout containers, tune spacing and order, then manage the auras living inside them.")
+  subtitle:SetWordWrap(true)
+  subtitle:SetText("Compose shared group layouts, then manage the auras inside them.")
   attachDragHandle(o.frame, subtitle)
 
   o.listPane = CreateFrame("Frame", nil, o.frame, "BackdropTemplate")
@@ -484,7 +519,7 @@ function GroupsPanel:Create(parent)
   else
     createBackdrop(o.listPane)
   end
-  o.listPane:SetPoint("TOPLEFT", 14, -76)
+  o.listPane:SetPoint("TOPLEFT", 14, -88)
   o.listPane:SetPoint("BOTTOMLEFT", 14, 52)
   o.listPane:SetWidth(224)
 
@@ -524,7 +559,7 @@ function GroupsPanel:Create(parent)
   o.footerBar = CreateFrame("Frame", nil, o.editorPane)
   o.footerBar:SetPoint("BOTTOMLEFT", 10, 10)
   o.footerBar:SetPoint("BOTTOMRIGHT", -10, 10)
-  o.footerBar:SetHeight(48)
+  o.footerBar:SetHeight(62)
 
   o.footerLine = o.footerBar:CreateTexture(nil, "ARTWORK")
   o.footerLine:SetPoint("TOPLEFT", 0, 0)
@@ -541,17 +576,17 @@ function GroupsPanel:Create(parent)
   end
 
   o.footerTop = CreateFrame("Frame", nil, o.footerBar)
-  o.footerTop:SetPoint("TOPLEFT", 0, -3)
+  o.footerTop:SetPoint("TOPLEFT", 0, -6)
   o.footerTop:SetPoint("TOPRIGHT", 0, 0)
-  o.footerTop:SetHeight(18)
+  o.footerTop:SetHeight(24)
 
   o.footerBottom = CreateFrame("Frame", nil, o.footerBar)
-  o.footerBottom:SetPoint("BOTTOMLEFT", 0, 0)
-  o.footerBottom:SetPoint("BOTTOMRIGHT", 0, 0)
-  o.footerBottom:SetHeight(18)
+  o.footerBottom:SetPoint("BOTTOMLEFT", 0, 2)
+  o.footerBottom:SetPoint("BOTTOMRIGHT", 0, 2)
+  o.footerBottom:SetHeight(24)
 
   o.listScroll = CreateFrame("ScrollFrame", nil, o.listPane, "UIPanelScrollFrameTemplate")
-  o.listScroll:SetPoint("TOPLEFT", 6, -24)
+  o.listScroll:SetPoint("TOPLEFT", 6, -70)
   o.listScroll:SetPoint("BOTTOMRIGHT", -12, 6)
   o.listChild = CreateFrame("Frame", nil, o.listScroll)
   o.listChild:SetSize(1, 1)
@@ -559,6 +594,14 @@ function GroupsPanel:Create(parent)
   o.listScroll:SetScript("OnSizeChanged", function()
     o:RenderList()
   end)
+
+  o.listHint = o.listPane:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  o.listHint:SetPoint("TOPLEFT", 8, -20)
+  o.listHint:SetPoint("RIGHT", -24, 0)
+  o.listHint:SetJustifyH("LEFT")
+  o.listHint:SetJustifyV("TOP")
+  o.listHint:SetWordWrap(true)
+  o.listHint:SetText("Drag an aura from the library onto a group row to assign it.")
 
   o.editorBody = CreateFrame("Frame", nil, o.editorPane)
   o.editorBody:SetPoint("TOPLEFT", 10, -28)
@@ -591,20 +634,20 @@ function GroupsPanel:Create(parent)
   o.emptyText:SetJustifyH("LEFT")
   o.emptyText:SetText("Select a group from the browser to shape its shared layout, then manage its member stack below.")
 
-  o.btnSave = makeButton(o.frame, "Save Group", 92, "primary", function()
+  o.btnSave = makeButton(o.frame, "Save Group", 96, "primary", function()
     o:SaveCurrent()
   end)
   o.btnSave:SetParent(o.footerTop)
   o.btnSave:SetPoint("LEFT", o.footerTop, "LEFT", 0, 0)
 
-  o.btnDelete = makeButton(o.frame, "Delete Group", 100, "danger", function()
+  o.btnDelete = makeButton(o.frame, "Delete Group", 118, "danger", function()
     o:DeleteCurrent()
   end)
   o.btnDelete:SetParent(o.footerTop)
   o.btnDelete:SetPoint("LEFT", o.btnSave, "RIGHT", 8, 0)
   o:RefreshDeleteButton()
 
-  o.btnAddSelected = makeButton(o.frame, "Add Selected Aura", 112, "default", function()
+  o.btnAddSelected = makeButton(o.frame, "Add Selected", 122, "default", function()
     o:AddSelectedAuraToCurrentGroup()
   end)
   o.btnAddSelected:SetParent(o.footerTop)
@@ -644,6 +687,8 @@ function GroupsPanel:Create(parent)
   o.deleteHint:SetPoint("LEFT", o.btnAddSelected, "RIGHT", 10, 0)
   o.deleteHint:SetPoint("RIGHT", o.btnClose, "LEFT", -10, 0)
   o.deleteHint:SetJustifyH("LEFT")
+  o.deleteHint:SetJustifyV("MIDDLE")
+  o.deleteHint:SetWordWrap(false)
   o.deleteHint:SetText("Deleting a group keeps its auras as standalone entries.")
 
   if E then

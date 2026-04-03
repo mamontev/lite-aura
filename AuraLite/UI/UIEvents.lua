@@ -7,6 +7,8 @@ UI.Events = UI.Events or {}
 local E = UI.Events
 
 E._listeners = E._listeners or {}
+E._queue = E._queue or {}
+E._isDispatching = E._isDispatching or false
 E.Names = E.Names or {
   AURA_SELECTED = "UI_AURA_SELECTED",
   FILTER_CHANGED = "UI_FILTER_CHANGED",
@@ -57,22 +59,35 @@ function E:Off(eventName, callback)
 end
 
 function E:Emit(eventName, payload)
-  local list = self._listeners[eventName]
-  if not list or #list == 0 then
+  self._queue = self._queue or {}
+  self._queue[#self._queue + 1] = {
+    eventName = eventName,
+    payload = payload,
+  }
+
+  if self._isDispatching == true then
     return
   end
 
-  local snapshot = {}
-  for i = 1, #list do
-    snapshot[i] = list[i]
-  end
+  self._isDispatching = true
+  while #self._queue > 0 do
+    local queued = table.remove(self._queue, 1)
+    local list = queued and self._listeners[queued.eventName]
+    if list and #list > 0 then
+      local snapshot = {}
+      for i = 1, #list do
+        snapshot[i] = list[i]
+      end
 
-  for i = 1, #snapshot do
-    local ok, err = pcall(snapshot[i], payload)
-    if not ok then
-      dispatchError(err)
+      for i = 1, #snapshot do
+        local ok, err = pcall(snapshot[i], queued.payload)
+        if not ok then
+          dispatchError(err)
+        end
+      end
     end
   end
+  self._isDispatching = false
 end
 
 function E:Clear(eventName)
